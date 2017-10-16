@@ -4,7 +4,7 @@ namespace eval test_msgid {
 }
 
 proc test_msgid::test_msgid {} {
-    global LEAD option dir hdr errors verbose
+    global option dir hdr
 
     # List of message-ids to test
     # Each element in teh list is a tuple
@@ -22,6 +22,8 @@ proc test_msgid::test_msgid {} {
     set def [list Test file {} $fn]
 
     foreach te $tests {
+	StartTest "Parsing '[lindex $te 0]'"
+
 	# Generate folder
 	set fh [open $fn w 0644]
 	puts $fh $hdr
@@ -39,13 +41,10 @@ proc test_msgid::test_msgid {} {
 
 	# Verify
 	if {[string compare $actual [lindex $te 1]]} {
-	    incr errors
-	    puts "$LEAD: failed to extract correct msgid"
-	    if {$verbose} {
-		puts "  Header: [lindex $te 0]"
-		puts "Expected: [lindex $te 1]"
-		puts "  Actual: $actual"
-	    }
+	    ReportError [join [list "Failed to extract correct msgid" \
+				   "  Header: [lindex $te 0]" \
+				   "Expected: [lindex $te 1]" \
+				   "  Actual: $actual"] "\n"]
 	}
     }
     file delete -force $fn

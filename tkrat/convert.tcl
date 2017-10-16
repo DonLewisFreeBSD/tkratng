@@ -4,7 +4,7 @@
 # vfolders to the latest version.
 #
 #
-#  TkRat software and its included text is Copyright 1996-2002 by
+#  TkRat software and its included text is Copyright 1996-2004 by
 #  Martin Forssén
 #
 #  The full text of the legal notice is contained in the file called
@@ -34,7 +34,7 @@ proc FixDbase4 {} {
     scale $w.scale -length 6c -showvalue 0 -sliderlength 5 \
 	    -variable fix_scale  -orient horiz
     pack $w.scale -side top -padx 5 -pady 5
-    Place $w fixDbase
+    ::tkrat::winctl::SetGeometry fixDbase $w
 
     # Find how many entries we must fix
     set fh [open $dir/index.info r]
@@ -77,7 +77,7 @@ proc FixDbase4 {} {
 	# Get Message-Id and references from stored message
 	set msgid {}
 	set ref {}
-	set m [open $dir/dbase/$line(10)]
+	set m [open $dir/dbase/$line(10) r]
 	gets $m joined
 	while {0 < [gets $m l]} {
 	    if {[regexp "^( |\t)" $l]} {
@@ -127,6 +127,7 @@ proc FixDbase4 {} {
     close $f
 
     file delete -force -- $dir/lock
+    ::tkrat::winctl::RecordGeometry fixDbase $w
     destroy $w
 }
 
@@ -156,7 +157,7 @@ proc FixDbase3 {} {
     scale $w.scale -length 6c -showvalue 0 -sliderlength 5 \
 	    -variable fix_scale  -orient horiz
     pack $w.scale -side top -padx 5 -pady 5
-    Place $w fixDbase
+    ::tkrat::winctl::SetGeometry fixDbase $w
 
     # Find how many entries we must fix
     set fh [open $dir/index.ver r]
@@ -276,6 +277,7 @@ proc FixDbase3 {} {
     pack $w.message
     update
     set unlinkedList [exec find $dir/dbase -name *@* -print]
+    ::tkrat::winctl::RecordGeometry fixDbase $w
     if {[llength $unlinkedList]} {
 	global vFolderDef
 
@@ -386,12 +388,13 @@ proc FixOldDbase {dir} {
     message $w.msg -text "Database corrupt. Fixing it..." -aspect 800
     pack $w.msg -padx 10 -pady 10
 
-    Place $w fixDbase2
+    ::tkrat::winctl::SetGeometry fixDbase2 $w
     update
 
     DoFixOldDbase $dir
 
     # Final cleanup
+    ::tkrat::winctl::RecordGeometry fixDbase2 $w
     destroy $w
 }
 
@@ -844,7 +847,6 @@ proc ScanAliases {} {
 	incr n [ReadPineAliases ~/.addressbook $option(default_book)]
     }
     if {$n} {
-	Popup "$t(found_aliases) $n $t(num_aliases)."
 	foreach book $option(addrbooks) {
 	    if {$option(default_book) == [lindex $book 0]} {
 		set file [lindex $book 2]
@@ -858,7 +860,6 @@ proc ScanAliases {} {
     SaveOptions
     AliasesPopulate
 }
-
 
 
 # AddImapPorts --
@@ -883,6 +884,208 @@ proc AddImapPorts {} {
     VFolderWrite
 }
 
+# ConvertHold --
+#
+# Convert the old-style message hold to a new folder
+#
+# Arguments:
+# dir - Hold to convert
+# var - Name of vfolderdef which contains the new folder def
+
+proc ConvertHold {dir var} {
+    global vFolderDef
+    upvar \#0 $var v
+
+    # Load old hold functions
+    package require ratatosk_old 2.2
+
+    # Get def of new folder
+    VFolderRead
+    set fh [RatOpenFolder $vFolderDef($v)]
+
+    ComposeLoad
+
+    # Loop over messages in hold
+    while {0 < [llength [RatHold $dir list]]} {
+	set hd [RatHold $dir extract 0]
+	set msg [ConvertHoldMsg $hd]
+	$fh insert $msg
+	rename $msg ""
+    }
+
+    # Mark all messages in hold as read
+    foreach i [$fh flagged seen 0] {
+	$fh setFlag $i seen 1
+    }
+    $fh close
+}
+
+# ConvertHoldMsg --
+#
+# Prepares a message extracted from the hold to be made into a real message
+#
+# Arguments:
+# mgh - handler of the extracted message
+
+proc ConvertHoldMsg {mgh} {
+    global charsetMapping option t composeHeaderList
+    upvar #0 $mgh mh
+
+    if {[info exists mh(body)]} {
+	upvar #0 $mh(body) bh
+	if {![string compare "$bh(type)/$bh(subtype)" text/plain]} {
+	    set edit $mh(body)
+	    set children {}
+	} elseif {![string compare "$bh(type)" multipart]} {
+	    set children $bh(children)
+	    upvar #0 [lindex $children 0] ch1
+	    if {![string compare "$ch1(type)/$ch1(subtype)" text/plain]} {
+		set edit [lindex $children 0]
+		set children [lreplace $children 0 0]
+	    } else {
+		set edit {}
+	    }
+	} else {
+	    set edit {}
+	    set children $mh(body)
+	}
+	if {[info exists bh(pgp_sign)]} {
+	    set mh(pgp_sign) $bh(pgp_sign)
+	    set mh(pgp_encrypt) $bh(pgp_encrypt)
+	}
+	if {[string length $edit]} {
+	    upvar #0 $edit bp
+	    set fh [open $bp(filename) r]
+	    if {[info exists bp(parameter)]} {
+		foreach lp $bp(parameter) {
+		    set p([lindex $lp 0]) [lindex $lp 1]
+		}
+	    }
+	    if {[info exists p(charset)]} {
+		set charset $p(charset)
+	    } else {
+		if {[info exists mh(charset)]} {
+		    set charset $mh(charset)
+		} else {
+		    set charset auto
+		}
+	    }
+	    if {"auto" == $charset} {
+		set charset utf-8
+	    } 
+	    set mh(charset) $charset
+	    fconfigure $fh -encoding $charsetMapping($charset)
+	    set mh(data) [read $fh]
+	    set mh(data_tags) {}
+	    close $fh
+	    if {$bp(removeFile)} {
+		catch "file delete -force -- $bp(filename)"
+	    }
+	}
+	set mh(attachmentList) $children
+    }
+
+    #######################################################################
+    # Create message
+
+    # Envelope
+    set envelope {}
+    foreach h $composeHeaderList {
+	if {[string length $mh($h)]} {
+	    lappend envelope [list $h $mh($h)]
+	}
+    }
+    lappend envelope [list X-TkRat-Internal-Role $mh(role)]
+
+    # Determine suitable charset
+    catch {unset p}
+    set p(charset) $mh(charset)
+    if {[info exists bh(parameter)]} {
+	foreach lp $bp(parameter) {
+	    set p([lindex $lp 0]) [lindex $lp 1]
+	}
+    }
+    if {"auto" == $p(charset)} {
+	set fallback $option(charset)
+	set p(charset) [RatCheckEncodings mh(data) \
+			 $option(charset_candidates)]
+    } else {
+	set fallback $p(charset)
+	set p(charset) [RatCheckEncodings mh(data) $mh(charset)]
+    }
+    if {"" == $p(charset)} {
+	if {0 != [RatDialog $mh(toplevel) $t(warning) $t(bad_charset) {} \
+		      0 $t(continue) $t(abort)]} {
+	    return {}
+	}
+	set p(charset) $fallback
+    }
+
+    # Prepare parameters array
+    set params {}
+    foreach name [array names p] {
+	lappend params [list $name $p($name)]
+    }
+
+    # Find encoding
+    set fn [RatTildeSubst $option(tmp)/rat.[RatGenId]]
+    set fh [open $fn w]
+    if {[info exists charsetMapping($p(charset))]} {
+	fconfigure $fh -encoding $charsetMapping($p(charset))
+    } else {
+	fconfigure $fh -encoding $p(charset)
+    }
+    puts -nonewline $fh $mh(data)
+    close $fh
+    set encoding [RatGetCTE $fn]
+    file delete $fn
+
+    # Collect into body entity
+    set body [list text plain $params $encoding inline {} {} \
+		  [list utfblob $mh(data)]]
+    # Handle attachments
+    if { 0 < [llength $mh(attachmentList)]} {
+	set attachments [list $body]
+	foreach a $mh(attachmentList) {
+	    upvar \#0 $a bh
+	    set body_header {}
+	    foreach h {description id} {
+		if {[info exists bh($h)] && [string length $bh($h)]} {
+		    lappend body_header [list $h $bh($h)]
+		}
+	    }
+	    foreach v {parameter disp_parm} {
+		if {![info exists bh($v)]} {
+		    set bh($v) {}
+		}
+	    }
+	    if {![info exists bh(encoding)]} {
+		set bh(encoding) 7bit
+	    }
+	    set bodypart [list $bh(type) $bh(subtype) $bh(parameter) \
+			      $bh(encoding) attachment $bh(disp_parm) \
+			      $body_header \
+			[list file $bh(filename)]]
+	    lappend attachments $bodypart
+	}
+	set body [list multipart mixed {} 7bit {} {} {} $attachments]
+    }
+
+    set msg [RatCreateMessage $mh(role) [list $envelope $body]]
+    
+    # pgp stuff
+    set mh(pgp_signer) [RatExtractAddresses $mh(role) $mh(from)]
+    set mh(pgp_rcpts) [RatExtractAddresses $mh(role) $mh(to) $mh(cc)]
+    if {$mh(pgp_sign) || $mh(pgp_encrypt)} {
+	if {[catch {$msg pgp $mh(pgp_sign) $mh(pgp_encrypt) $mh(role) \
+			$mh(pgp_signer) $mh(pgp_rcpts)}]} {
+	    return
+	}
+    }
+
+    return $msg
+}
+
 # NewVersionUpdate --
 #
 # Does updates that needs to be done when a new version is started for the
@@ -896,36 +1099,15 @@ proc NewVersionUpdate {} {
     if {$option(last_version_date) < 19960908 && $option(smtp_verbose) == 2} {
 	set option(smtp_verbose) 3
     }
-    if {$option(last_version_date) < 19961020} {
-	if {![catch {set fh [open $option(dsn_directory)/index r]}]} {
-	    set keep {}
-	    set remove {}
-	    while { -1 != [gets $fh line]} {
-		lappend keep [lindex $line 0]
-		foreach e [lindex $line 3] {
-		    lappend keep [lindex $e 2]
-		}
-	    }
-	    close $fh
-	    foreach f [lsort \
-		    [glob -nocomplain $option(dsn_directory)/\[0-9a-f\]*]] {
-		if { -1 == [lsearch $keep [file tail $f]]} {
-		    catch {exec rm -f $f}
-		}
-	    }
-	    unset remove
-	    unset keep
-	}
-    }
     if {$option(last_version_date) < 19970112} {
 	global ratPlace ratSize ratPlaceModified
-	ReadPos
+	::tkrat::winctl::ReadPos
 	catch {unset ratPlace(aliasList)}
 	catch {unset ratPlace(aliasEdit)}
 	catch {unset ratPlace(aliasCreate)}
 	catch {unset ratSize(aliasList)}
 	set ratPlaceModified 1
-	SavePos
+	::tkrat::winctl::SavePos
     }
 
     # Add port number to imap folders
@@ -1058,7 +1240,7 @@ proc NewVersionUpdate {} {
     }
 
     if {$option(last_version_date) < 20010809} {
-	foreach v {bcc dsn_request from masquerade_as name reply_to
+	foreach v {bcc from masquerade_as name reply_to
 	           sendprog sendprog_8bit sendprot signature smtp_hosts
                    save_outgoing} {
 	    if {[info exists option($v)]} {
@@ -1094,15 +1276,110 @@ proc NewVersionUpdate {} {
 	}
     }
 
+    # Check if we have held messages in old format
+    if {$option(last_version_date) < 20020808} {
+	if {[info exists option(hold_dir)]} {
+	    set hold_dir $option(hold_dir)
+	} else {
+	    set hold_dir $option(ratatosk_dir)/hold
+	}
+	if {[file isdirectory $hold_dir]
+	    && 0 < [llength [glob -nocomplain -directory $hold_dir *.desc]]} {
+	    ConvertHold $hold_dir vFolderHold
+	}
+
+	if {[info exists option(send_cache)]} {
+	    set send_dir $option(send_cache)
+	} else {
+	    set send_dir $option(ratatosk_dir)/send
+	}
+	if {[file isdirectory $send_dir]
+	    && 0 < [llength [glob -nocomplain -directory $send_dir *.desc]]} {
+	    ConvertHold $send_dir vFolderOutgoing
+	}
+	file delete -force $send_dir
+	file delete -force $hold_dir
+    }
+
     # Add new fields to roles
-    if {$option(last_version_date) < 20020423} {
+    if {$option(last_version_date) < 20020830} {
 	foreach r $option(roles) {
-	    if {![info exists option($r,uqa_domain)]} {
-		set option($r,uqa_domain) ""
-	    }
-	    if {![info exists option($r,smtp_helo)]} {
-		set option($r,smtp_helo) ""
+	    foreach vt {{uqa_domain {}} {smtp_helo {}} {validate_cert 0} \
+			    {same_sending_prefs 0} {smtp_user {}} \
+			    {smtp_passwd {}}} {
+		if {![info exists option($r,[lindex $vt 0])]} {
+		    set option($r,[lindex $vt 0]) [lindex $vt 1]
+		}
 	    }
 	}
+    }
+
+    # Adjust size of norm italic font
+    if {$option(last_version_date) < 20030213} {
+	set option(fixed_italic) \
+	    [lreplace $option(fixed_italic) 2 2 [lindex $option(fixed_norm) 2]]
+    }
+
+    # Add pgp fields to roles
+    if {$option(last_version_date) < 20031123} {
+	foreach r $option(roles) {
+	    if {[info exists option(pgp_sign)]} {
+		set option($r,sign_outgoing) $option(pgp_sign)
+	    } else {
+		set option($r,sign_outgoing) 0
+	    }
+	    set option($r,sign_as) {}
+	}
+    }
+
+    # Remove old color settings (they are incompatible)
+    if {$option(last_version_date) < 20040710} {
+        if {4 != [llength $option(color_set)]} {
+            set option(color_set) {\#dde3eb black white black}
+        }
+    }
+
+    # Convert saved address history encoding to utf-8
+    if {$option(last_version_date) < 20050701
+        && [file readable $option(ratatosk_dir)/addrlist]} {
+        set fh [open $option(ratatosk_dir)/addrlist r]
+        set data [read $fh]
+        close $fh
+
+        set fh [open $option(ratatosk_dir)/addrlist w]
+        fconfigure $fh -encoding utf-8
+        puts -nonewline $fh $data
+        close $fh
+    }
+
+    # Convert font specifications
+    if {$option(last_version_date) < 20050706} {
+        if {[info exists option(prop_norm)]
+            && "components" == [lindex $option(prop_norm) 0]} {
+            set option(font_family_prop) \
+                [string tolower [lindex $option(prop_norm) 1]]
+            set option(font_size) [lindex $option(prop_norm) 2]
+        }
+        if {[info exists option(fixed_norm)]
+            && "components" == [lindex $option(fixed_norm) 0]} {
+            set option(font_family_fixed) \
+                [string tolower [lindex $option(fixed_norm) 1]]
+            if {$option(font_size) != [lindex $option(fixed_norm) 2]} {
+                set option(font_size) [lindex $option(fixed_norm) 2]
+            }
+        }
+    }
+
+    if {$option(last_version_date) < 20050707
+        && [info exists option($option(url_viewer))]} {
+        set option(browser_cmd) $option($option(url_viewer))
+        if {"firefox" == $option(browser_cmd)} {
+            set option(url_viewer) firefox
+        }
+    }
+
+    if {$option(last_version_date) < 20050707
+        &&  [file exists "$option(ratatosk_dir)/log"]} {
+        file delete "$option(ratatosk_dir)/log"
     }
 }

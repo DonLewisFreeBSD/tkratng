@@ -1,0 +1,15 @@
+Some random notes on how to develop with the TkRat code
+
+The TkRat library provides a number of commands to the tcl environment.
+These commands are documented in doc/interface.
+
+It is easy to use a debugger on TkRat, when you know the trick:-)
+Personally I run gdb on the relevant wish-binary while standing in the
+tkrat lib directory. In that directory I have a .gdbinit which contains:
+set args ../tkrat/tkrat -confdir /home/maf/.test -appname tkrattest
+This lets me have a completely separate tkrat directory for testing.
+Unfortunately you can not just start 'gdb wish8.4' and then set
+breakpoints inside the TkRat code. Since it is loaded dynamically you
+must wait until it has been loaded. It gets loaded by the call to
+'RatGetId' in start.tcl. One can add a small delay anyplace after that
+to be able to break into teh debugger and set the desired breakpoints.

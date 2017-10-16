@@ -30,7 +30,6 @@ proc test_disonline::verify_map {mf map} {
 }
 
 proc test_disonline::dis_verify {f map name {diff 0}} {
-    global LEAD errors
     variable uidmap
 
     set expected_map $uidmap
@@ -38,13 +37,10 @@ proc test_disonline::dis_verify {f map name {diff 0}} {
 
     set i [lindex [$f info] 1]
     if {$num != $i} {
-	puts "$LEAD $name: Got $i expected $num"
-	incr errors
+	ReportError "$name: Got $i expected $num"
     }
     if {![verify_map $map $expected_map]} {
-	puts "$LEAD $name: map verify failed"
-	puts $uidmap
-	incr errors
+	ReportError "$name: map verify failed"
     }
 }
 
@@ -73,8 +69,15 @@ proc test_disonline::remove_from_uidmap {index} {
     set uidmap [lreplace $uidmap $index $index]
 }
 
+proc test_disonline::verify_flag {f index flag expected desc} {
+    set real [$f getFlag $index $flag]
+    if {$expected != $real} {
+        ReportError "$desc: flag $flag was $real (expected $expected)"
+    }
+}
+
 proc test_disonline::test_disonline {} {
-    global option dir hdr errors mailServer dis_def imap_map imap_def \
+    global dir errors mailServer dis_def imap_map imap_def \
 	    msg1 msg2 msg3 msg4 msg5 msg6 msg7 msg8 msg9 msg10 \
 	    msg11 msg12 msg13 msg14 msg15 msg16 msg17 msg18 msg19 msg20
 
@@ -88,32 +91,32 @@ proc test_disonline::test_disonline {} {
     insert_imap $imap_def $msg1
     add_to_uidmap
 
-    puts "Test opening"
+    StartTest "opening"
     set f [RatOpenFolder $dis_def]
     dis_verify $f $imap_map "Initial"
 
-    puts "Test update after open"
+    StartTest "update after open"
     $f update update
     dis_verify $f $imap_map "After first update"
 
-    puts "Test new mail arrival"
+    StartTest "new mail arrival"
     insert_imap $imap_def $msg2
     add_to_uidmap
     $f update sync
     dis_verify $f $imap_map "After 1 new message"
     $f close
 
-    puts "Test opening again"
+    StartTest "opening again"
     set f [RatOpenFolder $dis_def]
     dis_verify $f $imap_map "Second open"
 
-    puts "Test new mail arrival again"
+    StartTest "new mail arrival again"
     insert_imap $imap_def $msg18
     add_to_uidmap
     $f update sync
     dis_verify $f $imap_map "After another new message"
 
-    puts "Test multiple new messages"
+    StartTest "multiple new messages"
     insert_imap $imap_def $msg3 $msg4
     add_to_uidmap
     add_to_uidmap
@@ -121,13 +124,13 @@ proc test_disonline::test_disonline {} {
     $f update update
     dis_verify $f $imap_map "After 2 new messages"
 
-    puts "Test deleting message"
+    StartTest "deleting message"
     $f setFlag 1 deleted 1
     $f update sync
     remove_from_uidmap 1
     dis_verify $f $imap_map "After deleting"
 
-    puts "Test new message and one deleted"
+    StartTest "new message and one deleted"
     $f setFlag 1 deleted 1
     remove_from_uidmap 1
     insert_imap $imap_def $msg5
@@ -135,7 +138,7 @@ proc test_disonline::test_disonline {} {
     add_to_uidmap
     dis_verify $f $imap_map "After new & deleted"
 
-    puts "Test inserting one message"
+    StartTest "inserting one message"
     set fh [open $tmpfn w]
     puts $fh $msg6
     close $fh
@@ -150,7 +153,7 @@ proc test_disonline::test_disonline {} {
     add_to_uidmap
     dis_verify $f $imap_map "After inserting"
 
-    puts "Test inserting one message two times (different)"
+    StartTest "inserting one message two times (different)"
     set fh [open $tmpfn w]
     puts $fh $msg7
     puts $fh $msg8
@@ -166,7 +169,7 @@ proc test_disonline::test_disonline {} {
     $f update sync
     dis_verify $f $imap_map "After inserting one two times"
 
-    puts "Test inserting two messages"
+    StartTest "inserting two messages"
     set fh [open $tmpfn w]
     puts $fh $msg9
     puts $fh $msg10
@@ -181,7 +184,25 @@ proc test_disonline::test_disonline {} {
     $f update sync
     dis_verify $f $imap_map "After inserting two"
 
-    puts "Test deleting inserted directly"
+    StartTest "inserting two messages sequentially"
+    set fh [open $tmpfn w]
+    puts $fh $msg9
+    puts $fh $msg10
+    close $fh
+    set f2 [RatOpenFolder $tmpdef]
+    $f2 list "%s"
+    $f insert [$f2 get 0]
+    $f insert [$f2 get 1]
+    $f2 close
+    add_to_uidmap
+    add_to_uidmap
+    file delete $tmpfn
+    $f close
+    set f [RatOpenFolder $dis_def]
+    $f update sync
+    dis_verify $f $imap_map "After inserting two sequentially"
+
+    StartTest "deleting inserted directly"
     set n [lindex [$f info] 1]
     set fh [open $tmpfn w]
     puts $fh $msg11
@@ -197,7 +218,7 @@ proc test_disonline::test_disonline {} {
     remove_from_uidmap $n
     dis_verify $f $imap_map "After immediately deleted inserted"
 
-    puts "Test insert, delete and new messages"
+    StartTest "insert, delete and new messages"
     set fh [open $tmpfn w]
     puts $fh $msg12
     close $fh
@@ -214,7 +235,7 @@ proc test_disonline::test_disonline {} {
     $f update sync
     dis_verify $f $imap_map "After insert, deleted and new"
 
-    puts "Test resetting folder"
+    StartTest "resetting folder"
     for {set i 0} {$i <9} {incr i} {
 	$f setFlag $i deleted 1
 	remove_from_uidmap 0
@@ -224,7 +245,7 @@ proc test_disonline::test_disonline {} {
     $f update sync
     dis_verify $f $imap_map "After reset"
 
-    puts "Test offline-->online transition"
+    StartTest "offline-->online transition"
     # Go offline
     RatLibSetOnlineMode 0
     $f update sync
@@ -234,7 +255,26 @@ proc test_disonline::test_disonline {} {
     $f update sync
     dis_verify $f $imap_map "After sync"
  
-    puts "Test offline-->online transition (with new remote messages)"
+    StartTest "offline-->online transition (with flag changes)"
+    RatLibSetOnlineMode 0
+    $f setFlag 1 seen 0
+    $f setFlag 1 seen 1
+    $f setFlag 1 flagged 1
+    $f setFlag 1 flagged 0
+    dis_verify $f $imap_map "When offline"
+    verify_flag $f 1 seen 1 "When offline"
+    verify_flag $f 1 flagged 0 "When offline"
+    # Go online
+    RatLibSetOnlineMode 1
+    dis_verify $f $imap_map "When online"
+    verify_flag $f 1 seen 1 "When online"
+    verify_flag $f 1 flagged 0 "When online"
+    $f update sync
+    dis_verify $f $imap_map "After sync"
+    verify_flag $f 1 seen 1 "After sync"
+    verify_flag $f 1 flagged 0 "After sync"
+
+    StartTest "offline-->online transition (with new remote messages)"
     RatLibSetOnlineMode 0
     # Insert two new in remote
     insert_imap $imap_def $msg15 $msg16
@@ -246,7 +286,7 @@ proc test_disonline::test_disonline {} {
     RatLibSetOnlineMode 1
     dis_verify $f $imap_map "When online"
 
-    puts "Test offline-->online transition (with new local messages)"
+    StartTest "offline-->online transition (with new local messages)"
     RatLibSetOnlineMode 0
     # Insert one new in local
     set fh [open $tmpfn w]
@@ -265,7 +305,7 @@ proc test_disonline::test_disonline {} {
     RatLibSetOnlineMode 1
     dis_verify $f $imap_map "When online"
 
-    puts "Test offline-->online transition (with new messages in both)"
+    StartTest "offline-->online transition (with new messages in both)"
     RatLibSetOnlineMode 0
     # Insert one new in local
     set fh [open $tmpfn w]
@@ -284,6 +324,22 @@ proc test_disonline::test_disonline {} {
     # Go online
     RatLibSetOnlineMode 1
     dis_verify $f $imap_map "When online"
+
+    StartTest "offline-->online transition (with local delete)"
+    RatLibSetOnlineMode 0
+    # Set delete flag in lcoal
+    # The seen flag manipulation here is to simulate what happens when one
+    # reads a folder. And it did trigger a bug once.
+    $f setFlag 1 seen 0
+    $f setFlag 1 deleted 1
+    $f setFlag 1 seen 1
+    dis_verify $f $imap_map "When offline"
+    # Go online
+    RatLibSetOnlineMode 1
+    dis_verify $f $imap_map "When online"
+    $f update sync
+    remove_from_uidmap 1
+    dis_verify $f $imap_map "After sync"
 
     # Cleanup
     $f close

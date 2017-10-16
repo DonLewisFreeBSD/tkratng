@@ -37,15 +37,15 @@
 #include "tcl.h"
 #include "tk.h"
 
-#include <X11/Xutil.h>
-#include <X11/Xatom.h>
-
-#include <stdlib.h>
-#include "blt.h"
-
-#ifndef CONST84
+#ifndef CONST84   
 #   define CONST84
 #endif
+
+#include <X11/Xutil.h>
+#include <X11/Xatom.h>
+#include <stdlib.h>
+#include <string.h>
+#include "blt.h"
 
 #define TRUE    1
 #define FALSE   0
@@ -95,11 +95,7 @@ typedef struct {
 
 } Busy;
 
-#ifdef WIN32
-#define DEF_BUSY_CURSOR "wait"
-#else 
 #define DEF_BUSY_CURSOR "watch"
-#endif
 
 static Tk_ConfigSpec configSpecs[] =
 {
@@ -114,9 +110,23 @@ static Tcl_HashTable busyTable;	/* Hash table of busy window
 				 * structures keyed by the address of
 				 * the reference Tk window */
 
+
+/* Forward declarations */
+static void DestroyBusy _ANSI_ARGS_((char* dataPtr));
+static void BusyEventProc _ANSI_ARGS_((ClientData clientData,
+				       XEvent *eventPtr));
 static void BusyGeometryProc _ANSI_ARGS_((ClientData clientData,
-	Tk_Window tkwin));
-static void BusyCustodyProc _ANSI_ARGS_((ClientData clientData, Tk_Window tkwin));
+					  Tk_Window tkwin));
+static void BusyCustodyProc _ANSI_ARGS_((ClientData clientData,
+					 Tk_Window tkwin));
+static Tk_ClassCreateProc Blt_CreateBusy;
+static Window Blt_GetParent(Display *display, Window window);
+
+#ifdef __STDC__
+static Tk_EventProc BusyEventProc;
+static Tk_EventProc RefWinEventProc;
+static Tcl_CmdProc BusyCmd;
+#endif
 
 static Tk_GeomMgr busyMgrInfo =
 {
@@ -124,17 +134,6 @@ static Tk_GeomMgr busyMgrInfo =
     BusyGeometryProc,		/* Procedure to for new geometry requests */
     BusyCustodyProc,		/* Procedure when window is taken away */
 };
-
-/* Forward declarations */
-static void DestroyBusy _ANSI_ARGS_((char* dataPtr));
-static void BusyEventProc _ANSI_ARGS_((ClientData clientData, 
-	XEvent *eventPtr));
-
-#ifdef __STDC__
-static Tk_EventProc BusyEventProc;
-static Tk_EventProc RefWinEventProc;
-static Tcl_CmdProc BusyCmd;
-#endif
 
 
 /*
@@ -310,9 +309,6 @@ RefWinEventProc(clientData, eventPtr)
 		    y += Tk_Y(ancestor) + Tk_Changes(ancestor)->border_width;
 		}
 	    }
-#ifdef DEBUG
-	    PurifyPrintf("2 busyPtr->width=%d, busyPtr->height=%d\n", busyPtr->width, busyPtr->height);
-#endif
 	    if (busyPtr->busy != NULL) {
 		Tk_MoveResizeWindow(busyPtr->busy, x, y, busyPtr->width,
 		    busyPtr->height);
@@ -357,14 +353,13 @@ ConfigureBusy(interp, busyPtr, argc, argv)
     Tcl_Interp *interp;
     Busy *busyPtr;
     int argc;
-    char **argv;
+    CONST84 char **argv;
 {
     Tk_Cursor oldCursor;
 
     oldCursor = busyPtr->cursor;
-    if (Tk_ConfigureWidget(interp, busyPtr->tkwin, configSpecs, argc,
-			   (CONST84 char**)argv, (char*)busyPtr, 0)
-	!= TCL_OK) {
+    if (Tk_ConfigureWidget(interp, busyPtr->tkwin, configSpecs, argc, argv,
+	    (char *)busyPtr, 0) != TCL_OK) {
 	return TCL_ERROR;
     }
     if (busyPtr->cursor != oldCursor) {
@@ -419,6 +414,7 @@ CreateBusy(interp, tkwin)
     Tk_Window parent;
     Tk_FakeWin *winPtr;
     int x, y;
+    Tk_ClassProcs *procs = (Tk_ClassProcs*)calloc(1, sizeof(Tk_ClassProcs));
 
     busyPtr = (Busy *)calloc(1, sizeof(Busy));
     x = y = 0;
@@ -460,9 +456,9 @@ CreateBusy(interp, tkwin)
     busyPtr->cursor = None;
     busyPtr->busy = busy;
     Tk_SetClass(busy, "Busy");
-#if (TK_MAJOR_VERSION >= 8)
-    Blt_SetWindowInstanceData(busy, (ClientData)busyPtr);
-#endif
+    procs->createProc = Blt_CreateBusy;
+    procs->size = sizeof(Tk_ClassProcs);
+    Tk_SetClassProcs(busy, procs, (ClientData)busyPtr);
     winPtr = (Tk_FakeWin *)tkwin;
     if (winPtr->flags & TK_REPARENTED) {
 	/* 
@@ -473,38 +469,12 @@ CreateBusy(interp, tkwin)
 	 * wrong window). We get around this by determining the parent
 	 * via the native API calls. 
 	 */
-#ifdef WIN32
-	{
-	    HWND hWnd;
-	    RECT region;
-
-	    hWnd = GetParent(Tk_GetHWND(Tk_WindowId(tkwin)));
-	    parentWin = (Window)hWnd;
-	    if (GetWindowRect(hWnd, &region)) {
-		busyPtr->width = region.right - region.left;
-		busyPtr->height = region.bottom - region.top;
-#ifdef WINDEBUG
-		PurifyPrintf("0. busyPtr->width=%d, busyPtr->height=%d\n", 
-	busyPtr->width, busyPtr->height);
-#endif
-	    }
-	}
-#else
 	parentWin = Blt_GetParent(Tk_Display(tkwin), Tk_WindowId(tkwin));
-#endif
     } else {
 	parentWin = Tk_WindowId(parent);
-#ifdef WIN32
-	parentWin = (Window)Tk_GetHWND(parentWin);
-#endif
     }
-
-    Blt_MakeTransparentWindowExist(busy, parentWin);
-
-#ifdef WINDEBUG
-    PurifyPrintf("1. busyPtr->width=%d, busyPtr->height=%d\n", 
-	busyPtr->width, busyPtr->height);
-#endif
+    Tk_MakeWindowExist(busy);
+ 
     Tk_MoveResizeWindow(busy, x, y, busyPtr->width, busyPtr->height);
     Tk_RestackWindow(busy, Above, (Tk_Window)NULL);
 
@@ -512,7 +482,7 @@ CreateBusy(interp, tkwin)
      * Only worry if the busy window is destroyed.
      */
     Tk_CreateEventHandler(busy, StructureNotifyMask, BusyEventProc, 
-	(ClientData)busyPtr);
+			  (ClientData)busyPtr);
 
     /*
      * Indicate that the busy window's geometry is being managed.
@@ -681,23 +651,6 @@ HoldBusy(clientData, interp, argc, argv)
     Tk_Preserve((ClientData)busyPtr);
     result = ConfigureBusy(interp, busyPtr, argc - 1, argv + 1);
     Tk_Release((ClientData)busyPtr);
-#ifdef WIN32
-    { 
-	POINT point;
-	/* 
-	 * Under Win32, cursors aren't associated with windows.  Tk
-	 * fakes this by watching Motion events on its windows.  So Tk
-	 * will automatically change the cursor when the pointer
-	 * enters the Busy window.  But Windows doesn't immediately
-	 * change the cursor; it waits for the cursor position to
-	 * change or a system call.  We need to change the cursor
-	 * before the application starts processing, so set the cursor
-	 * position redundantly back to the current position.  
-	 */
-	GetCursorPos(&point);
-	SetCursorPos(point.x, point.y);
-    }
-#endif
     return result;
 }
 
@@ -723,7 +676,7 @@ StatusOp(clientData, interp, argc, argv)
     ClientData clientData;	/* Main window of interpreter */
     Tcl_Interp *interp;		/* Interpreter to report error to */
     int argc;			/* not used */
-    char **argv;
+    CONST84 char **argv;
 {
     Busy *busyPtr;
 
@@ -762,7 +715,7 @@ ForgetOp(clientData, interp, argc, argv)
     ClientData clientData;	/* Not used. */
     Tcl_Interp *interp;		/* Interpreter to report errors to */
     int argc;
-    char **argv;
+    CONST84 char **argv;
 {
     Busy *busyPtr;
     register int i;
@@ -820,7 +773,7 @@ ReleaseOp(clientData, interp, argc, argv)
     ClientData clientData;	/* Main window of the interpreter */
     Tcl_Interp *interp;		/* Interpreter to report errors to */
     int argc;
-    char **argv;
+    CONST84 char **argv;
 {
     Busy *busyPtr;
     int i;
@@ -860,7 +813,7 @@ WindowsOp(clientData, interp, argc, argv)
     ClientData clientData;	/* Main window of the interpreter */
     Tcl_Interp *interp;		/* Interpreter to report errors to */
     int argc;
-    char **argv;
+    CONST84 char **argv;
 {
     Tcl_HashEntry *hPtr;
     Tcl_HashSearch cursor;
@@ -900,7 +853,7 @@ IsBusyOp(clientData, interp, argc, argv)
     ClientData clientData;	/* Main window of the interpreter */
     Tcl_Interp *interp;		/* Interpreter to report errors to */
     int argc;
-    char **argv;
+    CONST84 char **argv;
 {
     Tcl_HashEntry *hPtr;
     Tcl_HashSearch cursor;
@@ -976,7 +929,7 @@ CgetOp(clientData, interp, argc, argv)
     ClientData clientData;	/* Main window of the interpreter */
     Tcl_Interp *interp;		/* Interpreter to report errors to */
     int argc;
-    char **argv;		/* Widget pathname and option switch */
+    CONST84 char **argv;	/* Widget pathname and option switch */
 {
     Busy *busyPtr;
     int result;
@@ -1015,7 +968,7 @@ ConfigureOp(clientData, interp, argc, argv)
     ClientData clientData;	/* Main window of the interpreter */
     Tcl_Interp *interp;		/* Interpreter to report errors to */
     int argc;
-    char **argv;		/* Reference window path name and options */
+    CONST84 char **argv;	/* Reference window path name and options */
 {
     Busy *busyPtr;
     int result;
@@ -1126,4 +1079,54 @@ Blt_busy_Init(Tcl_Interp *interp)
 {
     Tcl_CreateCommand(interp, "blt_busy", BusyCmd, NULL, NULL);
     return Tcl_PkgProvide(interp, "blt_busy", BUSYLIB_VERSION);
+}
+
+
+/*
+ * Blt_CreateBusy --
+ *
+ *      CReate the busy window
+ */
+Window Blt_CreateBusy(Tk_Window tkwin, Window parent, ClientData instanceData)
+{
+    Tk_Window *winPtr = (Tk_Window *)tkwin;
+
+    /* Create a transparent window and put it on top.  */
+    /*
+     * Ignore the important events while the window is mapped.
+     */
+    Tk_Attributes(winPtr)->do_not_propagate_mask =
+	(KeyPressMask | KeyReleaseMask | ButtonPressMask | ButtonReleaseMask |
+	 PointerMotionMask);
+    Tk_Attributes(winPtr)->event_mask = (KeyPressMask | KeyReleaseMask |
+	ButtonPressMask | ButtonReleaseMask | PointerMotionMask);
+    Tk_Changes(winPtr)->border_width = 0;
+    Tk_Depth(winPtr) = 0;
+    Tk_WindowId(winPtr) = XCreateWindow(Tk_Display(winPtr), parent,
+	Tk_X(winPtr), Tk_Y(winPtr),
+	(unsigned)Tk_Width(winPtr),	/* width */
+	(unsigned)Tk_Height(winPtr),	/* height */
+	0,			/* border_width */
+	0,			/* depth */
+	InputOnly,		/* class */
+	CopyFromParent,		/* visual */
+	(CWDontPropagate | CWEventMask),	/* valuemask */
+	Tk_Attributes(winPtr) /* attributes */ );
+
+    return Tk_WindowId(winPtr);
+}
+
+
+static Window
+Blt_GetParent(Display *display, Window window)
+{
+    Window root, parent;
+    Window *dummy;
+    unsigned int count;
+
+    if (XQueryTree(display, window, &root, &parent, &dummy, &count) > 0) {
+	XFree(dummy);
+	return parent;
+    }
+    return None;
 }

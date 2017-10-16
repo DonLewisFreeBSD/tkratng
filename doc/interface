@@ -1,10 +1,12 @@
+-*- mode: Text; fill-column: 78; -*-
+
 
 	INTERFACE between ratatosk library and the interface
 
 		    Martin Forssén
 
 
-   TkRat software and its included text is Copyright 1996-2002 by
+   TkRat software and its included text is Copyright 1996-2004 by
    Martin Forssén.
 
    The full text of the legal notice is contained in the file called
@@ -23,6 +25,10 @@ provide.
 RatOpenFolder def
     Opens a folder. The argument should be the definition of the folder to
     open.
+
+RatGetOpenHandler def
+    Gets the folder handler of the folder if it is already open. Otherwise
+    it returns an empty string.
 
 $folder update mode
     Updates the mailbox. Mode can be either 'update', 'checkpoint' or
@@ -55,8 +61,10 @@ $folder list format
     is an optional integer (may be negative) and one of the
     following characters:
       s - Subject of message
-      n - Name of sender (or mailaddress if the name is not
-	  available)
+      n - Name of sender or mailaddress if the name is not
+	  available. If the sender matches myself then use
+          'To: recpient' instead.
+      N - Like 'n' but withot the special handling of myself.
       m - Mail address of sender
       r - Name of recipient
       R - Mail address of recipient
@@ -69,16 +77,18 @@ $folder list format
       i - Current message index in folder
       t - Threading string
       M - Message ID
+      u - Message UID
+      c - Canonalized subject
   In some cases the message size may not be available. In that
   case it is replaced by a '?'.
 
 $folder get index
     Returns a message handler for the message specified
     by "index". This is an index into the list of messages
-    as it is returned by the list comnmand.
+    as it is returned by the list command.
 
-$folder setFlag index flag value
-    Sets the specified flag of the message specified by "index" to
+$folder setFlag {indexes} flag value
+    Sets the specified flag of the messages specified by the list of indexes to
     a value (a boolean value). The flag is one of 'seen', 'deleted',
     'flagged' or 'answered'.
 
@@ -86,9 +96,9 @@ $folder getFlag index flag
     Gets the specified flag of the message specified by "index".
     The flag is one of 'seen', 'deleted','flagged' or 'answered'.
 
-$folder flagged flag
-    Returns a list of messages (thir indexes) that are marked with
-    the given flag. Flag can be one of 'seen', 'deleted','flagged'
+$folder flagged flag value
+    Returns a list of messages (thir indexes) that have the given flag
+    set to the given value. Flag can be one of 'seen', 'deleted','flagged'
     or 'answered'.
 
 $folder insert message [message ...]
@@ -120,8 +130,7 @@ $folder refcount
     Returns how many current references there are to this folder.
 
 $folder role
-    Retiurns the role to use for this folder.
-
+    Returns the role to use for this folder.
 
     Message entities
 
@@ -144,7 +153,7 @@ $message get field...
     The following are the valid fields: return_path, from, sender,
     reply_to, to, cc and bcc.
 
-$message reply to
+$message reply to role
     Creates a new message handler which is fit to use for RatSend which
     is a reply to this message. The to field is either sender or all and
     denotes to whom the reply should go. There will be a member named
@@ -158,6 +167,25 @@ $message list format
     Returns information about the message. This command works like
     the folder list command but operates on only one message. See the
     documentation on folder list for description of the format argument.
+
+$message pgp sign encrypt role signer enc_rcpts
+    Do pgp operation on message. 'sign' and 'encrypt' are both booleans
+    and inidcates which operation(s) to perform. 'role' is the role we are
+    operating in. 'signer' is the use which should sign the message (ignores
+    if 'sign' is false. 'enc_rcpts' is the recipients to which we should
+    encrypt it (ignored if 'encrypt' is false. This modifies the message.
+
+$message remove_internal
+    Removes TkRat internal header fields from the message. This only has
+    an effect on RatFrMessages.
+
+$message duplicate
+    Create a copy of this message
+
+$message delete_attachments attachments dest_folder
+    Delete the specified attachemnts and put the resulting message in
+    the specified folder. Attachments are specified as a list of integers
+    which give the "path" to the attachment.
 
     Bodypart entities
 
@@ -243,9 +271,11 @@ $body findShowCommand
 	desc	- A description of this type
 	bitmap	- The name of an xbm-file which contains an icon for this type
 
-$body filename
+$body filename [gen_if_empty]
     Asks the body if it has a good candidate for a filename for the user who
-    wishes to save this bodypart.
+    wishes to save this bodypart. The return can be empty unless the
+    optionional gen_if_empty flag is given in which case a random name will be
+    returned.
 
 $body encoded
     Returns 1 if the bodypart has been decoded. Zero otherwise.
@@ -282,11 +312,14 @@ $address get form
 	mail	- returns the name of the mailbox
 	name	- returns the personal name
 
-RatCreateAddress address role
-    Returns an address command containing the given address. The role arg
-    tells which role to operate in.
+RatCreateAddress ?-nodomain? address ?role?
+    Returns an address command containing the given address. Exactly one of
+    -nodomain or role must be specified. -nodomain tells it to not associate a
+    domain with the address while the role argument tells which domain to use
+    if needed.
 
 
+OLD
     Message hold
 
 RatHold insert handler description
@@ -300,11 +333,11 @@ RatHold list
 RatHold extract index
     Extracts the intex'th message from the hold. A handler which has the
     same members as the one inserted is returned.
-
+/OLD
 
     Aliases
 
-RatAlias add book name fullname content comment options
+RatAlias add book name fullname content comment pgp_key options
     Adds the given alias to the alias list.
 
 RatAlias delete name ?...?
@@ -312,27 +345,31 @@ RatAlias delete name ?...?
 
 RatAlias get alias
     Returns the definition of an alias. The return value is
-    {book fullname content comment options}.
+    {book fullname content comment pgp_key options}.
 
 RatAlias list var
     Returns the alias list. The alias list is inserted into an array
     named "var". The index is the name of the alias and the content is
-    a list of three elements {book fullname content comment options}.
+    a list of elements {book fullname content comment pgp_key options}.
 
-RatAlias read filename
-    Reads aliases from filename and adds them to the internal list.
+RatAlias read book filename
+    Reads aliases from filename and adds them to the internal list as
+    members of the given book.
 
 RatAlias save book filename
     Saves an address book to the specified file.
 
-RatAlias expand1 adrlist role
-    Takes one address line as argument and tries to do first level alias
-    expansion on it, i.e. any found aliases are complemented with their
-    fullnames (if any). The new adrlist is returned.
-
-RatAlias expand2 adrlist role
-    Takes on adress line as argument and tries to do full alias expansion
-    on it, i.e. every alias is replaced with its content.
+RatAlias expand level adrlist role
+    Takes one address line as argument and tries to do address expansion
+    on it. How much the addresses are expanded is controlled by the level
+    argument. The following values are legal:
+    display    - Resolve for display. Entries which resolves to multiple
+                 addresses are shown instead of expanded.
+    sending    - Resolve for sending. All addresses are fully expanded.
+    pgp        - Get pgp keys. Returns a tcl-list of pgp key tuples
+                 {id name} or email addresses to encrypt the message to.
+    pgpactions - Get the pgp actions requested by the addresses. The return
+                 is a tuple of two booleans {sign encrypt}.
 
 
     PGP commands
@@ -341,14 +378,17 @@ RatPGP listkeys [keyring]
     Lists the keys on a keyring. Returns a tuple of two elements where the
     first is a suitable title to show above the descriptions. The
     second element is a list of keys where each key is represented by
-    a tuple of three elements. The key ID, a list of userids and a
-    text description of the key.
+    a tuple of the following elements:
+        {key_id email_addresses description subjects sign encrypt}
+    The keyring names 'PubRing' and 'SecRing' are reserved and refers to the
+    users default keyring.
 
 RatPGP extract id [keyring]
     Returns the ascii version of the wanted key.
 
 RatPGP add keys [keyring]
     Adds the given keys to the specified keyring.
+
 
     Misc commands
 
@@ -365,48 +405,9 @@ RatBgExec exitStatus args
     When the executed commands are done the variable exitStatus will be set
     to the exit value of the last process that exited.
 
-RatSend action ?handler?
-    If action is "init" then the ratDeferred variable is initialized.
-    If the action is "sendDeferred" then all deferred messages are sent and
-    the number of sent messages is returned. If the action is "kill" the the
-    child is killed (if it exists).
-    If action is "send" then we send the message identified by the handler
-    using the prefered method of sending messages. The handler argument
-    should be the name of an array which may contain the following entries
-    (entries marked with a '*' are required):
-	handler(remail)		- remail headers
-	handler(date)		- message composition date string
-	handler(from)		- originator address list
-	handler(reply_to)	- reply address list
-	handler(subject)	- message subject string
-	handler(to)*		- primary recipient list
-	handler(cc)		- secondary recipient list
-	handler(bcc)		- blind secondary recipient list
-	handler(in_reply_to)	- replied message ID
-	handler(message_id)	- message ID
-	handler(body)		- bodypart handler
-	handler(request_dsn)	- true if DSN is requested
-	handler(charset)*	- Which character set to use. If this is
-				  auto then the best set is choosen for each
-				  encoded entity. This also serves as default
-				  for the bodyparts. ie if they do not have
-				  a charset parameter
-	handler(role)*          - The role to send the message as
-    The bodypart handler should be the name of an array which may have
-    the following elements ('*' marked entries are mandatory):
-	bhandler(type)*		- type
-	bhandler(subtype)*	- subtype
-	bhandler(encoding)*	- CTE the data is in
-	bhandler(parameter)	- list of parameters to Content-Type:
-	bhandler(disp_type)	- disposition type
-	bhandler(disp_parm)	- list of parameters to Content-Disposition:
-	bhandler(id)		- bodypart identifier
-	bhandler(description)	- bodypart description
-	bhandler(filename)*	- name of file which contains the actual data
-				  (not needed for multipart entities)
-	bhandler(removeFile*)	- true if we should rmeove the file afterwards
-	bhandler(children)	- list of parts in a multipart message
-	bhandler(copy)		- true if should make a local copy of the file.
+RatNudgeSender
+    Causes the sender process, if idle, to rescan the outbox and send any
+    messages (if online).
 
 RatGetEncoding filename
     Examines a file and returns a guess of which MIME-encoding it is in.
@@ -474,15 +475,10 @@ RatSMTPSupportDSN host
 RatImport id
     Imports mail folders. The id argument points to a vfolderdef. This
     command modifies the folder definitions under id.
-OLD
-    forms (knwon flags are trace and subscribed):
-	{NAME dir {FLAGS} {OPTIONS} PATTERN DIR}
-	{NAME mh {FLAGS} {OPTIONS} PATTERN DIR}
-	{NAME imap {FLAGS} {OPTIONS} PATTERN HOST USER MBOX PORT}
-    It will return a list of tuples, where the following tuples exists:
-	{v vfolderdef}
-	{s name {list of tuples}}
-/OLD
+
+RatTestImport wildcard def
+    Does atest import. Uses the definition passed in def and the given
+    wildcard. The list of found items is returned.
 
 RatLL line
     Returns the length of the given line. This function counts tab stops
@@ -500,6 +496,13 @@ RatDbaseCheck fix
 	Number of unlinked messages
 	Total size in bytes of all messages
 	A list of diagnostic messages
+
+RatDbaseInfo
+    Returns some information about the database. The command returns a list
+    with the following elements:
+      * approximate number of messages in database
+      * timstamp of earliest message
+      * timestamp of last message
 
 RatParseExp expression
     Parses the given expression and returns an expression identifier.
@@ -519,6 +522,9 @@ RatMailcapReload
 
 RatCreateFolder def
     Creates a new folder
+
+RatCheckFolder def
+    Checks if the specified folder exists. Returns true if it does.
 
 RatDeleteFolder def
     Deletes a folder
@@ -563,6 +569,43 @@ RatGenerateAddresses handler
     by handler. Returns the following list:
 	{from sender}
 
+RatGetCTE datatype data
+    Returns which CTE the data will fit into. The 'data' argument depends on
+    the 'datatype' Valid datatypes are 'file', in which case data is a
+    filename, and 'blob', in which case the data is the actual data to
+    examine. The return value is one of 'binary', '8bit' or '7bit'.
+
+RatCreateMessage role {envelope body}
+    Creates a new message and returns the handler. The envelope is a list of
+    tuples where each tuple contains header-name and value. The body is 
+    described by the following informal grammar:
+	body     - {type subtype {*param} encoding disp {*param} 
+	            {*header} bodydata}
+	type     - A MIME type
+	subtype  - A MIME subtype
+	param    - {name value}
+	bodydata - {datablob / {*body}}
+	datablob - {utfblob/file DATA}
+
+RatExtractAddresses role adrlist...
+    Parses the given address lists and returns the user@domain parts of
+    them.
+
+RatGenerateDate
+    Generates a date-string formatted according to rfc822.
+
+RatGenerateStipple height
+    Generates a bitmap suitable as stipple for a text which is 'height'
+    pixels high.
+
+RatGetMatchingAddrsImpl addrlist match max
+    Look for addresses in addrlist which starts with the match charaters
+    (case insensitive). Return no more than "max" addresses.
+
+ratGenerateMsgId role
+    Return a suitable message id for the given role
+
+
 	TCL COMMANDS THE LIBRARY EXPECTS THE INTERFACE TO PROVIDE
 
 RatLog level message duration
@@ -577,10 +620,6 @@ RatLog level message duration
     The duration is an optional argument and can have a value of "time"
     or "explicit". If the value is explicit the a handle will be returned,
     and this handle can then be used in a call to RatClearLog
-
-RatFormatDate year month day hour min sec
-    This command gets a date expressed as numbers and is expected to return
-    a string.
 
 RatWantSave
     This command should ask the user if he wants to save an outgoing message.
@@ -603,3 +642,12 @@ RatDSNRecieve subject action recipient id
 
 UpdateDSN
     Gets called from the library when new DSN(s) arrive.
+
+RatSendFailed name reason
+    Called when TkRat fails to send a message. The "name" parameter contains a
+    handler which identifies the message and "reason" is a text string
+    describing what happened. This routine must take care of the passed
+    message since it will otherwise be lost.
+
+RatSaveOutgoing msg folder
+    Try to save the give message to the given folder.

@@ -1,6 +1,6 @@
-							Onsala 2003-09-24
+							Onsala 2002-08-12
 
-   TkRat software and its included text is Copyright 1996-2002 by
+   TkRat software and its included text is Copyright 1996-2004 by
    Martin Forssén.
 
    The full text of the legal notices is contained in the file called
@@ -15,13 +15,13 @@ This software should work on any Unix-system where you can build tcl/tk.
 
 	BUILDING THE SOFTWARE
 
-TkRat depends on tcl/tk 8.2 or later so these must be installed. Tcl/tk
+TkRat depends on tcl/tk 8.3 or later so these must be installed. Tcl/tk
 8.3.4 is recommended.
 
 	run './configure'
 
 This will configure the makefiles etc. See INSTALL for options to configure.
-Configure depends on you having tclsh8.2 and wish8.2 or later in your path.
+Configure depends on you having tclsh8.3 and wish8.3 or later in your path.
 If configure fails to locate the tcl/tk include-files you might have to
 help it by providing a --with-tcl-include=DIR argument.
 
@@ -54,11 +54,17 @@ configure.
 
 TkRat will now include ssl-support if the openssl library is found by
 configure. One can help configure on the way by using the
---with-ssl-dir argument. To be able to verify server certificates you
+--with-ssl argument. To be able to verify server certificates you
 must have the relevant CA-certificates installed on your
 system. Exactly where those should be stored depends upon your ssl-
 configuration. But usually they should be found in
 $OPENSSLDIR/cert.pem
+
+
+	HTML
+
+TkRat will show html-emails if TkHtml version 2.0 or later is installed.
+TkHtml can be fetched from http://www.hwaci.com/sw/tkhtml/index.html.
 
 
 	CONFIGURATION

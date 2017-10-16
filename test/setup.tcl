@@ -9,7 +9,7 @@ set env(SSH)            /usr/bin/ssh
 lappend auto_path [pwd]/..
 lappend auto_path $env(LIBDIR)
 
-package require ratatosk 2.1
+package require ratatosk 2.2
 
 proc InitTestmsgs {} {
     global dir
@@ -60,6 +60,41 @@ proc RatDSNRecieve {subject action recipient id} {
     puts "\tAction: $action"
     puts "\tRecipient: $recipient"
     puts "\tId: $id"
+r}
+
+proc StartTest {name} {
+    global verbose currentTest
+    set currentTest $name
+    if {$verbose} {
+	puts "Test $name"
+    }
+}
+
+proc ReportError {msg} {
+    global currentTest LEAD errors verbose abortOnError
+
+    if {!$verbose} {
+	puts "$LEAD Test $currentTest"
+    }
+    puts "$LEAD $msg"
+    incr errors
+    if {$abortOnError} {
+	exit 1
+    }
+}
+
+proc CompareLists {expected got} {
+    set le [llength $expected]
+    set lg [llength $got]
+    for {set i 0} {$i < $le && $i < $lg} {incr i} {
+	if {[lindex $expected $i] != [lindex $got $i]} {
+	    return "EXP: [lindex $expected $i]\nGOT: [lindex $got $i]"
+	}
+    }
+    if {$le != $lg} {
+	return "Got $lg elements while expecting $le"
+    }
+    return ""
 }
 
 set tkrat_version dev
@@ -87,5 +122,10 @@ OptionsRead
 InitMessages en t
 InitCharsetAliases
 
+source smtp_server.tcl
+
 set option(debug_file) $dir/LOG
 set option(folder_sort) natural
+set vFolderOutgoing 42
+set vFolderDef($vFolderOutgoing) \
+    [list Outgoing file {} $dir/outgoing-[pid]]

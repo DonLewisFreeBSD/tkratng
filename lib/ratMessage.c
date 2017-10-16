@@ -3,7 +3,7 @@
  *
  *	This file contains code which implements the message entities.
  *
- * TkRat software and its included text is Copyright 1996-2002 by
+ * TkRat software and its included text is Copyright 1996-2004 by
  * Martin Forssén
  *
  * The full text of the legal notice is contained in the file called
@@ -34,11 +34,20 @@ static int numReplies = 0;
  */
 static int numBodies = 0;
 
+static void RatCreateBody(Tcl_Interp *interp, MessageInfo *msgPtr);
+static void RatCreateChildren(Tcl_Interp *interp, BodyInfo *bodyInfoPtr);
 static void RatBodyDelete(Tcl_Interp *interp, BodyInfo *bodyInfoPtr);
 static BodyInfo *RatFindFirstText(BodyInfo *bodyInfoPtr);
 static CONST84 char *RatGetCitation(Tcl_Interp *interp, MessageInfo *msgPtr);
 static void RatCiteMessage(Tcl_Interp *interp, Tcl_Obj *dstObjPtr, 
 			   CONST84 char *src, CONST84 char *myCitation);
+static int RatMessageDeleteAttachments(Tcl_Interp *interp, MessageInfo *msgPtr,
+                                       Tcl_Obj *attachments);
+static int RatDeleteAttachment(Tcl_Interp *interp, MessageInfo *msgPtr,
+                               Tcl_DString *ds, Tcl_Obj *spec);
+static char* RatFindAttachment(Tcl_Interp *interp, BodyInfo *bodyInfoPtr,
+                               char *text, Tcl_Obj *spec, int spec_index,
+                               char **boundary);
 
 extern long unix_create (MAILSTREAM *stream,char *mailbox);
 
@@ -112,12 +121,7 @@ RatMessageCmd(ClientData clientData,Tcl_Interp *interp, int objc,
 
     } else if (!strcmp(Tcl_GetString(objv[1]), "body")) {
 	if (!msgPtr->bodyInfoPtr) {
-	    msgPtr->bodyInfoPtr =
-		    (*messageProcInfo[msgPtr->type].createBodyProc)(interp,
-		    msgPtr);
-	    RatPGPBodyCheck(interp, messageProcInfo, &msgPtr->bodyInfoPtr);
-	    Tcl_CreateObjCommand(interp, msgPtr->bodyInfoPtr->cmdName,
-		    RatBodyCmd, (ClientData) msgPtr->bodyInfoPtr, NULL);
+            RatCreateBody(interp, msgPtr);
 	}
 	Tcl_SetResult(interp, msgPtr->bodyInfoPtr->cmdName, TCL_STATIC);
 	return TCL_OK;
@@ -125,12 +129,12 @@ RatMessageCmd(ClientData clientData,Tcl_Interp *interp, int objc,
     } else if (!strcmp(Tcl_GetString(objv[1]), "rawText")) {
 	rPtr = Tcl_NewObj();
 	Tcl_AppendToObj(rPtr,
-		(*messageProcInfo[msgPtr->type].getHeadersProc)(interp,msgPtr),
-		-1);
+	      (*messageProcInfo[msgPtr->type].getHeadersProc)(interp, msgPtr),
+	      -1);
 	Tcl_AppendToObj(rPtr, "\r\n", 2);
 	Tcl_AppendToObj(rPtr,
-		(*messageProcInfo[msgPtr->type].fetchTextProc)(interp, msgPtr),
-		-1);
+	      (*messageProcInfo[msgPtr->type].fetchTextProc)(interp, msgPtr),
+	      -1);
 	Tcl_SetObjResult(interp, rPtr);
 	return TCL_OK;
 
@@ -173,21 +177,22 @@ RatMessageCmd(ClientData clientData,Tcl_Interp *interp, int objc,
 	 * different character sets here. /MaF
 	 */
 	ENVELOPE *env = (*messageProcInfo[msgPtr->type].envelopeProc)(msgPtr);
-	char handler[32], buf[1024], *cPtr;
+	char handler[32], *cPtr;
 	BodyInfo *bodyInfoPtr;
 	unsigned long bodylength;
 	ADDRESS *adrPtr;
-	char *dataPtr;
+	char *dataPtr, *role;
 	Tcl_DString ds;
 	Tcl_Obj *oPtr, *vPtr;
 
 	Tcl_DStringInit(&ds);
 
-	if (objc != 3) {
+	if (objc != 4) {
 	    Tcl_AppendResult(interp, "wrong # args: should be \"",
-		    Tcl_GetString(objv[0]), " reply to\"", (char *) NULL);
+		    Tcl_GetString(objv[0]), " reply to role\"", (char *) NULL);
 	    return TCL_ERROR;
 	}
+        role = Tcl_GetString(objv[3]);
 	sprintf(handler, "reply%d", numReplies++);
 	if (!strcasecmp(Tcl_GetString(objv[2]), "sender")) {
 	    /*
@@ -211,7 +216,8 @@ RatMessageCmd(ClientData clientData,Tcl_Interp *interp, int objc,
 		    if (Tcl_DStringLength(&ds)) {
 			Tcl_DStringAppend(&ds, ", ", -1);
 		    }
-		    Tcl_DStringAppend(&ds, RatAddressMail(adrPtr), -1);
+		    Tcl_DStringAppend(&ds,
+                                      RatAddressFull(interp, adrPtr, role),-1);
 		}
 	    }
 	    Tcl_SetVar2(interp, handler, "to", Tcl_DStringValue(&ds),
@@ -273,7 +279,8 @@ RatMessageCmd(ClientData clientData,Tcl_Interp *interp, int objc,
 		    if (Tcl_DStringLength(&ds)) {
 			Tcl_DStringAppend(&ds, ", ", 2);
 		    }
-		    Tcl_DStringAppend(&ds, RatAddressMail(adrPtr), -1);
+		    Tcl_DStringAppend(&ds,
+                                      RatAddressFull(interp, adrPtr, role),-1);
 		}
 	    }
 	    if (Tcl_DStringLength(&ds)) {
@@ -284,12 +291,12 @@ RatMessageCmd(ClientData clientData,Tcl_Interp *interp, int objc,
 		to = recipientPtrPtr[0];
 	    }
 	    if (to) {
-		snprintf(buf, sizeof(buf), "%s@%s", to->mailbox, to->host);
-		Tcl_SetVar2(interp, handler, "to", buf, TCL_GLOBAL_ONLY);
+		Tcl_SetVar2(interp, handler, "to",
+                            RatAddressFull(interp, to, role), TCL_GLOBAL_ONLY);
 	    }
 	    ckfree(recipientPtrPtr);
 	}
-	if (env->subject) {
+	if (env->subject && *env->subject) {
 	    int match;
 
 	    cPtr = RatDecodeHeader(interp, env->subject, 0);
@@ -320,6 +327,23 @@ RatMessageCmd(ClientData clientData,Tcl_Interp *interp, int objc,
 		    Tcl_GetVar2(interp, "option","no_subject",TCL_GLOBAL_ONLY),
 		    TCL_GLOBAL_ONLY);
 	}
+	if (env->references || env->in_reply_to) {
+            Tcl_DStringSetLength(&ds, 0);
+            if (env->references) {
+                Tcl_DStringAppend(&ds, env->references, -1);
+            } else {
+                Tcl_DStringAppend(&ds, env->in_reply_to, -1);
+            }
+	    if (env->message_id) {
+	        Tcl_DStringAppend(&ds, " ", 1);
+	        Tcl_DStringAppend(&ds, env->message_id, -1);
+	    }
+	    Tcl_SetVar2(interp, handler, "references", Tcl_DStringValue(&ds),
+                        TCL_GLOBAL_ONLY);
+	} else if (env->message_id) {
+	    Tcl_SetVar2(interp, handler, "references", env->message_id,
+                        TCL_GLOBAL_ONLY);
+        }
 	if (env->message_id) {
 	    Tcl_SetVar2(interp, handler, "in_reply_to", env->message_id,
 		    TCL_GLOBAL_ONLY);
@@ -352,7 +376,7 @@ RatMessageCmd(ClientData clientData,Tcl_Interp *interp, int objc,
 	    attrFormat = Tcl_GetVar2(interp, "option", "attribution",
 		    TCL_GLOBAL_ONLY);
 	    if (attrFormat && strlen(attrFormat)
-		    && (exprPtr = RatParseList(attrFormat))) {
+		    && (exprPtr = RatParseList(attrFormat, NULL))) {
 		oPtr = RatDoList(interp, exprPtr,
 			messageProcInfo[msgPtr->type].getInfoProc,
 			(ClientData)msgPtr, 0);
@@ -361,6 +385,7 @@ RatMessageCmd(ClientData clientData,Tcl_Interp *interp, int objc,
 	    } else {
 		oPtr = Tcl_NewObj();
 	    }
+	    Tcl_IncrRefCount(oPtr);
 
 	    citation = RatGetCitation(interp, msgPtr);
 	    RatCiteMessage(interp, oPtr, Tcl_DStringValue(decBPtr), citation);
@@ -370,12 +395,12 @@ RatMessageCmd(ClientData clientData,Tcl_Interp *interp, int objc,
 	    if (wrap) {
 		Tcl_Obj *nPtr;
 		nPtr = RatWrapMessage(interp, oPtr);
-		Tcl_DecrRefCount(oPtr);
 		oPtr = nPtr;
 	    }
 	    Tcl_SetVar2Ex(interp, handler, "data", oPtr, TCL_GLOBAL_ONLY);
 	    Tcl_SetVar2(interp, handler, "data_tags", "Cited noWrap no_spell",
 			TCL_GLOBAL_ONLY);
+	    Tcl_DecrRefCount(oPtr);
 	}
 	Tcl_SetResult(interp, handler, TCL_VOLATILE);
 	Tcl_DStringFree(&ds);
@@ -401,7 +426,7 @@ RatMessageCmd(ClientData clientData,Tcl_Interp *interp, int objc,
         infoPtr = RatGetOpenFolder(interp, defPtr);
 	if (infoPtr) {
 	    name = msgPtr->name;
-	    result = RatFolderInsert(interp, infoPtr, 1, &name);
+            result = RatFolderInsert(interp, infoPtr, 1, &name);
 	    RatFolderClose(interp, infoPtr, 0);
 	    return result;
 	} 
@@ -419,6 +444,7 @@ RatMessageCmd(ClientData clientData,Tcl_Interp *interp, int objc,
 		}
 	    }
 	    oPtr = Tcl_NewListObj(eobjc-i-1, &eobjv[i+1]);
+	    Tcl_IncrRefCount(oPtr);
 	    result = RatInsertMsg(interp, msgPtr, Tcl_GetString(oPtr),
 		    Tcl_GetString(dobjv[4]), Tcl_GetString(dobjv[3]));
 	    Tcl_DecrRefCount(oPtr);
@@ -491,6 +517,9 @@ RatMessageCmd(ClientData clientData,Tcl_Interp *interp, int objc,
 	    Tcl_DStringInit(&ds);
 	    RatMessageGet(interp, msgPtr, &ds, flags, sizeof(flags),
 		    date, sizeof(date));
+	    if ('\n' != Tcl_DStringValue(&ds)[Tcl_DStringLength(&ds)-1]) {
+		Tcl_DStringAppend(&ds, "\r\n", 2);
+	    }
 	    INIT(&string, mail_string, Tcl_DStringValue(&ds),
 		    Tcl_DStringLength(&ds));
 
@@ -532,7 +561,7 @@ end_copy:
 		    Tcl_GetString(objv[0]), " list format\"", (char *) NULL);
 	    return TCL_ERROR;
 	}
-	if (NULL == (exprPtr = RatParseList(Tcl_GetString(objv[2])))) {
+	if (NULL == (exprPtr = RatParseList(Tcl_GetString(objv[2]), NULL))) {
 	    Tcl_SetResult(interp, "Illegal list format", TCL_STATIC);
 	    return TCL_ERROR;
 	}
@@ -543,12 +572,129 @@ end_copy:
 	RatFreeListExpression(exprPtr);
 	return TCL_OK;
 
+    } else if (!strcmp(Tcl_GetString(objv[1]), "pgp")) {
+	int sign, encrypt;
+
+	if (objc != 7) {
+	    Tcl_AppendResult(interp, "wrong # args: should be \"",
+			     Tcl_GetString(objv[0]),
+			     " pgp sign encrypt role signer enc_rcpts\"",
+			     (char *) NULL);
+	    return TCL_ERROR;
+	}
+	if (msgPtr->type != RAT_FREE_MESSAGE) {
+	    Tcl_SetResult(interp, "pgp only works on internal messages",
+			  TCL_STATIC);
+	    return TCL_ERROR;
+	}
+	Tcl_GetBooleanFromObj(interp, objv[2], &sign);
+	Tcl_GetBooleanFromObj(interp, objv[3], &encrypt);
+	return RatFrMessagePGP(interp, msgPtr, sign, encrypt,
+			       Tcl_GetString(objv[4]), Tcl_GetString(objv[5]),
+			       objv[6]);
+	
+    } else if (!strcmp(Tcl_GetString(objv[1]), "remove_internal")) {
+	if (msgPtr->type != RAT_FREE_MESSAGE) {
+	    Tcl_SetResult(interp, "remove_internal only works on internal "
+			  "messages", TCL_STATIC);
+	    return TCL_ERROR;
+	}
+	return RatFrMessageRemoveInternal(interp, msgPtr);
+	
+    } else if (!strcmp(Tcl_GetString(objv[1]), "duplicate")) {
+	char *cmd;	
+	Tcl_Obj *oPtr = Tcl_NewObj();
+	
+	Tcl_AppendToObj(oPtr,
+	      (*messageProcInfo[msgPtr->type].getHeadersProc)(interp, msgPtr),
+	      -1);
+	Tcl_AppendToObj(oPtr, "\r\n", 2);
+	Tcl_AppendToObj(oPtr,
+	      (*messageProcInfo[msgPtr->type].fetchTextProc)(interp, msgPtr),
+	      -1);
+	Tcl_IncrRefCount(oPtr);
+	cmd = RatFrMessageCreate(interp, Tcl_GetString(oPtr),
+				 Tcl_GetCharLength(oPtr), NULL);
+	Tcl_DecrRefCount(oPtr);
+	
+	Tcl_SetResult(interp, cmd, TCL_STATIC);
+	return TCL_OK;
+
+    } else if (!strcmp(Tcl_GetString(objv[1]), "delete_attachments")) {
+	if (objc != 3) {
+	    Tcl_AppendResult(interp, "wrong # args: should be \"",
+                             Tcl_GetString(objv[0]), "delete_attachments"
+                             " attachments\"", (char*)NULL);
+	    return TCL_ERROR;
+	}
+
+        /* Create body if needed */
+        if (!msgPtr->bodyInfoPtr) {
+            RatCreateBody(interp, msgPtr);
+        }
+        if (msgPtr->bodyInfoPtr->bodyPtr->type != TYPEMULTIPART) {
+	    Tcl_AppendResult(interp, "not a multipart message", NULL);
+	    return TCL_ERROR;
+        }
+        return RatMessageDeleteAttachments(interp, msgPtr, objv[2]);
     } else {
 	Tcl_AppendResult(interp, "bad option \"", Tcl_GetString(objv[1]),
-		"\": must be one of header, body, rawText reply, or get",
-		(char*)NULL);
+			 "\": must be one of header, body, rawText reply, get"
+			 ", pgp, remove_internal, duplicate or "
+                         "delete_attachments", (char*)NULL);
 	return TCL_ERROR;
     }
+}
+
+/*
+ *----------------------------------------------------------------------
+ *
+ * RatCreateBody --
+ *
+ *      Create the body of a message
+ *
+ * Results:
+ *	None
+ *
+ * Side effects:
+ *	msgPtr->bodyInfoPtr is filled in a command is created
+ *
+ *
+ *----------------------------------------------------------------------
+ */
+
+static void
+RatCreateBody(Tcl_Interp *interp, MessageInfo *msgPtr)
+{
+    msgPtr->bodyInfoPtr =
+        (*messageProcInfo[msgPtr->type].createBodyProc)(interp, msgPtr);
+    RatPGPBodyCheck(interp, messageProcInfo, &msgPtr->bodyInfoPtr);
+    Tcl_CreateObjCommand(interp, msgPtr->bodyInfoPtr->cmdName,
+                         RatBodyCmd, (ClientData) msgPtr->bodyInfoPtr, NULL);
+}
+
+/*
+ *----------------------------------------------------------------------
+ *
+ * RatMessageGetContent --
+ *
+ *      Gets the content of the message
+ *
+ * Results:
+ *	Is left in header and body.
+ *
+ * Side effects:
+ *	None.
+ *
+ *
+ *----------------------------------------------------------------------
+ */
+void
+RatMessageGetContent(Tcl_Interp *interp, MessageInfo *msgPtr,
+		     char **header, char **body)
+{
+    *header = (*messageProcInfo[msgPtr->type].getHeadersProc)(interp, msgPtr);
+    *body = (*messageProcInfo[msgPtr->type].fetchTextProc)(interp, msgPtr);
 }
 
 /*
@@ -579,7 +725,7 @@ RatMessageGetHeader(Tcl_Interp *interp, char *srcHeader)
 	RatLog(interp, RAT_FATAL, Tcl_GetStringResult(interp), RATLOG_TIME);
 	exit(1);
     }
-    header = (char*) ckalloc (strlen(srcHeader)+1);
+    header = (char*) ckalloc (strlen(srcHeader)+2);
     if (!strncmp("From ", srcPtr, 5)) {
 	while ('\n' != *srcPtr) {
 	    srcPtr++;
@@ -597,9 +743,11 @@ RatMessageGetHeader(Tcl_Interp *interp, char *srcHeader)
 	*dstPtr = '\0';
 	fPtr[0] = Tcl_NewStringObj(header, -1);
 	cPtr = ++dstPtr;
-	do {
-	    srcPtr++;
-	} while (' ' == *srcPtr || '\t' == *srcPtr);
+        if (*srcPtr) {
+            do {
+                srcPtr++;
+            } while (' ' == *srcPtr || '\t' == *srcPtr);
+        }
 	do {
 	    for (; *srcPtr && '\n' != *srcPtr; srcPtr++) {
 		if ('\r' != *srcPtr) {
@@ -711,7 +859,7 @@ RatMessageDelete(Tcl_Interp *interp, char *msgName)
  *----------------------------------------------------------------------
  */
 BodyInfo*
-CreateBodyInfo(MessageInfo *msgPtr)
+CreateBodyInfo(Tcl_Interp *interp, MessageInfo *msgPtr, BODY *bodyPtr)
 {
     BodyInfo *bodyInfoPtr;
     int pad = sizeof(char*) - sizeof(BodyInfo)%sizeof(char*);
@@ -723,11 +871,12 @@ CreateBodyInfo(MessageInfo *msgPtr)
     bodyInfoPtr = (BodyInfo*)ckalloc(sizeof(BodyInfo)+pad+16);
 
     bodyInfoPtr->cmdName = (char*)bodyInfoPtr + pad + sizeof(BodyInfo);
-
+    
     sprintf(bodyInfoPtr->cmdName, "RatBody%d", numBodies++);
     bodyInfoPtr->firstbornPtr = NULL;
     bodyInfoPtr->nextPtr = NULL;
     bodyInfoPtr->containedEntity = NULL;
+    bodyInfoPtr->bodyPtr = bodyPtr;
     bodyInfoPtr->type = msgPtr->type;
     bodyInfoPtr->msgPtr = msgPtr;
     bodyInfoPtr->secPtr = NULL;
@@ -736,6 +885,9 @@ CreateBodyInfo(MessageInfo *msgPtr)
     bodyInfoPtr->encoded = 0;
     bodyInfoPtr->sigStatus = RAT_UNSIGNED;
     bodyInfoPtr->pgpOutput = NULL;
+
+    RatDecodeParameters(interp, bodyPtr->parameter);
+    RatDecodeParameters(interp, bodyPtr->disposition.parameter);
     return bodyInfoPtr;
 }
 
@@ -765,28 +917,20 @@ RatBodyCmd(ClientData clientData, Tcl_Interp *interp, int objc,
     BodyInfo *bodyInfoPtr = (BodyInfo*) clientData;
     BODY *bodyPtr = bodyInfoPtr->bodyPtr;
     unsigned long length;
-    Tcl_Obj *ov[2], *oPtr, *rPtr;
+    Tcl_Obj *ov[2], *rPtr;
 
     if (objc < 2) {
 	goto usage;
     }
     if (!strcmp(Tcl_GetString(objv[1]), "children")) {
-	BodyInfo **partInfoPtrPtr, *partInfoPtr;
+	BodyInfo *partInfoPtr;
 
 	if (TYPEMULTIPART != bodyPtr->type) {
 	    return TCL_OK;
 	}
 
 	if (!bodyInfoPtr->firstbornPtr) {
-	    (*messageProcInfo[bodyInfoPtr->type].makeChildrenProc)
-		    (interp, bodyInfoPtr);
-	    for (partInfoPtrPtr = &bodyInfoPtr->firstbornPtr; *partInfoPtrPtr;
-		 partInfoPtrPtr = &(*partInfoPtrPtr)->nextPtr) {
-		RatPGPBodyCheck(interp, messageProcInfo, partInfoPtrPtr);
-		Tcl_CreateObjCommand(interp, (*partInfoPtrPtr)->cmdName,
-				     RatBodyCmd, (ClientData)(*partInfoPtrPtr),
-				     NULL);
-	    }
+            RatCreateChildren(interp, bodyInfoPtr);
 	}
 	rPtr = Tcl_NewObj();
 	for (partInfoPtr = bodyInfoPtr->firstbornPtr; partInfoPtr;
@@ -862,7 +1006,7 @@ RatBodyCmd(ClientData clientData, Tcl_Interp *interp, int objc,
 	PARAMETER *parameter;
 
 	rPtr = Tcl_NewObj();
-	for (parameter = bodyPtr->parameter; parameter;
+	for (parameter = bodyPtr->disposition.parameter; parameter;
 		parameter = parameter->next) {
 	    ov[0] = Tcl_NewStringObj(parameter->attribute, -1);
 	    ov[1] = Tcl_NewStringObj(parameter->value, -1);
@@ -956,28 +1100,6 @@ RatBodyCmd(ClientData clientData, Tcl_Interp *interp, int objc,
 	}
 	return RatBodySave(interp, channel, bodyInfoPtr, encoded, convertNL);
 
-    } else if (!strcmp(Tcl_GetString(objv[1]), "dsn")) {
-	char *body;
-	int r;
-
-	if (TYPEMESSAGE != bodyPtr->type &&
-		!strcasecmp(bodyPtr->subtype, "delivery-status")) {
-	    Tcl_SetResult(interp, "Not an message/delivery-status bodypart",
-		    TCL_STATIC);
-	    return TCL_ERROR;
-	}
-	body = (*messageProcInfo[bodyInfoPtr->type].fetchBodyProc)
-		(bodyInfoPtr, &length);
-	if (*body) {
-	    oPtr = Tcl_NewStringObj(body, length);
-	    r = RatDSNExtract(interp, oPtr);
-	    Tcl_DecrRefCount(oPtr);
-	    return r;
-	} else {
-	    Tcl_SetResult(interp, "No body", TCL_STATIC);
-	    return TCL_ERROR;
-	}
-
     } else if (!strcmp(Tcl_GetString(objv[1]), "getShowCharset")) {
 	CONST84 char *c_charset = "us-ascii", *alias;
 	PARAMETER *parmPtr;
@@ -996,7 +1118,7 @@ RatBodyCmd(ClientData clientData, Tcl_Interp *interp, int objc,
 	}
 
 	charset = cpystr(c_charset);
-	lcase(charset);
+	lcase((unsigned char*)charset);
 
 	/*
 	 * - See if this charset is an alias and resolve that if so.
@@ -1032,9 +1154,14 @@ RatBodyCmd(ClientData clientData, Tcl_Interp *interp, int objc,
 
     } else if (!strcmp(Tcl_GetString(objv[1]), "filename")) {
 	PARAMETER *parmPtr;
-	char *filename = NULL, *delim, *d;
+	char *filename = NULL, *delim, *c;
+        int gen = 0;
 
-	for (parmPtr = bodyPtr->disposition.parameter; parmPtr;
+	if (objc == 3 && !strcmp("gen_if_empty", Tcl_GetString(objv[2]))) {
+            gen = 1;
+        }
+
+        for (parmPtr = bodyPtr->disposition.parameter; parmPtr;
 		parmPtr = parmPtr->next) {
 	    if (!strcasecmp(parmPtr->attribute, "filename")
 		    || !strcasecmp(parmPtr->attribute, "name")) {
@@ -1054,13 +1181,21 @@ RatBodyCmd(ClientData clientData, Tcl_Interp *interp, int objc,
 		&& !strchr(bodyPtr->description, ' ')) {
 	    filename = bodyPtr->description;
 	}
+        if (!filename && gen) {
+            filename = RatGenId();
+        }
+        for (c=filename; c && *c; c++) {
+            if (!isalnum((int)*c)
+                && NULL == strchr("_.,-=+", *c)) {
+                *c = '_';
+            }
+        }
 	if (filename) {
-	    d = RatDecodeHeader(interp, filename, 0);
-	    delim = strrchr(d, '/');
+	    delim = strrchr(filename, '/');
 	    if (delim) {
 		Tcl_SetResult(interp, delim+1, TCL_VOLATILE);
 	    } else {
-		Tcl_SetResult(interp, d, TCL_VOLATILE);
+		Tcl_SetResult(interp, filename, TCL_VOLATILE);
 	    }
 	}
 	return TCL_OK;
@@ -1100,6 +1235,39 @@ RatBodyCmd(ClientData clientData, Tcl_Interp *interp, int objc,
     Tcl_AppendResult(interp, "Illegal argument string", NULL);
     return TCL_ERROR;
 }
+
+/*
+ *----------------------------------------------------------------------
+ *
+ * RatCreateChildren --
+ *
+ *      Creates the children of a multipart body
+ *
+ * Results:
+ *	None.
+ *
+ * Side effects:
+ *	None.
+ *
+ *
+ *----------------------------------------------------------------------
+ */
+static void
+RatCreateChildren(Tcl_Interp *interp, BodyInfo *bodyInfoPtr)
+{
+    BodyInfo **partInfoPtrPtr;
+
+    (*messageProcInfo[bodyInfoPtr->type].makeChildrenProc)
+        (interp, bodyInfoPtr);
+    for (partInfoPtrPtr = &bodyInfoPtr->firstbornPtr; *partInfoPtrPtr;
+         partInfoPtrPtr = &(*partInfoPtrPtr)->nextPtr) {
+        RatPGPBodyCheck(interp, messageProcInfo, partInfoPtrPtr);
+        Tcl_CreateObjCommand(interp, (*partInfoPtrPtr)->cmdName,
+                             RatBodyCmd, (ClientData)(*partInfoPtrPtr),
+                             NULL);
+    }
+}
+
 
 /*
  *----------------------------------------------------------------------
@@ -1163,24 +1331,34 @@ void
 RatMessageGet(Tcl_Interp *interp, MessageInfo *msgPtr, Tcl_DString *ds,
 	      char *flags, size_t flaglen, char *date, size_t datelen)
 {
-    char *data;
+    char *data, *status, *status_end;
     int seen;
     Tcl_Obj *oPtr;
 
     data = (*messageProcInfo[msgPtr->type].getHeadersProc)(interp, msgPtr);
-    Tcl_DStringAppend(ds, data, strlen(data));
-    Tcl_DStringAppend(ds, "\r\n", 2);
+    status = strstr(data, "\r\nStatus: ");
+    if (status) {
+        status += 2;
+        Tcl_DStringAppend(ds, data, status-data);
+        status_end = strstr(status, "\r\n");
+        if (status_end && strlen(status_end+2)) {
+            Tcl_DStringAppend(ds, status_end+2, -1);
+        }
+    } else {
+        Tcl_DStringAppend(ds, data, -1);
+    }
     if (msgPtr->folderInfoPtr) {
 	seen  = (*msgPtr->folderInfoPtr->getFlagProc)(msgPtr->folderInfoPtr,
 		interp, msgPtr->msgNo, RAT_SEEN);
     } else {
 	seen = 1;
     }
+    Tcl_DStringAppend(ds, "\r\n", 2);
     data = (*messageProcInfo[msgPtr->type].fetchTextProc)(interp, msgPtr);
     Tcl_DStringAppend(ds, data, strlen(data));
     if (!seen) {
         (*msgPtr->folderInfoPtr->setFlagProc)(msgPtr->folderInfoPtr,
-	    interp, msgPtr->msgNo, RAT_SEEN, 0);
+	    interp, &msgPtr->msgNo, 1, RAT_SEEN, 0);
     }
     if (flags) {
 	oPtr = (*messageProcInfo[msgPtr->type].getInfoProc)(interp,
@@ -1308,7 +1486,7 @@ RatInsertMsg (Tcl_Interp *interp, MessageInfo *msgPtr, char *keywords,
 		flags = cpystr(value);
 	    }
 	} else if (!strcasecmp(key, "date")) {
-	    if (T == mail_parse_date(&elt, value)) {
+	    if (T == mail_parse_date(&elt, (unsigned char*)value)) {
 		tm.tm_sec = elt.seconds;
 		tm.tm_min = elt.minutes;
 		tm.tm_hour = elt.hours;
@@ -1367,197 +1545,6 @@ RatInsertMsg (Tcl_Interp *interp, MessageInfo *msgPtr, char *keywords,
     ckfree(subject);
     ckfree(flags);
     return result;
-}
-
-/*
- *----------------------------------------------------------------------
- *
- * RatParseList --
- *
- *      Parse a list expression (almost like a printf format string)
- *
- * Results:
- *	A structure representing the parsed expression, or null if
- *	there is a syntax error in the format string.
- *
- * Side effects:
- *	None.
- *
- *
- *----------------------------------------------------------------------
- */
-
-ListExpression*
-RatParseList(const char *format)
-{
-    ListExpression *expPtr;
-    int i, w, expIndex, bufLen, num;
-    char buf[1024];
-
-    for(i=num=0; '\0' != format[i]; i++) {
-	if ('%' == format[i] && format[i+1] && '%' != format[i+1]) {
-	    while (format[++i] && ('-' == format[i]
-		    || isdigit((unsigned char)format[i])));
-	    if (!strchr("snmrRbBdDSitM", format[i])) {
-		return NULL;
-	    }
-	    num++;
-	}
-    }
-    expPtr = (ListExpression*)ckalloc(sizeof(ListExpression));
-    expPtr->size = num;
-    expPtr->preString = (char**)ckalloc(num*sizeof(char*));
-    expPtr->typeList =
-	(RatFolderInfoType*)ckalloc(num*sizeof(RatFolderInfoType));
-    expPtr->fieldWidth = (int*)ckalloc(num*sizeof(int));
-    expPtr->leftJust = (int*)ckalloc(num*sizeof(int));
-    for (i = expIndex = bufLen = 0; format[i]; i++) {
-	if ('%' == format[i]) {
-	    if ('%' == format[++i]) {
-		buf[bufLen++] = format[i];
-		continue;
-	    }
-	    buf[bufLen] = '\0';
-	    expPtr->preString[expIndex] = cpystr(buf);
-	    if ('-' == format[i]) {
-		expPtr->leftJust[expIndex] = 1;
-		i++;
-	    } else {
-		expPtr->leftJust[expIndex] = 0;
-	    }
-	    w=0;
-	    while (isdigit((unsigned char)format[i])) {
-		w = w*10+format[i++]-'0';
-	    }
-	    expPtr->fieldWidth[expIndex] = w;
-	    switch(format[i]) {
-	    case 's': expPtr->typeList[expIndex++] = RAT_FOLDER_SUBJECT; break;
-	    case 'n': expPtr->typeList[expIndex++] = RAT_FOLDER_NAME; break;
-	    case 'm': expPtr->typeList[expIndex++] = RAT_FOLDER_MAIL; break;
-	    case 'r': expPtr->typeList[expIndex++] = RAT_FOLDER_NAME_RECIPIENT;
-		    break;
-	    case 'R': expPtr->typeList[expIndex++] = RAT_FOLDER_MAIL_RECIPIENT;
-		    break;
-	    case 'b': expPtr->typeList[expIndex++] = RAT_FOLDER_SIZE; break;
-	    case 'B': expPtr->typeList[expIndex++] = RAT_FOLDER_SIZE_F; break;
-	    case 'd': expPtr->typeList[expIndex++] = RAT_FOLDER_DATE_F; break;
-	    case 'D': expPtr->typeList[expIndex++] = RAT_FOLDER_DATE_N; break;
-	    case 'S': expPtr->typeList[expIndex++] = RAT_FOLDER_STATUS; break;
-	    case 'i': expPtr->typeList[expIndex++] = RAT_FOLDER_INDEX; break;
-	    case 't': expPtr->typeList[expIndex++] =RAT_FOLDER_THREADING;break;
-	    case 'M': expPtr->typeList[expIndex++] = RAT_FOLDER_MSGID; break;
-	    }
-	    bufLen = 0;
-	} else {
-	    buf[bufLen++] = format[i];
-	}
-    }
-    if (bufLen) {
-	buf[bufLen] = '\0';
-	expPtr->postString = cpystr(buf);
-    } else {
-	expPtr->postString = NULL;
-    }
-    return expPtr;
-}
-
-/*
- *----------------------------------------------------------------------
- *
- * RatFreeListExpression --
- *
- *      Frees all memory associated with a list expression.
- *
- * Results:
- *	None.
- *
- * Side effects:
- *	Some memory is freed.
- *
- *
- *----------------------------------------------------------------------
- */
-
-void
-RatFreeListExpression(ListExpression *exPtr)
-{
-    int i;
-
-    for (i=0; i<exPtr->size; i++) {
-	ckfree(exPtr->preString[i]);
-    }
-    ckfree(exPtr->preString);
-    ckfree(exPtr->typeList);
-    ckfree(exPtr->fieldWidth);
-    ckfree(exPtr->leftJust);
-    ckfree(exPtr->postString);
-    ckfree(exPtr);
-}
-
-
-/*
- *----------------------------------------------------------------------
- *
- * RatDoList --
- *
- *      Print the list information about a message.
- *
- * Results:
- *	A tcl object
- *
- * Side effects:
- *	None.
- *
- *
- *----------------------------------------------------------------------
- */
-
-Tcl_Obj*
-RatDoList(Tcl_Interp *interp, ListExpression *exprPtr, RatInfoProc *infoProc,
-	ClientData clientData, int index)
-{
-    Tcl_Obj *oPtr = Tcl_NewObj(), *iPtr;
-    char *str;
-    int i, j, slen, length;
-
-    for (i=0; i<exprPtr->size; i++) {
-	if (exprPtr->preString[i]) {
-	    Tcl_AppendToObj(oPtr, exprPtr->preString[i], -1);
-	}
-	iPtr = (*infoProc)(interp, clientData, exprPtr->typeList[i], index);
-	if (!iPtr) {
-	    for (j=0; j<exprPtr->fieldWidth[i]; j++) {
-		Tcl_AppendToObj(oPtr, " ", 1);
-	    }
-	    continue;
-	}
-	if (exprPtr->fieldWidth[i]) {
-	    str = Tcl_GetStringFromObj(iPtr, &slen);
-	    length = Tcl_NumUtfChars(str, slen);
-	    if (length > exprPtr->fieldWidth[i]) {
-		j = Tcl_UtfAtIndex(str, exprPtr->fieldWidth[i]) - str;
-		Tcl_AppendToObj(oPtr, str, j);
-	    } else {
-		if (exprPtr->leftJust[i]) {
-		    Tcl_AppendObjToObj(oPtr, iPtr);
-		    for (j=length; j<exprPtr->fieldWidth[i]; j++) {
-			Tcl_AppendToObj(oPtr, " ", 1);
-		    }
-		} else {
-		    for (j=length; j<exprPtr->fieldWidth[i]; j++) {
-			Tcl_AppendToObj(oPtr, " ", 1);
-		    }
-		    Tcl_AppendObjToObj(oPtr, iPtr);
-		}
-	    }
-	} else {
-	    Tcl_AppendObjToObj(oPtr, iPtr);
-	}
-    }
-    if (exprPtr->postString) {
-	Tcl_AppendToObj(oPtr, exprPtr->postString, -1);
-    }
-    return oPtr;
 }
 
 /*
@@ -1792,12 +1779,44 @@ RatCiteMessage(Tcl_Interp *interp, Tcl_Obj *dstObjPtr, CONST84 char *src,
 /*
  *----------------------------------------------------------------------
  *
+ * RatCitELength --
+ *
+ *      Calculate the effective length of a citation. Assuming
+ *      tab-stops are placed 8 chars apart.
+ *
+ * Results:
+ *	The effective length
+ *
+ * Side effects:
+ *	None.
+ *
+ *----------------------------------------------------------------------
+ */
+static unsigned int
+RatCitELength(const char *cit, unsigned int citLength)
+{
+    unsigned int l;
+    const char *cPtr;
+
+    for (l=0, cPtr=cit; cPtr < cit+citLength; cPtr = Tcl_UtfNext(cPtr)) {
+        if ('\t' == *cPtr) {
+            l = (l/8+1)*8;
+        } else {
+            l++;
+        }
+    }
+    return l;
+}
+
+/*
+ *----------------------------------------------------------------------
+ *
  * RatWrapMessage --
  *
  *      Wraps the text of a message
  *
  * Results:
- *	An opject containing the wrapped text is returned.
+ *	An object containing the wrapped text is returned.
  *
  * Side effects:
  *	None.
@@ -1809,10 +1828,13 @@ Tcl_Obj*
 RatWrapMessage(Tcl_Interp *interp, Tcl_Obj *textPtr)
 {
     int wrapLength, l, citLength, citLength2, overflow, i, add, mark, broken;
+    int delta;
     CONST84 char *s, *e, *cPtr, *lineStartPtr, *startPtr, *citPtr = NULL;
     Tcl_RegExp citexp, bullexp;
     Tcl_Obj *nPtr = Tcl_NewObj(), *oPtr;
+    unsigned char citbuf[80];
 
+    Tcl_IncrRefCount(nPtr);
     oPtr = Tcl_GetVar2Ex(interp, "option", "wrap_length", TCL_GLOBAL_ONLY);
     Tcl_GetIntFromObj(interp, oPtr, &wrapLength);
     s = Tcl_GetVar2(interp, "option", "citexp", TCL_GLOBAL_ONLY);
@@ -1823,7 +1845,7 @@ RatWrapMessage(Tcl_Interp *interp, Tcl_Obj *textPtr)
     }
     s = Tcl_GetVar2(interp, "option", "bullexp", TCL_GLOBAL_ONLY);
     bullexp = Tcl_RegExpCompile(interp, s);
-    if (NULL == citexp) {
+    if (NULL == bullexp) {
 	RatLogF(interp, RAT_ERROR, "illegal_regexp", RATLOG_EXPLICIT,
 		Tcl_GetStringResult(interp));
     }
@@ -1834,7 +1856,13 @@ RatWrapMessage(Tcl_Interp *interp, Tcl_Obj *textPtr)
 	 */
 	startPtr = cPtr;
 	for (l=0; l < wrapLength && '\n' != *cPtr && *cPtr;
-		l++, cPtr = Tcl_UtfNext(cPtr));
+             cPtr = Tcl_UtfNext(cPtr)) {
+            if ('\t' == *cPtr) {
+                l = (l/8+1)*8;
+            } else {
+                l++;
+            }
+        }
 	if (l < wrapLength) {
 	    Tcl_AppendToObj(nPtr, startPtr, cPtr-startPtr);
 	    if ('\n' == *cPtr) {
@@ -1870,6 +1898,25 @@ RatWrapMessage(Tcl_Interp *interp, Tcl_Obj *textPtr)
 	    citLength = 0;
 	}
 
+        /*
+         * Does it contain a bullet after the citation?
+         * If so create a modified citation for the following lines.
+         */
+        if (citPtr
+            && Tcl_RegExpExec(interp, bullexp, citPtr+citLength,
+                              citPtr+citLength)
+            && (Tcl_RegExpRange(bullexp, 0, &s, &e), 1)
+            && e-citPtr < sizeof(citbuf)) {
+            strncpy((char*)citbuf, citPtr, e-citPtr);
+            for (i=citLength; i<e-s+citLength; i++) {
+                if (!isspace(citbuf[i])) {
+                    citbuf[i] = ' ';
+                }
+            }
+            citPtr = (char*)citbuf;
+            citLength += e-s;
+        }
+
 	/*
 	 * Find point to break
 	 *  First walk backwards until first LWSP.
@@ -1885,7 +1932,7 @@ RatWrapMessage(Tcl_Interp *interp, Tcl_Obj *textPtr)
 	}
 
 	/*
-	 * Add first part of line and linebreak
+	 * Add first part of line, linebreak and citation
 	 */
 	Tcl_AppendToObj(nPtr, startPtr, cPtr-startPtr);
 	Tcl_AppendToObj(nPtr, "\n", 1);
@@ -1901,7 +1948,7 @@ RatWrapMessage(Tcl_Interp *interp, Tcl_Obj *textPtr)
 	 *    where the difference does not match a bullet expression
 	 */
 	lineStartPtr = startPtr = ++cPtr;
-	l = citLength;
+	l = RatCitELength(citPtr, citLength);
 	broken = 1;
 	while (*cPtr) {
 	    /* Found end of line? */
@@ -1925,33 +1972,28 @@ RatWrapMessage(Tcl_Interp *interp, Tcl_Obj *textPtr)
 		if (*s != '\n' &&
 		    (isalnum(*s) || '\'' == *s || '"' == *s || '(' == *s)) {
 		    /* Is citation identical? */
-		    if (citLength == citLength2
-			&& !strncmp(cPtr, citPtr, citLength)) {
+                    delta = RatCitELength(citPtr, citLength)
+                        - RatCitELength(cPtr, citLength2);
+                    if (0 == delta) {
 			add = 1;
-		    }
-		    if (citLength > citLength2) {
-			/* Citation is short (by LWSP only) */
-			for (i=citLength2;
-			     i < citLength && isspace(citPtr[i]);
-			     i++);
-			if (i == citLength) {
-			    /*
-			     * We have found a line with shorter citation.
-			     * Change data already inserted into dest as well
-			     * as remembered citation
-			     */
-			    /* Data already there */
-			    oPtr = Tcl_NewStringObj(
-				nPtr->bytes+mark+citLength,
-				nPtr->length-mark-citLength);
-			    Tcl_SetObjLength(nPtr, mark+citLength2);
-			    Tcl_AppendObjToObj(nPtr, oPtr);
-			    Tcl_DecrRefCount(oPtr);
-			    l -= citLength-citLength2;
-			    citLength = citLength2;
-			    add = 1;
-			}
-		    } else if (citLength < citLength2
+		    } else if (delta > 0) {
+                        /*
+                         * We have found a line with shorter citation.
+                         * Change data already inserted into dest as well
+                         * as remembered citation
+                         */
+                        /* Data already there */
+                        oPtr = Tcl_NewStringObj(
+                            nPtr->bytes+mark+citLength,
+                            nPtr->length-mark-citLength);
+                        Tcl_IncrRefCount(oPtr);
+                        Tcl_SetObjLength(nPtr, mark+citLength2);
+                        Tcl_AppendObjToObj(nPtr, oPtr);
+                        Tcl_DecrRefCount(oPtr);
+                        l -= citLength-citLength2;
+                        citLength = citLength2;
+                        add = 1;
+		    } else if (delta < 0
 			       && Tcl_RegExpExec(interp, bullexp,
 						 citPtr+citLength,
 						 citPtr+citLength)
@@ -1962,6 +2004,7 @@ RatWrapMessage(Tcl_Interp *interp, Tcl_Obj *textPtr)
 			oPtr = Tcl_NewStringObj(
 			    nPtr->bytes+mark+citLength,
 			    nPtr->length-mark-citLength);
+			Tcl_IncrRefCount(oPtr);
 			Tcl_SetObjLength(nPtr, mark);
 			Tcl_AppendToObj(nPtr, cPtr, citLength2);
 			Tcl_AppendObjToObj(nPtr, oPtr);
@@ -1975,13 +2018,14 @@ RatWrapMessage(Tcl_Interp *interp, Tcl_Obj *textPtr)
 		if (add && broken) {
 		    Tcl_AppendToObj(nPtr, " ", 1);
 		    l++;
-		    cPtr += citLength;
-		    startPtr = cPtr;
+		    cPtr += citLength2;
+                    startPtr = cPtr;
 		    broken = 0;
 		    continue;
 		} else {
 		    Tcl_AppendToObj(nPtr, "\n", 1);
 		    l = 0;
+                    startPtr = cPtr;
 		    break;
 		}
 	    } else if (l >= wrapLength) {
@@ -2001,12 +2045,16 @@ RatWrapMessage(Tcl_Interp *interp, Tcl_Obj *textPtr)
 		if (overflow) break;
 		mark = nPtr->length;
 		Tcl_AppendToObj(nPtr, citPtr, citLength);
-		l += citLength;
+		l += RatCitELength(citPtr, citLength);
 	    } else {
 		l++;
 		cPtr = Tcl_UtfNext(cPtr);
 	    }
 	}
+        if (startPtr < cPtr) {
+            Tcl_AppendToObj(nPtr, startPtr, cPtr-startPtr);
+            Tcl_AppendToObj(nPtr, "\n", 1);
+        }
     }
 
     return nPtr;
@@ -2186,6 +2234,235 @@ RatPurgeFlags(char *flags, int level)
 	}
     }
     return flags;
+}
+
+/*
+ *----------------------------------------------------------------------
+ *
+ * RatHeaderSize --
+ *
+ *	Calculate size of header
+ *
+ * Results:
+ *      Maximum size of header
+ *
+ * Side effects:
+ *      None.
+ *
+ *
+ *----------------------------------------------------------------------
+ */
+
+static int RatHeaderLineSize(char *name, ENVELOPE *env, char *text);
+static int RatHeaderAddressSize(char *name, ENVELOPE *env, ADDRESS *adr);
+
+static int
+RatHeaderLineSize(char *name, ENVELOPE *env, char *text)
+{
+    if (text) {
+	return (env->remail ? 7 : 0) + strlen(name) + 2 + strlen(text) + 2;
+    } else {
+	return 0;
+    }
+}
+
+static int
+RatHeaderAddressSize(char *name, ENVELOPE *env, ADDRESS *adr)
+{
+    if (adr) {
+	return (env->remail?7:0) + strlen(name) + 2 + RatAddressSize(adr, 1)+2;
+    } else {
+	return 0;
+    }
+}
+
+size_t
+RatHeaderSize(ENVELOPE *env,BODY *body)
+{
+    size_t len = 0;
+
+    if (env->remail) len += strlen(env->remail);
+    len += RatHeaderLineSize("Newsgroups", env, env->newsgroups);
+    len += RatHeaderLineSize("Date", env, (char*)env->date); 
+    len += RatHeaderAddressSize("From", env, env->from);
+    len += RatHeaderAddressSize("Sender", env, env->sender);
+    len += RatHeaderAddressSize("Reply-To", env, env->reply_to);
+    len += RatHeaderLineSize("Subject", env, env->subject);
+    if (env->bcc && !(env->to || env->cc)) {
+	len += strlen("To: undisclosed recipients: ;\015\012");
+    }
+    len += RatHeaderAddressSize("To", env, env->to);
+    len += RatHeaderAddressSize("cc", env, env->cc);
+    len += RatHeaderLineSize("In-Reply-To", env, env->in_reply_to);
+    len += RatHeaderLineSize("Message-ID", env, env->message_id);
+    len += RatHeaderLineSize("Followup-to", env, env->followup_to);
+    len += RatHeaderLineSize("References", env, env->references);
+    if (body && !env->remail) {   /* not if remail or no body structure */
+	/*
+	 * TODO: Fix this correctly
+	 * Here we assume that the body headers will never become longer
+	 * than 8192 bytes
+	 */
+        len += 8192;
+    } 
+    len += 2;
+    return len;
+}
+
+
+/*
+ *----------------------------------------------------------------------
+ *
+ * RatMessageDeleteAttachments --
+ *
+ *	See ../doc/interface
+ *
+ * Results:
+ *      A standard tcl result
+ *
+ * Side effects:
+ *      None.
+ *
+ *
+ *----------------------------------------------------------------------
+ */
+static int
+RatMessageDeleteAttachments(Tcl_Interp *interp, MessageInfo *msgPtr,
+                            Tcl_Obj *attachments)
+{
+    char flags[128], date[128], *name;
+    Tcl_DString ds;
+    int i, length;
+    Tcl_Obj *oPtr;
+
+    /* Get message text */
+    Tcl_DStringInit(&ds);
+    RatMessageGet(interp, msgPtr, &ds, flags, sizeof(flags),
+                  date, sizeof(date));
+    if ('\n' != Tcl_DStringValue(&ds)[Tcl_DStringLength(&ds)-1]) {
+        Tcl_DStringAppend(&ds, "\r\n", 2);
+    }
+
+    /* Delete attachments */
+    Tcl_ListObjLength(interp, attachments, &length);
+    for (i=0; i<length; i++) {
+        Tcl_ListObjIndex(interp, attachments, i, &oPtr);
+        if (TCL_OK != RatDeleteAttachment(interp, msgPtr, &ds, oPtr)) {
+            Tcl_DStringFree(&ds);
+            return TCL_ERROR;
+        }
+    }
+
+    /* Create new message */
+    name = RatFrMessageCreate(interp, Tcl_DStringValue(&ds),
+                              Tcl_DStringLength(&ds), NULL);
+
+    Tcl_SetResult(interp, name, TCL_VOLATILE);
+    return TCL_OK;
+}
+
+static int
+RatDeleteAttachment(Tcl_Interp *interp, MessageInfo *msgPtr,
+                    Tcl_DString *ds, Tcl_Obj *spec)
+{
+    char *start, *boundary, *end, buf[2048];
+    const char *text;
+
+    /* Find start and end of region to replace */
+    start = RatFindAttachment(interp, msgPtr->bodyInfoPtr,
+                              Tcl_DStringValue(ds), spec, 0, &boundary);
+    if (!start) {
+        return TCL_ERROR;
+    }
+    strlcpy(buf, "--", sizeof(buf));
+    strlcat(buf, boundary, sizeof(buf));
+    end = strstr(start+1, buf);
+    if (!end) {
+        Tcl_SetResult(interp, "Attachment end not found", TCL_STATIC);
+        return TCL_ERROR;
+    }
+    start += strlen(buf)+2;
+
+    /* Create replacement data */
+    text = Tcl_GetVar2(interp, "t", "deleted_attachment", TCL_GLOBAL_ONLY);
+    snprintf(buf, sizeof(buf), "Content-Type: TEXT/PLAIN; CHARSET=us-ascii\r\n"
+             "\r\n%s\r\n", text);
+
+    /* Make sure there is room */
+    if (end-start < strlen(buf)) {
+        Tcl_DStringSetLength(ds,Tcl_DStringLength(ds)+strlen(buf)-(end-start));
+    }
+
+    /* Move data */
+    memmove(start+strlen(buf), end, strlen(end)+1);
+    memmove(start, buf, strlen(buf));
+
+    /* Set new length */
+    if (end-start > strlen(buf)) {
+        Tcl_DStringSetLength(ds,Tcl_DStringLength(ds)+strlen(buf)-(end-start));
+    }
+
+    return TCL_OK;
+}
+
+static char*
+RatFindAttachment(Tcl_Interp *interp, BodyInfo *bodyInfoPtr,
+                  char *text, Tcl_Obj *spec, int spec_index, char **boundary)
+{
+    char buf[1024];
+    BodyInfo *child;
+    PARAMETER *param;
+    Tcl_Obj *oPtr;
+    int index, i, length;
+
+    /* Find boundary */
+    if (bodyInfoPtr->bodyPtr->type != TYPEMULTIPART) {
+        Tcl_SetResult(interp, "Not a multipart message", TCL_STATIC);
+        return NULL;
+    }
+    for (param = bodyInfoPtr->bodyPtr->parameter;
+         param && strcasecmp(param->attribute, "BOUNDARY");
+         param = param->next) {
+    }
+    if (!param) {
+        Tcl_SetResult(interp, "No boundary found", TCL_STATIC);
+        return NULL;
+    }
+    *boundary = param->value;
+    strlcpy(buf, "--", sizeof(buf));
+    strlcat(buf, param->value, sizeof(buf));
+
+    /* Make sure children exist */
+    if (!bodyInfoPtr->firstbornPtr) {
+        RatCreateChildren(interp, bodyInfoPtr);
+    }
+
+    /* Extract index of child we are interested in */
+    if (TCL_OK != Tcl_ListObjIndex(interp, spec, spec_index, &oPtr)
+        || TCL_OK != Tcl_GetIntFromObj(interp, oPtr, &index)) {
+        Tcl_SetResult(interp, "Failed to extract index", TCL_STATIC);
+        return NULL;
+    }
+
+    /* Find the location of the child */
+    text = strstr(text+1, buf);
+    for (i=0, child = bodyInfoPtr->firstbornPtr;
+         text && i < index && child->nextPtr; i++, child = child->nextPtr) {
+        text = strstr(text+1, buf);
+    }
+    if (i < index || !text) {
+        Tcl_SetResult(interp, "Failed to locate child", TCL_STATIC);
+        return NULL;
+    }
+
+    /* Are we done or do we need to recurse? */
+    Tcl_ListObjLength(interp, spec, &length);
+    if (spec_index < length-1) {
+        return RatFindAttachment(interp, child, text, spec, spec_index+1,
+                                 boundary);
+    } else {
+        return text;
+    }
 }
 
 #ifdef MEM_DEBUG

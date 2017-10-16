@@ -2,12 +2,15 @@
 # the next line restarts using wish \
 exec @wish@ "$0" "$@"
 
+set tclsh_binary @tclsh@
+
 wm withdraw .
 
 # Change to test directory
 cd [file dirname $argv0]
 
 # Setup environment
+set errors 0
 set HEAD "---"
 set LEAD "***"
 set dir [pwd]/TESTDIR
@@ -20,13 +23,15 @@ set passwd {}
 set tests {}
 set verbose 0
 set delay 0
+set abortOnError 0
 for {set ai 0} {$ai < [llength $argv]} {incr ai} {
     switch [lindex $argv $ai] {
 	debug { set debug 1 }
 	verbose { set verbose 1 }
 	passwd { set passwd [lindex $argv [incr ai]] }
-	run { set tests ../[lindex $argv [incr ai]] }
+	run { set tests [lindex $argv [incr ai]] }
 	delay { set delay 1}
+	aoe { set abortOnError 1 }
 	default {
 	    puts {Usage: run [verbose] [debug] [delay] [passwd PASSWD] [run TESTFILE]}
 	    exit 0
@@ -42,10 +47,24 @@ if $delay {
 }
 
 # Run tests
+# Run tests
 cd $dir
-set errors 0
-if {0 == [llength $tests]} {
-    set tests [glob -nocomplain ../test_*.tcl]
+if {0 < [llength $tests]} {
+    set at $tests
+    set tests ""
+    foreach c [list ../$at ../test_$at.tcl ../*$at*] {
+	set g [glob -nocomplain $c]
+	if {1 == [llength $g]} {
+	    lappend tests $g
+	    break
+	}
+    }
+    if {"" == $tests} {
+	puts "No test specified"
+	exit 1
+    }
+} else {
+    set tests [lsort [glob -nocomplain ../test_*.tcl]]
 }
 foreach st $tests {
     source $st

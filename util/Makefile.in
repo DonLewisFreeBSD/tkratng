@@ -1,6 +1,6 @@
 #############################################################################
-# TkRat software and its included text is Copyright 1996-2002 by
-# Martin Forssen.                                                        #
+# TkRat software and its included text is Copyright 1996-2004 by            #
+# Martin Forssen.                                                           #
 #                                                                           #
 # The full text of the legal notices is contained in the file called        #
 # COPYRIGHT, included with this distribution.                               #
@@ -71,13 +71,15 @@ CFLAGS = ${TK_DEFS} ${EXTRA_CFLAGS} ${FIX_INCLUDE} ${INCLUDES} \
          ${SHLIB_CFLAGS} -DBUSYLIB_VERSION=\"${BUSYLIB_VERSION}\"
 BUSYLIB = blt_busy${BUSYLIB_SUFFIX}
 
-BUSYSRC = blt_busy.c blt_window.c
+BUSYSRC = blt_busy.c
 BUSYOBJ = ${BUSYSRC:.c=.o}
 
 TARGETS_LIB  = ${BUSYLIB}
 TARGETS_DATA = rat_list.tcl rat_fbox.tcl rat_balloon.tcl \
                rat_edit.tcl rat_textlist.tcl rat_ed.tcl rat_ispell.tcl \
-               rat_tree.tcl rat_enriched.tcl
+               rat_tree.tcl rat_enriched.tcl rat_flowmsg.tcl \
+	       rat_scrollframe.tcl rat_compat.tcl rat_textspell.tcl \
+	       rat_spellutil.tcl rat_find.tcl
 TARGETS = ${TARGETS_LIB} ${TARGETS_DATA}
 
 all: ${TARGETS} pkgIndex.tcl ${DUMMYLIB}

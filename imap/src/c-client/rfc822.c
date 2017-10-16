@@ -217,8 +217,11 @@ void rfc822_address (char *dest,ADDRESS *adr)
 #endif
 				/* write mailbox name */
     rfc822_cat (dest,adr->mailbox,NIL);
-				/* unless null host (HIGHLY discouraged!) */
-    if (*adr->host != '\0') sprintf (dest + strlen (dest),"@%s",adr->host);
+				/* unless null host (HIGHLY
+                                 * discouraged!) */
+    /* TkRat modification */
+    if (*adr->host != '\0' && strcmp(adr->host, NODOMAIN))
+        sprintf (dest + strlen (dest),"@%s",adr->host);
   }
 }
 

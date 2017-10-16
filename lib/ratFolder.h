@@ -3,7 +3,7 @@
  *
  *      Declarations of types used in the folder and messages system.
  *
- * TkRat software and its included text is Copyright 1996-2002 by
+ * TkRat software and its included text is Copyright 1996-2004 by
  * Martin Forssén
  *
  * The full text of the legal notice is contained in the file called
@@ -26,7 +26,9 @@ typedef enum {
     RAT_FOLDER_NAME,		/* The full name of the sender (From:)
 				   or To: if From: is me. Both fall
 				   back to "RAT_FOLDER_MAIL" below
-				   when no full name is present */
+				   is the subject without any leading Re:*/
+    RAT_FOLDER_ANAME,		/* Like RAT_FOLDER_NAME but without special
+                                   handling of me-case */
     RAT_FOLDER_MAIL_REAL,	/* The mail address of the sender (From:) */
     RAT_FOLDER_MAIL,		/* The mail address of the sender (From:)
 				   or To: if From: is me */
@@ -54,6 +56,7 @@ typedef enum {
     RAT_FOLDER_MSGID,		/* The message ID */
     RAT_FOLDER_REF,		/* The In-Reply-to header */
     RAT_FOLDER_THREADING,	/* Threading information */
+    RAT_FOLDER_UID,	        /* Message UID */
     RAT_FOLDER_END
 } RatFolderInfoType;
 
@@ -69,8 +72,9 @@ typedef enum {
     RAT_FLAGGED,		/* Message is flagged */
     RAT_ANSWERED,		/* Message has been answered */
     RAT_DRAFT,			/* Message is a draft */
-    RAT_RECENT			/* Message is a not seen but has been in the
+    RAT_RECENT,			/* Message is a not seen but has been in the
 				   folder for some time */
+    RAT_FLAG_END
 } RatFlag;
 typedef struct {
     char *imap_name;	/* The name of the flag when used with c-client */
@@ -171,7 +175,7 @@ typedef int (RatUpdateProc) (RatFolderInfoPtr infoPtr,
 typedef int (RatInsertProc) (RatFolderInfoPtr infoPtr,
 	Tcl_Interp *interp, int argc, char *argv[]);
 typedef int (RatSetFlagProc) (RatFolderInfoPtr infoPtr,
-	Tcl_Interp *interp, int index, RatFlag flag, int value);
+	Tcl_Interp *interp, int *ilist, int count, RatFlag flag, int value);
 typedef int (RatGetFlagProc) (RatFolderInfoPtr infoPtr,
 	Tcl_Interp *interp, int index, RatFlag flag);
 typedef Tcl_Obj* (RatInfoProc) (Tcl_Interp *interp, ClientData clientData,
@@ -191,7 +195,7 @@ typedef struct RatFolderInfo {
     char *name;			/* Mailbox name (this is a pointer which
 				 * may be ckfree():ed) */
     char *type;			/* Type of folder */
-    char *definition;		/* Definition id of folder */
+    char *ident_def;		/* Definition id of folder */
     int refCount;		/* Reference count (<=0 means closing) */
     SortOrder sortOrder;	/* Sort order for folder */
     Tcl_Obj *role;		/* Role to use */
@@ -200,7 +204,6 @@ typedef struct RatFolderInfo {
     int number;			/* Number of messages in folder */
     int recent;			/* Number of recent messages in folder */
     int unseen;			/* Number of unseen messages in folder */
-    int visible;		/* The number of messages that the user sees */
     int size;			/* Approximate size of folder, or -1 if the
 				 * folder type doesn't support size. */
     int allocated;		/* The number of messages that fits into the
@@ -214,13 +217,8 @@ typedef struct RatFolderInfo {
 				 * be presented to the user. The first element
 				 * of this list is the index of the first
 				 * message to show etc. */
-    int *hidden;		/* A true value here means that we should
-				 * pretend that the corresponding message
-				 * does not exists. */
     int flagsChanged;		/* Non null if the flags has been changed
 				 * since the last checkpoint */
-    int watcherInterval;	/* Interval between updates */
-    Tcl_TimerToken timerToken;	/* Token for update timer */
     RatInitProc *initProc;
     RatFinalProc *finalProc;
     RatCloseProc *closeProc;
@@ -351,11 +349,19 @@ typedef struct {
  */
 typedef enum {
     RAT_MGMT_CREATE,
-    RAT_MGMT_DELETE
+    RAT_MGMT_CHECK,
+    RAT_MGMT_DELETE,
+    RAT_MGMT_SUBSCRIBE,
+    RAT_MGMT_UNSUBSCRIBE
 } RatManagementAction;
 
 /* ratFolder.c (note that this file also exports functions in rat.h) */
 extern RatFolderInfo *RatGetOpenFolder(Tcl_Interp *interp, Tcl_Obj *defPtr);
+extern RatFolderInfo* RatOpenFolder(Tcl_Interp *interp, Tcl_Obj *def);
+extern char* RatFolderCmdGet(Tcl_Interp *interp, RatFolderInfo *infoPtr,
+			     int index);
+extern void RatFolderCmdSetFlag(Tcl_Interp *interp, RatFolderInfo *infoPtr,
+				int *ilist, int count,RatFlag flag, int value);
 extern Tcl_Obj *RatFolderCanonalizeSubject (const char *s);
 extern Tcl_Obj *RatGetMsgInfo(Tcl_Interp *interp, RatFolderInfoType type,
 	MessageInfo *msgPtr, ENVELOPE *envPtr, BODY *bodyPtr,
@@ -377,7 +383,7 @@ extern RatFolderInfo *RatStdFolderCreate(Tcl_Interp *interp, Tcl_Obj *defPtr);
 extern MAILSTREAM* OpenStdFolder(Tcl_Interp *interp, char *spec, void *stdPtr);
 extern void CloseStdFolder(Tcl_Interp *interp, MAILSTREAM *stream);
 extern int RatStdManageFolder(Tcl_Interp *interp, RatManagementAction op,
-			      Tcl_Obj *fptr);
+			      int mbx, Tcl_Obj *fptr);
 void RatStdCheckNet(Tcl_Interp *interp);
 
 /* ratDbFolder.c */
@@ -389,7 +395,6 @@ extern Tcl_Obj* Db_InfoProcInt(Tcl_Interp *interp, RatFolderInfo *infoPtr,
 
 /* ratDisFolder.c */
 extern int RatDisFolderInit (Tcl_Interp *interp);
-extern MAILSTREAM* RatDisFolderOpenStream(Tcl_Interp *interp, Tcl_Obj *defPtr);
 extern RatFolderInfo *RatDisFolderCreate(Tcl_Interp *interp, Tcl_Obj *defPtr);
 extern char* RatDisFolderDir(Tcl_Interp *interp, Tcl_Obj *defPtr);
 extern int RatDisOnOffTrans(Tcl_Interp *interp, int newState);
@@ -399,7 +404,10 @@ extern void RatDisManageFolder(Tcl_Interp *interp, RatManagementAction op,
 /* ratMessage.c */
 extern void RatInitMessages (void);
 extern Tcl_ObjCmdProc RatMessageCmd;
-extern BodyInfo *CreateBodyInfo(MessageInfo *msgPtr);
+extern void RatMessageGetContent(Tcl_Interp *interp, MessageInfo *msgPtr,
+				 char **header, char **body);
+extern BodyInfo *CreateBodyInfo(Tcl_Interp *interp, MessageInfo *msgPtr,
+				BODY *bodyPtr);
 extern Tcl_ObjCmdProc RatBodyCmd;
 extern int RatMessageDelete (Tcl_Interp *interp, char *msgCmd);
 extern void RatMessageGet (Tcl_Interp *interp, MessageInfo *msgPtr,
@@ -408,10 +416,6 @@ extern void RatMessageGet (Tcl_Interp *interp, MessageInfo *msgPtr,
 extern Tcl_ObjCmdProc RatInsertCmd;
 extern int RatInsertMsg (Tcl_Interp *interp, MessageInfo *msgPtr,
 	char *keywords, char *exDate, char *exType);
-extern ListExpression *RatParseList(const char *format);
-extern void RatFreeListExpression(ListExpression *exprPtr);
-extern Tcl_Obj *RatDoList(Tcl_Interp *interp, ListExpression *exprPtr,
-	RatInfoProc *infoProc, ClientData clientData, int index);
 extern Tcl_Obj *RatMsgInfo(Tcl_Interp *interp, MessageInfo *msgPtr,
 	RatFolderInfoType type);
 extern int RatBodySave(Tcl_Interp *interp,Tcl_Channel channel,
@@ -422,7 +426,14 @@ extern Tcl_Obj *RatBodyData(Tcl_Interp *interp, BodyInfo *bodyInfoPtr,
 extern MESSAGECACHE *RatMessageInternalDate(Tcl_Interp *interp,
 	MessageInfo *msgPtr);
 extern char *RatPurgeFlags(char *flags, int level);
+extern size_t RatHeaderSize(ENVELOPE *env,BODY *body);
 
+/* ratMsgList.c */
+extern ListExpression *RatParseList(const char *format, char *error);
+extern void RatFreeListExpression(ListExpression *exprPtr);
+extern Tcl_Obj *RatDoList(Tcl_Interp *interp, ListExpression *exprPtr,
+	RatInfoProc *infoProc, ClientData clientData, int index);
+extern Tcl_ObjCmdProc RatCheckListFormatCmd;
 
 /* ratDbMessage.c */
 extern char *RatDbMessageCreate (Tcl_Interp *interp, RatFolderInfoPtr infoPtr,
@@ -431,16 +442,21 @@ extern void RatDbMessagesInit (MessageProcInfo* procInfo);
 
 /* ratFrMessage.c */
 extern void RatFrMessagesInit (MessageProcInfo* procInfo);
+extern Tcl_ObjCmdProc RatCreateMessageCmd;
 extern BodyInfo* Fr_CreateBodyProc(Tcl_Interp *interp, MessageInfo *msgPtr);
 extern char* RatFrMessageCreate(Tcl_Interp *interp, char *data, int length,
 				MessageInfo **msgPtrPtr);
+extern int RatFrMessagePGP(Tcl_Interp *interp, MessageInfo *msgPtr,
+			   int sign, int encrypt, char *role, char *signer,
+			   Tcl_Obj *rcpts);
+extern int RatFrMessageRemoveInternal(Tcl_Interp *interp, MessageInfo *msgPtr);
 
 /* ratStdMessage.c */
 extern void RatStdMessagesInit (MessageProcInfo* procInfo);
 extern int RatStdEasyCopyingOK(Tcl_Interp *interp, MessageInfo *msgPtr,
 			       Tcl_Obj *defPtr);
 extern int RatStdMessageCopy (Tcl_Interp *interp, MessageInfo *msgPtr,
-	char *destination);
+			      char *destination);
 
 /* ratExp.c */
 extern Tcl_ObjCmdProc RatParseExpCmd;

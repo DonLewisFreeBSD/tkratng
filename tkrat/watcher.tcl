@@ -3,7 +3,7 @@
 # This file contains code which handles the watcher window.
 #
 #
-#  TkRat software and its included text is Copyright 1996-2002 by
+#  TkRat software and its included text is Copyright 1996-2004 by
 #  Martin Forssén
 #
 #  The full text of the legal notice is contained in the file called
@@ -32,7 +32,7 @@ proc WatcherInit {handler} {
 # Arguments:
 
 proc WatcherCreate {} {
-    global b idCnt option watcherWins vFolderName watcherFont
+    global t b idCnt option watcherWins vFolderName watcherFont
 
     # Create toplevel
     set id watcher[incr idCnt]
@@ -42,7 +42,7 @@ proc WatcherCreate {} {
     set whd(watcher_list) $w.list
     set whd(watcher_size) ""
     toplevel $w -class TkRat
-    wm title $w $option(watcher_name)
+    wm title $w $option(watcher_title)
     wm protocol $w WM_DELETE_WINDOW "WatcherSleep $id"
     
     # Populate window
@@ -67,10 +67,9 @@ proc WatcherCreate {} {
 	    -exportselection false \
 	    -highlightthickness 0
     set b($whd(watcher_list)) watcher
-    Size $whd(watcher_list) watcher
     pack $w.scroll -side right -fill y
     pack $w.list -side left -expand 1 -fill both
-    Place $w watcher
+    ::tkrat::winctl::SetGeometry watcher $w $whd(watcher_list)
 
     foreach but {<1> <B1-Motion> <ButtonRelease-1> <Shift-1> <Control-1>
 	       <B1-Leave> <B1-Enter> <space> <Select> <Control-Shift-space>
@@ -97,9 +96,11 @@ proc WatcherCreate {} {
 # whandler -	The handler describing the watcher window
 
 proc WatcherSleep {whandler} {
-    upvar #0 $whandler whd
+    upvar \#0 $whandler whd
     if {[info exists whd(watcher_w)] && [winfo ismapped $whd(watcher_w)]} {
-	upvar #0 $whd(folder_handler) hd
+	upvar \#0 $whd(folder_handler) hd
+        ::tkrat::winctl::RecordGeometry watcher \
+            $whd(watcher_w) $whd(watcher_list)
 	wm withdraw $whd(watcher_w)
 	regsub {[0-9]+x[0-9]+} [wm geom $whd(watcher_w)] {} hd(watcher_geom)
     }

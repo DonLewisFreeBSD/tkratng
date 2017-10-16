@@ -1,7 +1,7 @@
 /*
  * ratDbase.c --
  *
- * TkRat software and its included text is Copyright 1996-2002 by
+ * TkRat software and its included text is Copyright 1996-2004 by
  * Martin Forssén
  *
  * The full text of the legal notice is contained in the file called
@@ -73,7 +73,7 @@
 
 static int isRead = 0;		/* 0 means that the database hasn't been
 				 * read yet */
-static int numRead;		/* The number of entries in the entryPtr list*/
+static int numRead = 0;		/* The number of entries in the entryPtr list*/
 static int numAlloc;		/* The number of entries that will fit
 				 * into the entryPtr list */
 static RatDbEntry *entryPtr;	/* The list of entries in the database */
@@ -86,6 +86,8 @@ static int changeSize = 0;	/* The number of bytes in the index.changes
 static int needRewrite = 0;	/* 1 if we need to rewrite the indexfile */
 static int numChanges = 0;	/* Number of changes in the changes file */
 static int version;		/* Version read */
+static long firstDate = 0;      /* The earliest date in the dbase */
+static long lastDate = 0;       /* The last date in the dbase */
 
 /*
  * This structure is used while checking the dbase
@@ -95,6 +97,11 @@ typedef struct {
     int index;		/* Index in the list that handles this entry */
     RatDbEntry entry;	/* The actual entry in the index file */
 } RatDbItem;
+
+#define SEARCH_ALL           -1
+#define SEARCH_ALL_ADDRESSES -2
+#define SEARCH_TIME_FROM     -3
+#define SEARCH_TIME_TO       -4
 
 /*
  * Forward declarations for procedures defined in this file:
@@ -109,7 +116,6 @@ static void	RatDbBuildList(Tcl_Interp *interp, Tcl_DString *dsPtr,
 	char *prefix, char *dir, Tcl_HashTable *tablePtr, int fix);
 static int	NoLFPrint(FILE *fp, const char *s);
 static void	DbaseConvert3to4(Tcl_Interp *interp);
-
 
 
 /*
@@ -146,6 +152,7 @@ Read(Tcl_Interp *interp)
     FILE *fpIndexinfo;	/* File pointer for index.info file */
     int i, j;		/* Loop variables */
     char *cPtr;		/* Running pointer */
+    long l;             /* Long value */
 
     /*
      * First make sure we know where the database should reside and which
@@ -317,6 +324,13 @@ Read(Tcl_Interp *interp)
 		entryPtr[i].content[EX_TIME] = cpystr(buf);
 		entryPtr[i].content[EX_TYPE] = "backup";
 	    }
+            l = atol(entryPtr[i].content[DATE]);
+            if (l > 0 && (l < firstDate || 0 == firstDate)) {
+                firstDate = l;
+            }
+            if (l > 0 && (l > lastDate || 0 == lastDate)) {
+                lastDate = l;
+            }
 	}
     } else {
 	entryPtr = (RatDbEntry*)ckalloc(EXTRA_ENTRIES * sizeof(RatDbEntry));
@@ -455,6 +469,7 @@ Unlock(Tcl_Interp *interp)
 static int
 Sync(Tcl_Interp *interp, int force)
 {
+    static int stale = 0;  /* Number of stale entries */
     char buf[1024];	   /* Scratch area */
     struct stat sbuf;	   /* Buffer for stat() calls */
     FILE *fpChanges;	   /* index.changes file pointer */
@@ -468,6 +483,7 @@ Sync(Tcl_Interp *interp, int force)
     int indexOffset = 0;   /* Offset of new part of index file */
     char *cPtr;
     int size;
+    long l;
 
     snprintf(buf, sizeof(buf), "%s/index.changes", dbDir);
     if (0 > stat(buf, &sbuf)) {
@@ -586,6 +602,13 @@ Sync(Tcl_Interp *interp, int force)
 		}
 		*cPtr++ = '\0';
 	    }
+            l = atol(entryPtr[numRead].content[DATE]);
+            if (l < firstDate || 0 == firstDate) {
+                firstDate = l;
+            }
+            if (l > lastDate || 0 == lastDate) {
+                lastDate = l;
+            }
 	    numRead++;
 	}
     }
@@ -653,7 +676,8 @@ Sync(Tcl_Interp *interp, int force)
 	    (void)fclose(fpIndex);
 	    if (0 != fclose(fpNewIndex)) {
 		Tcl_AppendResult(interp,"error closing file \"", newIndex,
-			"\": ", Tcl_PosixError(interp), (char *) NULL);
+				 "\": ", Tcl_PosixError(interp),
+				 (char *) NULL);
 		(void)unlink(newIndex);
 		return TCL_ERROR;
 	    }
@@ -663,8 +687,9 @@ Sync(Tcl_Interp *interp, int force)
 			(char *) NULL);
 		return TCL_ERROR;
 	    }
+	    stale = numRead-numEntries;
 	} else {
-	    numEntries = numRead;
+	    numEntries = numRead-stale;
 	}
 	snprintf(buf, sizeof(buf), "%s/index.info", dbDir);
 	if (0 == (fpIndexinfo = fopen(buf, "w"))) {
@@ -688,6 +713,7 @@ Sync(Tcl_Interp *interp, int force)
 		    "\": ", Tcl_PosixError(interp), (char *) NULL);
 	    return TCL_ERROR;
 	}
+	
 	changeSize = 0;
 	numChanges = 0;
 	needRewrite = 0;
@@ -824,15 +850,7 @@ RatDbInsert (Tcl_Interp *interp, const char *to, const char *from,
     FILE *indchaFP;		/* File pointer to the index.changes file */
     Tcl_Channel dataChannel;	/* Data channel */
     ADDRESS *adrPtr;		/* Address list */
-    int mode;			/* Mode to use when creating files */
     int i;
-    Tcl_Obj *oPtr;
-
-    /*
-     * Get file creation mode
-     */
-    oPtr = Tcl_GetVar2Ex(interp, "option", "permissions", TCL_GLOBAL_ONLY);
-    Tcl_GetIntFromObj(interp, oPtr, &mode);
 
     if (0 == isRead) {
 	if (TCL_OK != Read(interp)) {
@@ -962,7 +980,7 @@ RatDbInsert (Tcl_Interp *interp, const char *to, const char *from,
      * Create the actual entry in the database.
      */
     snprintf(buf, sizeof(buf), "%s/dbase/%s", dbDir, fname);
-    if (NULL == (dataChannel = Tcl_OpenFileChannel(interp, buf, "w", mode))) {
+    if (NULL == (dataChannel = Tcl_OpenFileChannel(interp, buf, "w", 0666))) {
 	Tcl_AppendResult(interp, "error creating file \"", buf,
 		"\": ", Tcl_PosixError(interp), (char *) NULL);
 	goto losing;
@@ -1087,12 +1105,15 @@ RatDbSetStatus(Tcl_Interp *interp, int index, char *status)
  *
  *      Searches the database for entries matching the given expression.
  *	The search expression is in the following form:
- *	    op exp [exp ...]
+ *	    [interval] op exp [exp ...]
+ *      Where interval (which is optional) is defined as:
+ *          int start_time end_time
  *	Where op is either "and" or "or". and exp is as follows:
  *	    [not] field value
- *	Where field is one of "to", "from", "cc", "subject", "keywords"
- *	and "all". if op is "and" the all following expressions must be
- *	true but if it is "or" then only one has to be true.
+ *	Where field is one of "to", "from", "cc", "subject", "keywords",
+ *	"all", "time_from" and "time_to". if op is "and" the all following
+ *      expressions must be true but if it is "or" then only one has to bes
+ *      true.
  *
  * Results:
  *      The number of items found is returned in numFoundPtr if it is
@@ -1110,14 +1131,16 @@ RatDbSetStatus(Tcl_Interp *interp, int index, char *status)
 
 int
 RatDbSearch(Tcl_Interp *interp, Tcl_Obj *exp, int *numFoundPtr,
-	    int **foundPtrPtr)
+	    int **foundPtrPtr, int *expError)
 {
     int or;			/* Indicates the operation; 0 = and  1 = or */
     int i, j, k;		/* Loop counters */
-    int match;
+    int match, matchl;
     int numAlloc = 0;		/* Number of entries allocated room for */
     int expNumWords, objc;
     Tcl_Obj **expWords, **objv;
+    long long_value;
+    long time_start, time_end;
     int numExp;			/* The number of subexpressions in the exp */
     char fname[1024];		/* Filename of actual message */
     int bodyfd;			/* File descriptor to actual message */
@@ -1139,21 +1162,40 @@ RatDbSearch(Tcl_Interp *interp, Tcl_Obj *exp, int *numFoundPtr,
 
     /*
      * Parse the expression and build the lists.
+     * We start by being pessimistic and assume the expression is faulty:-)
      */
+    if (expError != NULL) {
+        *expError = 1;
+    }
     if (TCL_OK != Tcl_ListObjGetElements(interp, exp,&expNumWords,&expWords)) {
 	return TCL_ERROR;
     }
-    s = Tcl_GetString(expWords[0]);
-    if (!strcmp(s, "and") && !strcmp(s, "or")) {
-	Tcl_SetResult(interp, "exp must start with \"and\" or \"or\".",
+    i=0;
+    s = Tcl_GetString(expWords[i++]);
+    if (!strcmp(s, "and") && !strcmp(s, "or") && !strcmp(s, "int")) {
+	Tcl_SetResult(interp, "exp must start with 'and', 'or' or 'int'.",
 		TCL_STATIC);
 	return TCL_ERROR;
     }
+    
+    /* These might be sligthly larger than needed, but who cares:-) */
     notPtr = (int*) ckalloc(sizeof(int) * (expNumWords/2));
     fieldPtr = (RatDbEType*) ckalloc(sizeof(RatDbEType) * (expNumWords/2));
     valuePtr = (Tcl_Obj**) ckalloc(sizeof(Tcl_Obj*) * (expNumWords/2));
 
-    expNumWords--;
+    if (!strcmp(s, "int")) {
+        if (expNumWords < 4
+            || TCL_OK != Tcl_GetLongFromObj(interp, expWords[i+0], &time_start)
+            || TCL_OK != Tcl_GetLongFromObj(interp, expWords[i+1], &time_end)){
+            Tcl_SetResult(interp, "syntax error in expression", TCL_STATIC);
+            return TCL_ERROR;
+        }
+        i += 2;
+        s = Tcl_GetString(expWords[i++]);
+    } else {
+        time_start = 0;
+        time_end = 0;
+    }
     if (!strcmp(s, "or")) {
 	or = 1;
     } else {
@@ -1161,13 +1203,11 @@ RatDbSearch(Tcl_Interp *interp, Tcl_Obj *exp, int *numFoundPtr,
     }
 
     numExp = 0;
-    i = 1;
     while (i < expNumWords) {
 	s = Tcl_GetString(expWords[i]);
 	if (!strcmp(s, "not")) {
 	    notPtr[numExp] = 1;
-	    i++;
-	    s = Tcl_GetString(expWords[i]);
+	    s = Tcl_GetString(expWords[++i]);
 	} else {
 	    notPtr[numExp] = 0;
 	}
@@ -1188,7 +1228,13 @@ RatDbSearch(Tcl_Interp *interp, Tcl_Obj *exp, int *numFoundPtr,
 	} else if (!strcmp(s, "keywords")) {
 	    fieldPtr[numExp] = KEYWORDS;
 	} else if (!strcmp(s, "all")) {
-	    fieldPtr[numExp] = -1;
+	    fieldPtr[numExp] = SEARCH_ALL;
+	} else if (!strcmp(s, "all_addresses")) {
+	    fieldPtr[numExp] = SEARCH_ALL_ADDRESSES;
+	} else if (!strcmp(s, "time_from")) {
+	    fieldPtr[numExp] = SEARCH_TIME_FROM;
+	} else if (!strcmp(s, "time_to")) {
+	    fieldPtr[numExp] = SEARCH_TIME_TO;
 	} else {
 	    Tcl_SetResult(interp, "Parse error in exp (illegal field value)",
 		    TCL_STATIC);
@@ -1196,6 +1242,13 @@ RatDbSearch(Tcl_Interp *interp, Tcl_Obj *exp, int *numFoundPtr,
 	}
 	i++;
 	valuePtr[numExp++] = expWords[i++];
+    }
+
+    /*
+     * The expression was good...
+     */
+    if (expError != NULL) {
+        *expError = 0;
     }
 
     /*
@@ -1215,11 +1268,18 @@ RatDbSearch(Tcl_Interp *interp, Tcl_Obj *exp, int *numFoundPtr,
 	if (!entryPtr[i].content[FROM]) {	/* Entry deleted */
 	    continue;
 	}
+        if (time_start != 0) {
+            long_value = atol(entryPtr[i].content[DATE]);
+            if (long_value != 0
+                && ((long_value < time_start) || (long_value > time_end))) {
+                continue;
+            }
+        }
 	match = 0;
 	for(j=0; j < numExp && !(j != 0 && or == match); j++) {
 	    Tcl_ListObjGetElements(interp, valuePtr[j], &objc, &objv);
-	    for (k=0; k<objc && !(k != 0 && or == match); k++) {
-		if (fieldPtr[j] == -1) {
+	    for (k=0, matchl=0; k<objc && 0 == matchl; k++) {
+		if (fieldPtr[j] == SEARCH_ALL) {
 		    snprintf(fname, sizeof(fname), "%s/dbase/%s", dbDir,
 			    entryPtr[i].content[FILENAME]);
 		    if (0 > (bodyfd = open(fname, O_RDONLY))) {
@@ -1241,18 +1301,33 @@ RatDbSearch(Tcl_Interp *interp, Tcl_Obj *exp, int *numFoundPtr,
 		    read(bodyfd, message, sbuf.st_size);
 		    message[sbuf.st_size] = '\0';
 		    (void)close(bodyfd);
-		    match = RatSearch(Tcl_GetString(objv[k]), message);
+		    matchl = RatSearch(Tcl_GetString(objv[k]), message);
+                } else if (fieldPtr[j] == SEARCH_ALL_ADDRESSES) {
+		    matchl = RatSearch(Tcl_GetString(objv[k]),
+                                       entryPtr[i].content[TO])
+                        || RatSearch(Tcl_GetString(objv[k]),
+                                     entryPtr[i].content[CC])
+                        || RatSearch(Tcl_GetString(objv[k]),
+                                     entryPtr[i].content[FROM]);
+                } else if (fieldPtr[j] == SEARCH_TIME_FROM) {
+                    Tcl_GetLongFromObj(interp, objv[k], &long_value);
+                    matchl = atol(entryPtr[i].content[DATE]) >= long_value;
+                } else if (fieldPtr[j] == SEARCH_TIME_TO) {
+                    Tcl_GetLongFromObj(interp, objv[k], &long_value);
+                    matchl = atol(entryPtr[i].content[DATE]) <= long_value;
 		} else {
-		    match = RatSearch(Tcl_GetString(objv[k]),
-				      entryPtr[i].content[fieldPtr[j]]);
-		}
-		if (1 == notPtr[j]) {
-		    match = match ? 0 : 1;
+		    matchl = RatSearch(Tcl_GetString(objv[k]),
+                                       entryPtr[i].content[fieldPtr[j]]);
 		}
 	    }
+            if (1 == notPtr[j]) {
+                match = matchl ? 0 : 1;
+            } else {
+                match = matchl;
+            }
 	}
 
-	if (match) {
+	if (match || (or && 0 == numExp)) {
 	    if (*numFoundPtr >= numAlloc) {
 		numAlloc += EXTRA_ENTRIES;
 		*foundPtrPtr =(int*)ckrealloc(*foundPtrPtr,
@@ -1291,7 +1366,7 @@ losing:
  *
  *      This routine retrieves an entry from the database. The pointer
  *	returned is ONLY good until the next call to RatDbInsert(),
- *	RatDbSetStatus(), RatDbSearch(), RatDbDelete().
+ *	RatDbSetStatus(), RatDbSearch().
  *
  * Results:
  *      The routine returns a pointer to a RatDbEntry structure which
@@ -1406,12 +1481,13 @@ RatDbGetMessage(Tcl_Interp *interp, int index, char **buffer)
 char*
 RatDbGetHeaders(Tcl_Interp *interp, int index)
 {
-    static char *header;	/* Static storage area */
+    static char *header = NULL;	/* Static storage area */
     static int headerSize = 0;	/* Size of static storage area */
     char fname[1024];		/* Filename of message */
     char *hPtr;			/* The header to return */
     FILE *messFp;		/* Message file pointer */
     int length = 0;		/* Length of header */
+    int c;
 
     /*
      * Check the index for validity.
@@ -1438,29 +1514,24 @@ RatDbGetHeaders(Tcl_Interp *interp, int index)
 		fname, "\": ", Tcl_PosixError(interp), (char*)NULL);
 	return NULL;
     }
-    headerSize = 8196;
-    header = (char*)ckalloc(headerSize);
-    while (fgets(header+length, headerSize-length, messFp), !feof(messFp)) {
-	if (header[length] == '\n' || header[length] == '\r') {
-	    if ('\n' == header[length+1]) {
-		length += 2;
-	    } else {
-		length += 1;
-	    }
-	    break;
-	}
-	length += strlen(header+length);
-	if (length >= headerSize-1) {
-	    headerSize += 4096;
-	    header = (char*)ckrealloc(header, headerSize);
-	}
-	if (length >= 2 && header[length-1] == '\n') {
-	    if (header[length-2] != '\r') {
-		header[length-1] = '\r';
-		header[length++] = '\n';
-	    }
-	}
+
+    while (c = fgetc(messFp), !feof(messFp)) {
+        if (length >= headerSize-1) {
+            headerSize += 1024;
+            header = (char*)ckrealloc(header, headerSize);
+        }
+        if ('\n' == c && (length == 0 || header[length-1] != '\r')) {
+            header[length++] = '\r';
+        }
+        header[length++] = c;
+        if (length > 4
+            && header[length-4] == '\r' && header[length-3] == '\n'
+            && header[length-2] == '\r' && header[length-1] == '\n') {
+            length -= 2;
+            break;
+        }
     }
+
     header[length] = '\0';
     fclose(messFp);
     Unlock(interp);
@@ -1560,6 +1631,7 @@ RatDbGetText(Tcl_Interp *interp, int index)
     FILE *messFp;		/* Message file pointer */
     int length = 0;		/* Length of header */
     char buf[2048];		/* Temporary holding area */
+    int c;
 
     /*
      * Check the index for validity.
@@ -1591,91 +1663,21 @@ RatDbGetText(Tcl_Interp *interp, int index)
 	    break;
 	}
     }
-    if (0 == bodySize) {
-	bodySize = 8196;
-	body = (char*)ckalloc(bodySize);
-    }
-    while (fgets(body+length, bodySize-length, messFp), !feof(messFp)) {
-	length += strlen(body+length);
-	if (length >= bodySize-1) {
-	    bodySize += 4096;
-	    body = (char*)ckrealloc(body, bodySize);
-	}
-	if (length >= 2 && body[length-1] == '\n') {
-	    if (body[length-2] != '\r') {
-		body[length-1] = '\r';
-		body[length++] = '\n';
-	    }
-	}
+
+    while (c = fgetc(messFp), !feof(messFp)) {
+        if (length >= bodySize-1) {
+            bodySize += 8192;
+            body = (char*)ckrealloc(body, bodySize);
+        }
+        if ('\n' == c && (length == 0 || body[length-1] != '\r')) {
+            body[length++] = '\r';
+        }
+        body[length++] = c;
     }
     body[length] = '\0';
     fclose(messFp);
     Unlock(interp);
     return body;
-}
-
-
-/*
- *----------------------------------------------------------------------
- *
- * RatDbDelete --
- *
- *      Deletes the specified entry from the database.
- *
- * Results:
- *      The return value is normally TCL_OK; if something goes wrong
- *	TCL_ERROR is returned and an error message will be left in
- *	the result area.
- *
- * Side effects:
- *      Both the internal and the disk copy of the database are affected.
- *	Observer that if some caller has previously retrieved this entry
- *	from the database with a call to RatDbGet() the RatDbEntry
- *	obtained will be destroyed (filled with nulls).
- *
- *----------------------------------------------------------------------
- */
-
-int
-RatDbDelete(Tcl_Interp *interp, int index)
-{
-    char buf[1024];	/* Name of index.changes file */
-    FILE *indexFP;	/* File pointer to index.changes file */
-
-    /*
-     * Check the index for validity.
-     */
-    if (index >= numRead || index < 0) {
-	Tcl_SetResult(interp, "error: the given index is invalid", TCL_STATIC);
-	return TCL_ERROR;
-    }
-
-    Lock(interp);
-
-    snprintf(buf, sizeof(buf), "%s/index.changes", dbDir);
-    if (NULL == (indexFP = fopen(buf, "a"))) {
-	Tcl_AppendResult(interp, "error opening (for append)\"", buf,
-		"\": ", Tcl_PosixError(interp), (char *) NULL);
-	Unlock(interp);
-	return TCL_ERROR;
-    }
-    if (0 > fprintf(indexFP, "d %d\n", index)) {
-	Tcl_AppendResult(interp, "Failed to write to file \"", buf, "\"",
-		(char*) NULL);
-	(void)fclose(indexFP);
-	Unlock(interp);
-	return TCL_ERROR;
-    }
-    if (0 != fclose(indexFP)) {
-	Tcl_AppendResult(interp, "error closing file \"", buf,
-		"\": ", Tcl_PosixError(interp), (char *) NULL);
-	Unlock(interp);
-	return TCL_ERROR;
-    }
-
-    Sync(interp, 0);
-    Unlock(interp);
-    return TCL_OK;
 }
 
 /*
@@ -1810,7 +1812,7 @@ RatDbExpire(Tcl_Interp *interp, char *infolder, char *backupDirectory)
     char *compressProg, *compressSuffix, *statusId;
     const char *backupDir;
     int numScan = 0, numDelete = 0, numBackup = 0, numInbox = 0, numCustom = 0;
-    int i, len, delete, mode, fd, doBackup = 0, changed = 0, error = 0;
+    int i, len, delete, fd, doBackup = 0, changed = 0, error = 0;
     int move;
     char buf[1024], buf2[1024];
     FILE *indexFP = NULL;
@@ -1826,11 +1828,7 @@ RatDbExpire(Tcl_Interp *interp, char *infolder, char *backupDirectory)
 	    return TCL_ERROR;
 	}
     }
-    /*
-     * Get file creation mode
-     */
-    oPtr = Tcl_GetVar2Ex(interp, "option", "permissions", TCL_GLOBAL_ONLY);
-    Tcl_GetIntFromObj(interp, oPtr, &mode);
+
     /*
      * Make sure the inbox directory exists.
      */
@@ -1892,7 +1890,7 @@ RatDbExpire(Tcl_Interp *interp, char *infolder, char *backupDirectory)
 	    numBackup++;
 	    snprintf(buf, sizeof(buf), "%s/dbase/%s",
 		    dbDir, entryPtr[i].content[FILENAME]);
-	    RatGenId(NULL, interp, 0, NULL);
+	    RatGenIdCmd(NULL, interp, 0, NULL);
 	    snprintf(buf2, sizeof(buf2), "%s/message.%s", backupDirectory, 
 		    Tcl_GetStringResult(interp));
 
@@ -1901,7 +1899,7 @@ RatDbExpire(Tcl_Interp *interp, char *infolder, char *backupDirectory)
 	    numInbox++;
 	    snprintf(buf, sizeof(buf), "%s/dbase/%s",
 		    dbDir, entryPtr[i].content[FILENAME]);
-	    RatGenId(NULL, interp, 0, NULL);
+	    RatGenIdCmd(NULL, interp, 0, NULL);
 	    snprintf(buf2, sizeof(buf2), "%s/inbox/%s",
 		    dbDir, Tcl_GetStringResult(interp));
 
@@ -1927,7 +1925,7 @@ RatDbExpire(Tcl_Interp *interp, char *infolder, char *backupDirectory)
 		 * copy them.
 		 */
 		fdSrc = open(buf, O_RDONLY);
-		fdDst = open(buf, O_WRONLY|O_TRUNC|O_CREAT, mode);
+		fdDst = open(buf2, O_WRONLY|O_TRUNC|O_CREAT, 0666);
 		do {
 		    len = read(fdSrc, buf, sizeof(buf));
 		    if (0 > write(fdDst, buf, len)) {
@@ -2089,7 +2087,7 @@ RatDbExpire(Tcl_Interp *interp, char *infolder, char *backupDirectory)
      */
     snprintf(buf, sizeof(buf), "%s/expired", dbDir);
     (void)unlink(buf);
-    if (0 <= (fd = open(buf, O_WRONLY|O_CREAT, mode))) {
+    if (0 <= (fd = open(buf, O_WRONLY|O_CREAT, 0666))) {
 	close(fd);
     }
     Tcl_VarEval(interp, "RatClearLog ", statusId, "; update idletasks",
@@ -2601,7 +2599,8 @@ RatDbCheck(Tcl_Interp *interp, int fix)
 			flags = cpystr(elemArgv[1]);
 		    }
 		} else if (!strcasecmp(elemArgv[0], "date")) {
-		    if (T == mail_parse_date(&elt, (char*)elemArgv[1])) {
+		    if (T == mail_parse_date(&elt,
+                                             (unsigned char*)elemArgv[1])) {
 			tm.tm_sec = elt.seconds;
 			tm.tm_min = elt.minutes;
 			tm.tm_hour = elt.hours;
@@ -2851,4 +2850,47 @@ DbaseConvert3to4(Tcl_Interp *interp)
     ckfree(entryPtr);
 
     RatLog(interp, RAT_INFO, "", RATLOG_EXPLICIT);
+}
+
+/*
+ *----------------------------------------------------------------------
+ *
+ * RatDbInfoCmd --
+ *
+ *	See ../doc/interface for a descriptions of arguments and result.
+ *
+ * Results:
+ *      A standard tcl result.
+ *
+ * Side effects:
+ *      None.
+ *
+ *
+ *----------------------------------------------------------------------
+ */
+
+int
+RatDbaseInfoCmd(ClientData dummy, Tcl_Interp *interp, int objc,
+                Tcl_Obj *const objv[])
+{
+    Tcl_Obj *robjv[3];
+
+    if (0 == isRead) {
+	if (TCL_OK != Read(interp)) {
+	    goto losing;
+	}
+    } else {
+	if (TCL_OK != Sync(interp, 0)) {
+	    goto losing;
+	}
+    }
+
+    robjv[0] = Tcl_NewLongObj(numRead);
+    robjv[1] = Tcl_NewLongObj(firstDate);
+    robjv[2] = Tcl_NewLongObj(lastDate);
+    Tcl_SetObjResult(interp, Tcl_NewListObj(3, robjv));
+    return TCL_OK;
+
+ losing:
+    return TCL_ERROR;
 }

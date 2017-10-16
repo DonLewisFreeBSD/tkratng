@@ -1,5 +1,5 @@
 #############################################################################
-# TkRat software and its included text is Copyright 1996-2002 by            #
+# TkRat software and its included text is Copyright 1996-2004 by            #
 # Martin Forssén.                                                           #
 #                                                                           #
 # The full text of the legal notice is contained in the file called         #
@@ -68,38 +68,48 @@ CFLAGS = ${TK_DEFS} ${EXTRA_CFLAGS} -I${C_CLIENT} ${FIX_INCLUDE} ${INCLUDES} \
 	 ${SHLIB_CFLAGS} -DVERSION=\"${VERSION}\"
 C_CLIENT_LIB = ${C_CLIENT}/c-client.a
 RATLIB = ratatosk${RATLIB_SUFFIX}
+RATOLDLIB = ratold${RATLIB_SUFFIX}
 DUMMYLIB = ratDummy${SHLIB_SUFFIX}
 
 HEADERS = rat.h ratFolder.h ratPGP.h ratStdFolder.h
 SRC = ratAppInit.c ratFolder.c ratStdFolder.c ratMessage.c ratCode.c \
       ratAddress.c ratDbase.c ratDbFolder.c ratStdMessage.c ratDbMessage.c \
-      ratFrMessage.c ratSMTP.c ratDSN.c ratHold.c ratSender.c ratExp.c \
+      ratFrMessage.c ratSender.c ratExp.c ratSequence.c \
       ratMailcap.c ratCompat.c ratPGP.c ratPGPprog.c ratPwCache.c \
-      ratDisFolder.c ratPrint.c ratWatchdog.c ratBusy.c
+      ratDisFolder.c ratPrint.c ratWatchdog.c ratBusy.c ratAddrList.c \
+      ratMsgList.c
 OBJ = ${SRC:.c=.o}
+OLDSRC = ratHold.c
+OLDOBJ = ${OLDSRC:.c=.o}
 
-all: ${RATLIB} pkgIndex.tcl
+all: ${RATLIB} ${RATOLDLIB} pkgIndex.tcl
 
 clean:
-	rm -f ${OBJ} ${RATLIB} ratDummy.o ${DUMMYLIB} core pkgIndex.tcl
+	rm -f ${OBJ} ${OLDOBJ} ${RATLIB} ${RATOLDLIB} ratDummy.o \
+		${DUMMYLIB} core pkgIndex.tcl
 
 ${RATLIB}: ${OBJ} ${C_CLIENT_LIB}
 	${SHLIB_LD} -o ${RATLIB} ${OBJ} ${C_CLIENT_LIB} $(EXTRA_LIBS) ${SHLIB_LD_LIBS}
 
+${RATOLDLIB}: ${OLDOBJ}
+	${SHLIB_LD} -o ${RATOLDLIB} ${OLDOBJ} $(EXTRA_LIBS) ${SHLIB_LD_LIBS}
+
 ${DUMMYLIB}: ratDummy.o
 	${SHLIB_LD} -o ${DUMMYLIB} ratDummy.o $(EXTRA_LIBS) ${SHLIB_LD_LIBS}
 
-pkgIndex.tcl: ${RATLIB} ${DUMMYLIB}
+pkgIndex.tcl: ${RATLIB} ${RATOLDLIB} ${DUMMYLIB}
 	echo "if [catch {load ./${DUMMYLIB}; \
 			 load ./${RATLIB}; \
-			 pkg_mkIndex . ${RATLIB}} error] \
+			 load ./${RATOLDLIB}; \
+			 pkg_mkIndex . ${RATLIB} ${RATOLDLIB}} error] \
 		  {puts \$$error; exit 1}" | ${TCLSH}
 
-install.bin: ${RATLIB} ${DUMMYLIB}
+install.bin: ${RATLIB} ${RATOLDLIB} ${DUMMYLIB}
 	if test ! -d ${INSTALL_PREFIX}${LIB_DIR} ; then\
 	    ${INSTALL} -m 0755 -d ${INSTALL_PREFIX}${LIB_DIR} ;\
 	fi
 	${INSTALL} -m 0755 ${RATLIB} ${INSTALL_PREFIX}${LIB_DIR}/${RATLIB}
+	${INSTALL} -m 0755 ${RATOLDLIB} ${INSTALL_PREFIX}${LIB_DIR}/${RATOLDLIB}
 	INST=${INSTALL_PREFIX}${LIB_DIR}; \
 	    echo "if [catch {load ./${DUMMYLIB}; \
 		     cd $$INST; \
@@ -139,7 +149,6 @@ ratPGPprog.o:	ratPGPprog.c ratFolder.h rat.h ../config.h ratPGP.h ${MD}
 ratPrint.o:	ratPrint.c ratFolder.h rat.h ../config.h ${MD}
 ratPwCache.o:	ratPwCache.c rat.h ../config.h ${MD} \
                 ../imap/c-client/env_unix.h
-ratSMTP.o:	ratSMTP.c rat.h ../config.h ${MD}
 ratSender.o:	ratSender.c ratFolder.h rat.h ../config.h ratPGP.h ${MD}
 ratStdFolder.o: ratStdFolder.c ratStdFolder.h ratFolder.h rat.h ../config.h \
                 ${MD} ../imap/c-client/linkage.c

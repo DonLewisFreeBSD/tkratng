@@ -4,7 +4,7 @@
  *	This file contains basic support for decoding and encoding of
  *	strings coded in various MIME-encodings.
  *
- * TkRat software and its included text is Copyright 1996-2002 by
+ * TkRat software and its included text is Copyright 1996-2004 by
  * Martin Forssén
  *
  * The full text of the legal notice is contained in the file called
@@ -32,9 +32,23 @@ static char alphabet64[66] =
 static char modified64[66] =
 	   "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+,=";
 
+/*
+ * Characters which causes encoding of parameter values
+ */
+static char *tspecials = " ()<>@,;:\\\"[]./?=\1\2\3\4\5\6\7\10\11\12\13"
+                         "\14\15\16\17\20\21\22\23\24\25\26\27\30\31\32"
+                         "\33\34\35\36\37\177";
+
+/*
+ * Characters valid withi an rfc2047 encoded word
+ */
+static const char *rfc2047valid = "abcdefghijklmnopqrstuvwxyz!*+-/=_"
+                                  "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789";
+
 #define RFC2047_MAX_LINE_LENGTH 75
 #define RFC2047_MAX_ENCODED_WORD_LENGTH 75
 
+static int HexValue(unsigned char c);
 static int FindMimeHdr(Tcl_Interp *interp, unsigned char *hdr,
 	unsigned char **sPtr, unsigned char **ePtr, Tcl_Encoding *encoding,
 	int *code, unsigned char **data, int *length);
@@ -45,7 +59,38 @@ static int RatCheckEncoding(Tcl_Interp *interp, char *encoding_name,
 static int CreateEncWord(Tcl_Interp *interp, Tcl_Encoding enc,
 			 const char *charset, unsigned char *raw, int length,
 			 Tcl_DString *dest, int maxUse);
+static Tcl_Encoding FindEncoding(Tcl_Interp *interp, char *string,
+				  char const **charset);
+static PARAMETER *RatRFC2231EncodeParameters(Tcl_Interp *interp,
+					     PARAMETER *inparam);
 
+
+/*
+ *----------------------------------------------------------------------
+ *
+ * HexValue --
+ *
+ *      Get the hex value of the given character
+ *
+ * Results:
+ *	Returns the hex value
+ *
+ * Side effects:
+ *	None
+ *
+ *----------------------------------------------------------------------
+ */
+static int
+HexValue(unsigned char c)
+{
+    if (c >= '0' && c <= '9') {
+	return c - '0';
+    }
+    if (c >= 'A' && c <= 'F') {
+	return c - 'A' + 10;
+    }
+    return c - 'a' + 10;
+}
 
 /*
  *----------------------------------------------------------------------
@@ -175,7 +220,7 @@ RatDecodeHeader(Tcl_Interp *interp, const char *data, int adr)
 	    } else {
 		for (i=0; i<sPtr-point; i++) {
 		    if ('\n' != point[i]) {
-			Tcl_DStringAppend(&ds, &point[i], 1);
+			Tcl_DStringAppend(&ds, (char*)&point[i], 1);
 		    }
 		}
 	    }
@@ -189,14 +234,12 @@ RatDecodeHeader(Tcl_Interp *interp, const char *data, int adr)
 	if (ENCBASE64 == code) {
 	    decoded = rfc822_base64(text, length, &dlen);
 	} else {
-	    decoded = (char*)ckalloc(length+1);
+	    decoded = (unsigned char*)ckalloc(length+1);
 	    for (dlen=0, cPtr=text; cPtr-text < length; cPtr++) {
 		if ('_' == *cPtr) {
 		    decoded[dlen++] = ' ';
 		} else if ('=' == *cPtr) {
-		    decoded[dlen++] =
-			    ((strchr(alphabetHEX, cPtr[1])-alphabetHEX)<<4) +
-			     (strchr(alphabetHEX, cPtr[2])-alphabetHEX);
+		    decoded[dlen++] = (HexValue(cPtr[1])<<4)+HexValue(cPtr[2]);
 		    cPtr += 2;
 		} else {
 		    decoded[dlen++] = *cPtr;
@@ -204,7 +247,7 @@ RatDecodeHeader(Tcl_Interp *interp, const char *data, int adr)
 	    }
 	    decoded[dlen] = '\0';
 	}
-	Tcl_ExternalToUtfDString(encoding, decoded, dlen, &tmp);
+	Tcl_ExternalToUtfDString(encoding, (char*)decoded, dlen, &tmp);
 	ckfree(decoded);
 	Tcl_DStringAppend(&ds,
 			  Tcl_DStringValue(&tmp), Tcl_DStringLength(&tmp));
@@ -296,10 +339,8 @@ RatDecode(Tcl_Interp *interp, int cte, const char *data, int length,
 		    } else if ('\n' == data[dataIndex+1]) {
 			dataIndex += 2;
 		    } else {
-			buf[srcLength++] = 16*(strchr(alphabetHEX,
-				data[dataIndex+1])-alphabetHEX)
-				+ strchr(alphabetHEX,
-				data[dataIndex+2])-alphabetHEX;
+			buf[srcLength++] = (HexValue(data[dataIndex+1])<<4)
+			    + HexValue(data[dataIndex+2]);
 			dataIndex += 3;
 		    }
 		} else {
@@ -357,8 +398,7 @@ static int
 CreateEncWord(Tcl_Interp *interp, Tcl_Encoding enc, const char *charset,
 	      unsigned char *raw, int length, Tcl_DString *dest, int maxUse)
 {
-    unsigned char buf[RFC2047_MAX_ENCODED_WORD_LENGTH+1],
-	buf2[RFC2047_MAX_ENCODED_WORD_LENGTH+1];
+    unsigned char buf[1024], buf2[1024];
     Tcl_EncodingState state;
     int i, consumed, wrote, d;
     
@@ -367,7 +407,7 @@ CreateEncWord(Tcl_Interp *interp, Tcl_Encoding enc, const char *charset,
      */
     for (i=0; i<length && raw[i] < 0x80; i++);
     if (i == length) {
-	Tcl_DStringAppend(dest, raw, length);
+	Tcl_DStringAppend(dest, (char*)raw, length);
 	return 1;
     }
 
@@ -381,9 +421,9 @@ CreateEncWord(Tcl_Interp *interp, Tcl_Encoding enc, const char *charset,
     /*
      * Try to convert to external encoding
      */
-    if (TCL_OK != Tcl_UtfToExternal(interp, enc, raw, length,
+    if (TCL_OK != Tcl_UtfToExternal(interp, enc, (char*)raw, length,
 				    TCL_ENCODING_START|TCL_ENCODING_END,
-				    &state, buf2, sizeof(buf2),
+				    &state, (char*)buf2, sizeof(buf2),
 				    &consumed, &wrote, NULL)
 	|| consumed != length) {
 	return 0;
@@ -392,15 +432,11 @@ CreateEncWord(Tcl_Interp *interp, Tcl_Encoding enc, const char *charset,
     /*
      * Convert into quoted-printable, check that we have room all the time
      */
-    snprintf(buf, sizeof(buf), "=?%s?Q?", charset);
-    for (i=0, d=strlen(buf); i<wrote && d < maxUse-2; i++) {
+    snprintf((char*)buf, sizeof(buf), "=?%s?Q?", charset);
+    for (i=0, d=strlen((char*)buf); i<wrote && d < maxUse-2; i++) {
 	if (' ' == buf2[i]) {
 	    buf[d++] = '_';
-	} else if (buf2[i] & 0x80
-	    || !isprint(buf2[i])
-	    || '=' == buf2[i]
-	    || '_' == buf2[i]
-	    || '?' == buf2[i]) {
+	} else if (!strchr(rfc2047valid, buf2[i])) {
 	    if (d+3 >= maxUse-2) {
 		return 0;
 	    }
@@ -416,7 +452,7 @@ CreateEncWord(Tcl_Interp *interp, Tcl_Encoding enc, const char *charset,
     }
     buf[d++] = '?';
     buf[d++] = '=';
-    Tcl_DStringAppend(dest, buf, d);
+    Tcl_DStringAppend(dest, (char*)buf, d);
     return 1;
 
 }
@@ -431,8 +467,8 @@ CreateEncWord(Tcl_Interp *interp, Tcl_Encoding enc, const char *charset,
  *	characters. This is so that the line folding can do its job properly.
  *
  * Results:
- *	A block of encoded header line. THis block of data will be valid
- *      until the next call to thius function.
+ *	A block of encoded header line. This block of data will be valid
+ *      until the next call to this function.
  *
  * Side effects:
  *	None.
@@ -446,8 +482,7 @@ RatEncodeHeaderLine (Tcl_Interp *interp, Tcl_Obj *line, int nameLength)
 {
     static Tcl_DString ds;
     static int initialized = 0;
-    Tcl_Obj **objv;
-    int i, objc, l, l1, pre = nameLength, maxUse;
+    int l, l1, pre = nameLength, maxUse;
     char *s;
     const char *charset;
     Tcl_Encoding enc;
@@ -463,26 +498,8 @@ RatEncodeHeaderLine (Tcl_Interp *interp, Tcl_Obj *line, int nameLength)
 	Tcl_DStringSetLength(&ds, 0);
     }
 
-    /*
-     * Find suitable encoding
-     */
-    Tcl_ListObjGetElements(interp,
-			   Tcl_GetVar2Ex(interp, "option",
-					 "charset_candidates",
-					 TCL_GLOBAL_ONLY),
-			   &objc, &objv);
-    s = Tcl_GetStringFromObj(line, &l);
-    for (i=0; i<objc; i++) {
-	if (RatCheckEncoding(interp, Tcl_GetString(objv[i]), s, l)) {
-	    break;
-	}
-    }
-    if (i<objc) {
-	charset = Tcl_GetString(objv[i]);
-    } else {
-	charset = Tcl_GetVar2(interp, "option", "charset", TCL_GLOBAL_ONLY);
-    }
-    enc = RatGetEncoding(interp, charset);
+    s = Tcl_GetString(line);
+    enc = FindEncoding(interp, s, &charset);
 
     /*
      * Do while we have characters left to consume
@@ -492,7 +509,7 @@ RatEncodeHeaderLine (Tcl_Interp *interp, Tcl_Obj *line, int nameLength)
      *    - If no new canididate is found switch to test every character
      */
     while (*s) {
-	if (strlen(s)+pre <= RFC2047_MAX_LINE_LENGTH) {
+	if ((int)strlen(s)+pre <= RFC2047_MAX_LINE_LENGTH) {
 	    l = strlen(s);
 	} else {
 	    for (l = RFC2047_MAX_LINE_LENGTH-pre; l>0 && !isspace(s[l]); l--);
@@ -501,7 +518,8 @@ RatEncodeHeaderLine (Tcl_Interp *interp, Tcl_Obj *line, int nameLength)
 	    }
 	}
 	maxUse = RFC2047_MAX_LINE_LENGTH-pre;
-	while (!CreateEncWord(interp, enc, charset, s, l, &ds, maxUse)) {
+	while (!CreateEncWord(interp, enc, charset, (unsigned char*)s,
+                              l, &ds, maxUse)) {
 	    for (l1 = l-1; l1 > 0 && !isspace(s[l1]); l1--);
 	    if (0 < l1) {
 		l = l1;
@@ -512,7 +530,7 @@ RatEncodeHeaderLine (Tcl_Interp *interp, Tcl_Obj *line, int nameLength)
 	}
 	s += l;
 	if (*s) {
-	    Tcl_DStringAppend(&ds, "\r\n", 2);
+	    Tcl_DStringAppend(&ds, "\n", 1);
 	    for (pre=0; isspace(*s) && pre<RFC2047_MAX_LINE_LENGTH; s++,pre++){
 		Tcl_DStringAppend(&ds, s, 1);
 	    }
@@ -548,17 +566,23 @@ void
 RatEncodeAddresses(Tcl_Interp *interp, ADDRESS *adrPtr)
 {
     Tcl_Obj *oPtr;
-    char *cPtr;
+    char *c;
 
     while (adrPtr) {
 	if (adrPtr->personal) {
-	    for (cPtr = adrPtr->personal; *cPtr; cPtr++) {
-		if (*cPtr & 0x80) {
+            c = adrPtr->personal;
+            if (c[0] == c[strlen(c)-1] && (*c == '"'  || *c == '\'')) {
+                memmove(c, c+1, strlen(c));
+                c[strlen(c)-1] = '\0';
+            }
+	    for (c = adrPtr->personal; *c; c++) {
+		if (*c & 0x80) {
 		    oPtr = Tcl_NewStringObj(adrPtr->personal, -1);
-		    cPtr = RatEncodeHeaderLine(interp, oPtr, 0);
+		    Tcl_IncrRefCount(oPtr);
+		    c = RatEncodeHeaderLine(interp, oPtr, 0);
 		    Tcl_DecrRefCount(oPtr);
 		    ckfree(adrPtr->personal);
-		    adrPtr->personal = cpystr(cPtr);
+		    adrPtr->personal = cpystr(c);
 		}
 	    }
 	}
@@ -597,7 +621,7 @@ RatGetEncoding(Tcl_Interp *interp, const char *name)
     }
 
     strlcpy(lname, name, sizeof(lname));
-    lcase(lname);
+    lcase((unsigned char*)lname);
     tclName = Tcl_GetVar2(interp, "charsetMapping", lname, TCL_GLOBAL_ONLY);
     if (NULL == tclName) {
 	tclName = lname;
@@ -684,6 +708,9 @@ RatCheckEncodingsCmd(ClientData dummy, Tcl_Interp *interp, int objc,
 	return TCL_ERROR;
     }
     vPtr = Tcl_GetVar2Ex(interp, Tcl_GetString(objv[1]), NULL, 0);
+    if (NULL == vPtr) {
+        goto done;
+    }
     Tcl_ListObjLength(interp, objv[2], &listLength);
     src = Tcl_GetStringFromObj(vPtr, &srcLen);
     for (i=0; i<listLength; i++) {
@@ -693,6 +720,7 @@ RatCheckEncodingsCmd(ClientData dummy, Tcl_Interp *interp, int objc,
 	    return TCL_OK;
 	}
     }
+ done:
     Tcl_SetResult(interp, "", TCL_STATIC);
     return TCL_OK;
 }
@@ -1020,7 +1048,7 @@ RatEncodeQP(const unsigned char *line)
 {
     Tcl_DString *ds = (Tcl_DString*)ckalloc(sizeof(*ds));
     const unsigned char *c;
-    unsigned char buf[4];
+    char buf[4];
 
     Tcl_DStringInit(ds);
     for (c=line; *c; c++) {
@@ -1028,7 +1056,7 @@ RatEncodeQP(const unsigned char *line)
 	    snprintf(buf, sizeof(buf), "=%02X", *c);
 	    Tcl_DStringAppend(ds, buf, 3);
 	} else {
-	    Tcl_DStringAppend(ds, c, 1);
+	    Tcl_DStringAppend(ds, (char*)c, 1);
 	}
     }
     return ds;
@@ -1065,7 +1093,7 @@ RatEncodeQPCmd(ClientData dummy, Tcl_Interp *interp, int objc,
 
     enc = Tcl_GetEncoding(interp, Tcl_GetString(objv[1]));
     Tcl_UtfToExternalDString(enc, Tcl_GetString(objv[2]), -1, &ext);
-    encoded = RatEncodeQP(Tcl_DStringValue(&ext));
+    encoded = RatEncodeQP((unsigned char*)Tcl_DStringValue(&ext));
     Tcl_DStringFree(&ext);
     Tcl_DStringResult(interp, encoded);
     Tcl_FreeEncoding(enc);
@@ -1099,8 +1127,7 @@ RatDecodeQP(unsigned char *line)
     d = s = line;
     while (*s) {
 	if ('=' == *s && isxdigit(s[1]) && isxdigit(s[2])) {
-	    *d++ = ((strchr(alphabetHEX, s[1])-alphabetHEX)<<4) +
-		(strchr(alphabetHEX, s[2])-alphabetHEX);
+	    *d++ = (HexValue(s[1])<<4) + HexValue(s[2]);
 	    s += 3;
 	} else {
 	    *d++ = *s++;
@@ -1142,12 +1169,348 @@ RatDecodeQPCmd(ClientData dummy, Tcl_Interp *interp, int objc,
 
     enc = Tcl_GetEncoding(interp, Tcl_GetString(objv[1]));
     text = cpystr(Tcl_GetString(objv[2]));
-    RatDecodeQP(text);
+    RatDecodeQP((unsigned char*)text);
     Tcl_ExternalToUtfDString(enc, text, -1, &utf);
     ckfree(text);
     Tcl_DStringResult(interp, &utf);
     Tcl_FreeEncoding(enc);
     return TCL_OK;
+}
+
+/*
+ *----------------------------------------------------------------------
+ *
+ * RatRFC2231EncodeParameter --
+ *
+ *	Encodes a parameter according to rfc2231
+ *
+ * Results:
+ *      None
+ *
+ * Side effects:
+ *      Modifies the parameter list 
+ *
+ *
+ *----------------------------------------------------------------------
+ */
+
+static PARAMETER*
+RatRFC2231EncodeParameters(Tcl_Interp *interp, PARAMETER *inparam)
+{
+    Tcl_DString value;
+    int encoded = 0, is_long = 0, i, l;
+    char *v = inparam->value, buf[1024], *key, *old_value;
+    unsigned char *c;
+
+    /* Check for non us-ascii characters */
+    for (c = (unsigned char*)v; *c && *c<128; c++);
+
+    if (*c) {
+	Tcl_Encoding enc;
+	Tcl_DString external;
+	const char *charset;
+	
+	Tcl_DStringInit(&value);
+	encoded = 1;
+	
+	enc = FindEncoding(interp, inparam->value, &charset);
+	Tcl_DStringAppend(&value, charset, -1);
+	Tcl_DStringAppend(&value, "''", 2);
+
+	Tcl_UtfToExternalDString(enc, v, strlen(v), &external);
+	for (c=(unsigned char*)Tcl_DStringValue(&external); *c; c++) {
+	    if (*c > 128 || strchr(tspecials, *c)) {
+		snprintf(buf, sizeof(buf), "%%%02X", *c);
+		Tcl_DStringAppend(&value, buf, 3);
+	    } else {
+		Tcl_DStringAppend(&value, (char*)c, 1);
+	    }
+	}
+	Tcl_DStringFree(&external);
+	v = Tcl_DStringValue(&value);
+    }
+
+    /* Check for long value */
+    if (strlen(inparam->attribute) + strlen(inparam->value) > 72) {
+	is_long = 1;
+    }
+
+    /* No changes? */
+    if (!encoded && !is_long) {
+	return inparam;
+    }
+
+    /* Only encoded? */
+    if (!is_long) {
+	l = strlen(inparam->attribute)+2;
+	key = ckalloc(l);
+	strlcpy(key, inparam->attribute, l);
+	strlcat(key, "*", l);
+	ckfree(inparam->attribute);
+	inparam->attribute = key;
+	ckfree(inparam->value);
+	inparam->value = cpystr(v);
+	Tcl_DStringFree(&value);
+	return inparam;
+    }
+
+    /* Needs length wrapping */
+    i = 0;
+    key = inparam->attribute;
+    l = 72 - strlen(key);
+    inparam->attribute = NULL;
+    old_value = inparam->value;
+    while(1) {
+	if (inparam->attribute) {
+	    PARAMETER *n = (PARAMETER*)ckalloc(sizeof(PARAMETER));
+	    n->next = inparam->next;
+	    inparam->next = n;
+	    inparam = n;
+	}
+	snprintf(buf, sizeof(buf), "%s*%d%s", key, i++, (encoded?"*":""));
+	inparam->attribute = cpystr(buf);
+	if (strlen(v) > l) {
+	    inparam->value = (char*)ckalloc(l+1);
+	    memcpy(inparam->value, v, l);
+	    inparam->value[l] = '\0';
+	    v += l;
+	} else {
+	    inparam->value = cpystr(v);
+	    break;
+	}
+    }
+    ckfree(key);
+    ckfree(old_value);
+
+    if (encoded) {
+	Tcl_DStringFree(&value);
+    }
+    return inparam;
+}
+
+/*
+ *----------------------------------------------------------------------
+ *
+ * RatEncodeParameters --
+ *
+ *	Encode parameters according to the current settings.
+ *
+ * Results:
+ *      None
+ *
+ * Side effects:
+ *      Modifies the parameter list 
+ *
+ *
+ *----------------------------------------------------------------------
+ */
+
+void
+RatEncodeParameters(Tcl_Interp *interp, PARAMETER *inparam)
+{
+    Tcl_Obj *oPtr;
+    PARAMETER *p;
+    char *enc_mode;
+
+    oPtr = Tcl_GetVar2Ex(interp, "option", "parm_enc", TCL_GLOBAL_ONLY);
+    enc_mode = Tcl_GetString(oPtr);
+
+    for (p = inparam; p; p = p->next) {
+	int is_long = 0;
+	char *v = p->value;
+	unsigned char *c;
+
+	/* Check for non us-ascii characters and length */
+	for (c = (unsigned char*)v; *c && *c<128; c++);
+	if (strlen(p->attribute) + strlen(p->value) > 72) {
+	    is_long = 1;
+	}
+
+	if (*c && !strcmp("rfc2047", enc_mode)) {
+	    oPtr = Tcl_NewStringObj(p->value, -1);
+	    v = RatEncodeHeaderLine (interp, oPtr, 0);
+	    ckfree(p->value);
+	    p->value = cpystr(v);
+	    Tcl_DecrRefCount(oPtr);
+
+	} else if ((*c || is_long) && !strcmp("rfc2231", enc_mode)) {
+	    p = RatRFC2231EncodeParameters(interp, p);
+
+	} else if ((*c || is_long) && !strcmp("both", enc_mode)) {
+	    PARAMETER *p2 = mail_newbody_parameter();
+	    p2->attribute = cpystr(p->attribute);
+	    p2->value = p->value;
+	    p2->next = p->next;
+	    p->next = p2;
+
+	    if (*c) {
+		oPtr = Tcl_NewStringObj(p->value, -1);
+		/* The -1000 is a kludge to avoid line breaks */
+		v = RatEncodeHeaderLine (interp, oPtr, -1000);
+		p->value = cpystr(v);
+		Tcl_DecrRefCount(oPtr);
+	    } else {
+		p->value = cpystr(p->value);
+	    }
+	    
+	    p = p2;
+	    p = RatRFC2231EncodeParameters(interp, p);
+	}
+    }
+}
+
+
+/*
+ *----------------------------------------------------------------------
+ *
+ * FindEncoding --
+ *
+ *	Find a suitable encoding
+ *
+ * Results:
+ *      The encoding
+ *
+ * Side effects:
+ *      None
+ *
+ *
+ *----------------------------------------------------------------------
+ */
+static Tcl_Encoding
+FindEncoding(Tcl_Interp *interp, char *string, char const **charset)
+{
+    Tcl_Obj **objv;
+    int objc, i;
+	
+    Tcl_ListObjGetElements(interp,
+			   Tcl_GetVar2Ex(interp, "option",
+					 "charset_candidates",
+					 TCL_GLOBAL_ONLY),
+			   &objc, &objv);
+    for (i=0; i<objc; i++) {
+	if (RatCheckEncoding(interp, Tcl_GetString(objv[i]), string,
+			     strlen(string))) {
+	    break;
+	}
+    }
+    if (i<objc) {
+	*charset = Tcl_GetString(objv[i]);
+    } else {
+	*charset = Tcl_GetVar2(interp, "option", "charset", TCL_GLOBAL_ONLY);
+    }
+    return RatGetEncoding(interp, *charset);
+}
+
+
+/*
+ *----------------------------------------------------------------------
+ *
+ * RatDecodeParameters --
+ *
+ *	Decode parameters encoded according to rfc2231, or as a fallback
+ *      parameters which are encoded according to rfc2047 (which is illegal
+ *      but common).
+ *
+ * Results:
+ *      None
+ *
+ * Side effects:
+ *      Modifies the parameter list 
+ *
+ *
+ *----------------------------------------------------------------------
+ */
+void
+RatDecodeParameters(Tcl_Interp *interp, PARAMETER *inparam)
+{
+    PARAMETER *p;
+    int encoded, value_used;
+    Tcl_RegExp exp = Tcl_RegExpCompile(interp, "^[^\\*]+(\\*[0-9]+)?(\\*)?$");
+    CONST84 char *start, *end, *v;
+    Tcl_DString value;
+
+    for (p = inparam; p; p = p->next) {
+	value_used = 0;
+	if (NULL == strchr(p->attribute, '*')
+	    || !Tcl_RegExpExec(interp, exp, p->attribute, p->attribute)) {
+	    v = RatDecodeHeader(interp, p->value, 0);
+	    if (strcmp(v, p->value)) {
+		ckfree(p->value);
+		p->value = cpystr(v);
+	    }
+	    continue;
+	}
+	Tcl_RegExpRange(exp, 2, &start, &end);
+	encoded = (start != NULL);
+	Tcl_RegExpRange(exp, 1, &start, &end);
+	
+	/*
+	 * Join the parts of a broken value
+	 */
+	if (start != NULL) {
+	    Tcl_DStringInit(&value);
+	    value_used = 1;
+	    Tcl_DStringAppend(&value, p->value, -1);
+	    while (p->next
+		   && NULL != strchr(p->next->attribute, '*')
+		   && Tcl_RegExpExec(interp, exp, p->next->attribute,
+				     p->next->attribute)
+		   && (Tcl_RegExpRange(exp, 1, &start, &end), 1)
+		   && '0' != start[1]) {
+		PARAMETER *pn = p->next;
+		Tcl_DStringAppend(&value, pn->value, -1);
+		p->next = pn->next;
+		ckfree(pn->value);
+		ckfree(pn->attribute);
+		ckfree(pn);
+	    }
+	} else if (encoded) {
+	    Tcl_DStringInit(&value);
+	    Tcl_DStringAppend(&value, p->value, -1);
+	}
+
+	/*
+	 * Decode encoded values
+	 */
+	if (encoded) {
+	    Tcl_Encoding enc = NULL;
+	    unsigned char *s, *d, *b;
+	    
+	    if (!value_used) {
+		Tcl_DStringInit(&value);
+		Tcl_DStringAppend(&value, p->value, -1);
+		value_used = 1;
+	    }
+	    b = d = (unsigned char*)ckalloc(Tcl_DStringLength(&value)+1);
+	    for (s = (unsigned char*)Tcl_DStringValue(&value);
+                 *s && '\'' != *s; s++);
+	    if ('\'' == *s) {
+		*s = '\0';
+		enc = RatGetEncoding(interp, Tcl_DStringValue(&value));
+		for (s++; *s && '\'' != *s; s++);
+		if (*s)	s++;
+		while (*s) {
+		    if ('%' == *s && s[1] && s[2]) {
+			*d++ = (HexValue(s[1])<<4) + HexValue(s[2]);
+			s += 3;
+		    } else {
+			*d++ = *s++;
+		    }
+		}
+		*d = '\0';
+		Tcl_DStringFree(&value);
+		Tcl_ExternalToUtfDString(enc,(char*)b,strlen((char*)b),&value);
+		ckfree(b);
+	    }
+	}
+
+	if (value_used) {
+	    *strchr(p->attribute, '*') = '\0';
+	    ckfree(p->value);
+	    p->value = cpystr(Tcl_DStringValue(&value));
+	    Tcl_DStringFree(&value);
+	}
+    }
 }
 
 /*

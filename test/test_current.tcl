@@ -4,7 +4,7 @@ namespace eval test_current {
 }
 
 proc test_current::test_current {} {
-    global LEAD errors verbose option env
+    global verbose option env
 
     # Setup option(domain) and find out data
     set old_domain $option(domain)
@@ -45,25 +45,22 @@ proc test_current::test_current {} {
     # Do tests
     foreach case $tests {
 	set r [lindex $case 0]
+	StartTest "Current with role $r"
 	set v [RatGetCurrent host $r]
 	if {"[lindex $case 4]" != $v} {
-	    puts "$LEAD case '$r' host was '$v' expected '[lindex $case 4]'"
-	    incr errors
+	    ReportError "Host was '$v' expected '[lindex $case 4]'"
 	}
 	set v [RatGetCurrent mailbox $r]
 	if {"[lindex $case 5]" != $v} {
-	    puts "$LEAD case '$r' mailbox was '$v' expected '[lindex $case 5]'"
-	    incr errors
+	    ReportError "Mailbox was '$v' expected '[lindex $case 5]'"
 	}
 	set v [RatGetCurrent personal $r]
 	if {"[lindex $case 6]" != $v} {
-	    puts "$LEAD case '$r' personal was '$v' expected '[lindex $case 6]'"
-	    incr errors
+	    ReportError "Personal was '$v' expected '[lindex $case 6]'"
 	}
 	set v [RatGetCurrent smtp_helo $r]
 	if {"[lindex $case 7]" != $v} {
-	    puts "$LEAD case '$r' smtp_helo was '$v' expected '[lindex $case 7]'"
-	    incr errors
+	    ReportError "Smtp_helo was '$v' expected '[lindex $case 7]'"
 	}
     }
 

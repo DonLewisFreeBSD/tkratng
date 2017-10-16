@@ -9,7 +9,6 @@ namespace eval test_disoffline {
 }
 
 proc test_disoffline::verify_map {mf map} {
-    global LEAD
     foreach e $map {
 	set expected($e) 1
     }
@@ -18,22 +17,19 @@ proc test_disoffline::verify_map {mf map} {
 	file copy -force $mf /tmp/map
 	while {-1 != [gets $f line]} {
 	    if {[catch {unset expected($line)}]} {
-		puts "$LEAD Did not expect [list $line]"
 		close $f
-		return 0
+		return "Did not expect [list $line]"
 	    }
 	}
 	close $f
     }
     if {0 != [array size expected]} {
-	puts "$LEAD Did not find [list [array names expected]]"
-	return 0
+	return "Did not find [list [array names expected]]"
     }
-    return 1
+    return ""
 }
 
 proc test_disoffline::dis_verify {f map name {diff 0}} {
-    global LEAD errors
     variable uidmap
 
     set expected_map $uidmap
@@ -41,13 +37,12 @@ proc test_disoffline::dis_verify {f map name {diff 0}} {
 
     set i [lindex [$f info] 1]
     if {$num != $i} {
-	puts "$LEAD $name: Found $i messages expected $num"
-	incr errors
+	ReportError "$name: found $i messages expected $num"
+	return
     }
-    if {![verify_map $map $expected_map]} {
-	puts "$LEAD $name: map verify failed"
-	puts "$LEAD $uidmap"
-	incr errors
+    set err [verify_map $map $expected_map]
+    if {"" != $err} {
+	ReportError "$name: map verify failed\n$uidmap\n$err"
     }
 }
 
@@ -77,7 +72,7 @@ proc test_disoffline::remove_from_uidmap {index} {
 }
 
 proc test_disoffline::test_disoffline {} {
-    global option dir hdr errors mailServer LEAD imap_def dis_def imap_map \
+    global option dir hdr mailServer imap_def dis_def imap_map \
 	    msg1 msg2 msg3 msg4 msg5 msg6 msg7 msg8 msg9 msg10 \
 	    msg11 msg12 msg13 msg14 msg15 msg16 msg17 msg18 msg19
 
@@ -90,20 +85,20 @@ proc test_disoffline::test_disoffline {} {
     init_imap_folder $imap_def
     insert_imap $imap_def $msg1
 
-    puts "Test opening"
+    StartTest "opening"
     set f [RatOpenFolder $dis_def]
     dis_verify $f $imap_map "Initial"
-    puts "Test update after open"
+    StartTest "update after open"
     $f update update
     dis_verify $f $imap_map "After first update"
 
-    puts "Test update after netsync"
+    StartTest "update after netsync"
     $f netsync
     $f update update
     add_to_uidmap
     dis_verify $f $imap_map "After netsync"
 
-    puts "Test new mail arrival"
+    StartTest "new mail arrival"
     insert_imap $imap_def $msg2
     $f update update
     dis_verify $f $imap_map "Before netsync"
@@ -112,7 +107,7 @@ proc test_disoffline::test_disoffline {} {
     $f update sync
     dis_verify $f $imap_map "After 1 new message"
 
-    puts "Test multiple new messages"
+    StartTest "multiple new messages"
     insert_imap $imap_def $msg3 $msg4
     add_to_uidmap
     add_to_uidmap
@@ -120,14 +115,14 @@ proc test_disoffline::test_disoffline {} {
     $f update update
     dis_verify $f $imap_map "After 2 new messages"
 
-    puts "Test deleting message"
+    StartTest "deleting message"
     $f setFlag 1 deleted 1
     $f update sync
     $f netsync
     remove_from_uidmap 1
     dis_verify $f $imap_map "After deleting"
 
-    puts "Test new message and one deleted"
+    StartTest "new message and one deleted"
     $f setFlag 1 deleted 1
     remove_from_uidmap 1
     insert_imap $imap_def $msg5
@@ -136,7 +131,7 @@ proc test_disoffline::test_disoffline {} {
     add_to_uidmap
     dis_verify $f $imap_map "After new & deleted"
 
-    puts "Test inserting one message"
+    StartTest "inserting one message"
     set fh [open $tmpfn w]
     puts $fh $hdr
     puts $fh $msg6
@@ -152,7 +147,7 @@ proc test_disoffline::test_disoffline {} {
     add_to_uidmap
     dis_verify $f $imap_map "After inserting"
 
-    puts "Test inserting one message two times (different)"
+    StartTest "inserting one message two times (different)"
     set fh [open $tmpfn w]
     puts $fh $msg7
     puts $fh $msg8
@@ -169,7 +164,7 @@ proc test_disoffline::test_disoffline {} {
     $f update sync
     dis_verify $f $imap_map "After inserting one two times"
 
-    puts "Test inserting two messages"
+    StartTest "inserting two messages"
     set fh [open $tmpfn w]
     puts $fh $msg9
     puts $fh $msg10
@@ -185,7 +180,7 @@ proc test_disoffline::test_disoffline {} {
     $f update sync
     dis_verify $f $imap_map "After inserting two"
 
-    puts "Test deleting inserted directly"
+    StartTest "deleting inserted directly"
     set n [lindex [$f info] 1]
     set fh [open $tmpfn w]
     puts $fh $msg11
@@ -202,28 +197,25 @@ proc test_disoffline::test_disoffline {} {
     remove_from_uidmap $n
     dis_verify $f $imap_map "After immediately deleted inserted"
 
-    puts "Test flagging"
+    StartTest "flagging"
     set option(cache_conn) 0
     $f netsync
     set f2 [RatOpenFolder $imap_def]
     $f2 setFlag 0 flagged 1
     if {0 != [$f getFlag 0 flagged]} {
 	$f2 close
-	puts "$LEAD Flag set before it was expected to be"
-	incr errors
+        ReportError "Flag set before it was expected to be"
     } else {
 	$f2 close
 	$f netsync
 	dis_verify $f $imap_map "After setting flag"
 	if {1 != [$f getFlag 0 flagged]} {
-	    puts "$LEAD Flag not set after sync"
-	    incr errors
-	    exit 0
+	    ReportError "Flag not set after sync"
 	}
     }
     set option(cache_conn) 1
 
-    puts "Test resetting folder"
+    StartTest "resetting folder"
     set num [lindex [$f info] 1]
     for {set i 0} {$i < $num} {incr i} {
 	$f setFlag $i deleted 1

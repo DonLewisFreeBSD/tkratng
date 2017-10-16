@@ -3,7 +3,7 @@
  *
  *      This file contains code which implements standard c-client folders.
  *
- * TkRat software and its included text is Copyright 1996-2002 by
+ * TkRat software and its included text is Copyright 1996-2004 by
  * Martin Forssén
  *
  * The full text of the legal notice is contained in the file called
@@ -98,17 +98,19 @@ RatDbFolderCreate(Tcl_Interp *interp, Tcl_Obj *defPtr)
 {
     RatFolderInfo *infoPtr;
     DbFolderInfo *dbPtr;
-    int *listPtr, number, i, objc, eobjc;
+    int *listPtr, number, i, objc, eobjc, expError;
     RatDbEntry *entryPtr;
     Tcl_Obj **objv, **eobjv;
 
     Tcl_ListObjGetElements(interp, defPtr, &objc, &objv);
     
     Tcl_IncrRefCount(objv[5]);
-    if (TCL_OK != RatDbSearch(interp, objv[5], &number, &listPtr)) {
+    if (TCL_OK != RatDbSearch(interp, objv[5], &number, &listPtr, &expError)) {
 	Tcl_DecrRefCount(objv[5]);
-	RatLogF(interp, RAT_ERROR, "dbase_error", RATLOG_TIME,
-		Tcl_GetStringResult(interp));
+        if (!expError) {
+            RatLogF(interp, RAT_ERROR, "dbase_error", RATLOG_TIME,
+                    Tcl_GetStringResult(interp));
+        }
 	Tcl_ResetResult(interp);
 	Tcl_AppendResult(interp, "Failed to search dbase \"",
 		Tcl_GetString(objv[5]), "\"", (char *) NULL);
@@ -251,7 +253,7 @@ static int
 Db_UpdateProc(RatFolderInfoPtr infoPtr, Tcl_Interp *interp, RatUpdateType mode)
 {
     DbFolderInfo *dbPtr = (DbFolderInfo *) infoPtr->private;
-    int *listPtr, number, numNew, i;
+    int *listPtr, number, numNew, i, expError;
     RatDbEntry *entryPtr;
 
     if (RAT_SYNC == mode) {
@@ -287,16 +289,19 @@ Db_UpdateProc(RatFolderInfoPtr infoPtr, Tcl_Interp *interp, RatUpdateType mode)
 
     numNew = 0;
     if (RAT_SYNC == mode || RAT_UPDATE == mode) {
-	if (TCL_OK != RatDbSearch(interp, dbPtr->searchExpr,&number,&listPtr)){
-	    RatLogF(interp, RAT_ERROR, "dbase_error", RATLOG_TIME,
-		    Tcl_GetStringResult(interp));
+	if (TCL_OK != RatDbSearch(interp, dbPtr->searchExpr, &number,
+                                  &listPtr, &expError)){
+            if (!expError) {
+                RatLogF(interp, RAT_ERROR, "dbase_error", RATLOG_TIME,
+                        Tcl_GetStringResult(interp));
+            }
 	    Tcl_ResetResult(interp);
 	    Tcl_AppendResult(interp, "Failed to search dbase \"",
 		    Tcl_GetString(dbPtr->searchExpr), "\"", (char *) NULL);
 	    return -1;
 	}
-	for (i=0 ; number == infoPtr->number
-		&& i<number
+	for (i=0 ; i < infoPtr->number
+		&& i < number
 		&& listPtr[i] == dbPtr->listPtr[i];
 		i++);
 	if (i != number || i != infoPtr->number) {
@@ -308,7 +313,7 @@ Db_UpdateProc(RatFolderInfoPtr infoPtr, Tcl_Interp *interp, RatUpdateType mode)
 	    ckfree(dbPtr->infoPtr);
 	    ckfree(dbPtr->listPtr);
 	    dbPtr->listPtr = listPtr;
-	    numNew = infoPtr->number - number;
+	    numNew = number - infoPtr->number;
 	    infoPtr->number = number;
 	    dbPtr->infoPtr = (Tcl_Obj**)
 		    ckalloc(sizeof(Tcl_Obj*)*number*RAT_FOLDER_END);
@@ -320,10 +325,10 @@ Db_UpdateProc(RatFolderInfoPtr infoPtr, Tcl_Interp *interp, RatUpdateType mode)
 	infoPtr->unseen = 0;
 	for (i=0; i<infoPtr->number; i++) {
 	    entryPtr = RatDbGetEntry(dbPtr->listPtr[i]);
-	    if (!strchr(entryPtr->content[RAT_FOLDER_STATUS], 'O')) {
+	    if (!strchr(entryPtr->content[STATUS], 'O')) {
 		infoPtr->recent++;
 	    }
-	    if (!strchr(entryPtr->content[RAT_FOLDER_STATUS], 'R')) {
+	    if (!strchr(entryPtr->content[STATUS], 'R')) {
 		infoPtr->unseen++;
 	    }
 	}
@@ -385,40 +390,55 @@ Db_InsertProc(RatFolderInfoPtr infoPtr, Tcl_Interp *interp, int argc,
  *----------------------------------------------------------------------
  */
 static int
-Db_SetFlagProc(RatFolderInfoPtr infoPtr, Tcl_Interp *interp, int index,
-	RatFlag flag, int value)
+Db_SetFlagProc(RatFolderInfoPtr infoPtr, Tcl_Interp *interp, int *ilist,
+	       int count, RatFlag flag, int value)
 {
     DbFolderInfo *dbPtr = (DbFolderInfo *) infoPtr->private;
-    RatDbEntry *entryPtr = RatDbGetEntry(dbPtr->listPtr[index]);
+    RatDbEntry *entryPtr;
     char newStatus[5];
-    int flagArray[4] = {0,0,0,0};
-    int dst, i;
+    int dst, i, j;
 
-    for (i=0; entryPtr->content[STATUS][i]; i++) {
-	switch(entryPtr->content[STATUS][i]) {
+    for (i=0; i<count; i++) {
+	int flagArray[RAT_FLAG_END];
+        memset(flagArray, 0, sizeof(flagArray));
+	entryPtr = RatDbGetEntry(dbPtr->listPtr[ilist[i]]);
+	for (j=0; entryPtr->content[STATUS][j]; j++) {
+	    switch(entryPtr->content[STATUS][j]) {
 	    case 'R':	flagArray[RAT_SEEN] = 1; break;
 	    case 'D':	flagArray[RAT_DELETED] = 1; break;
 	    case 'F':	flagArray[RAT_FLAGGED] = 1; break;
 	    case 'A':	flagArray[RAT_ANSWERED] = 1; break;
 	    case 'T':	flagArray[RAT_DRAFT] = 1; break;
 	    case 'O':	flagArray[RAT_RECENT] = 1; break;
+	    }
+	}
+	if (RAT_SEEN == flag && flagArray[RAT_SEEN] != value) {
+	    if (value) {
+		infoPtr->unseen--;
+	    } else {
+		infoPtr->unseen++;
+	    }
+	}
+	flagArray[flag] = value;
+	dst = 0;
+	if (flagArray[RAT_SEEN]) { newStatus[dst++] = 'R'; }
+	if (flagArray[RAT_DELETED]) { newStatus[dst++] = 'D'; }
+	if (flagArray[RAT_FLAGGED]) { newStatus[dst++] = 'F'; }
+	if (flagArray[RAT_ANSWERED]) { newStatus[dst++] = 'A'; }
+	if (flagArray[RAT_DRAFT]) { newStatus[dst++] = 'T'; }
+	if (flagArray[RAT_RECENT]) { newStatus[dst++] = 'O'; }
+	newStatus[dst] = '\0';
+	j = ilist[i]*RAT_FOLDER_END+RAT_FOLDER_STATUS;
+	if (dbPtr->infoPtr[j]) {
+	    Tcl_DecrRefCount(dbPtr->infoPtr[j]);
+	    dbPtr->infoPtr[j] = NULL;
+	}
+	if (TCL_OK !=
+	    RatDbSetStatus(interp, dbPtr->listPtr[ilist[i]], newStatus)) {
+	    return TCL_ERROR;
 	}
     }
-    flagArray[flag] = value;
-    dst = 0;
-    if (flagArray[RAT_SEEN]) { newStatus[dst++] = 'R'; }
-    if (flagArray[RAT_DELETED]) { newStatus[dst++] = 'D'; }
-    if (flagArray[RAT_FLAGGED]) { newStatus[dst++] = 'F'; }
-    if (flagArray[RAT_ANSWERED]) { newStatus[dst++] = 'A'; }
-    if (flagArray[RAT_DRAFT]) { newStatus[dst++] = 'T'; }
-    if (flagArray[RAT_RECENT]) { newStatus[dst++] = 'O'; }
-    newStatus[dst] = '\0';
-    i = index*RAT_FOLDER_END+RAT_FOLDER_STATUS;
-    if (dbPtr->infoPtr[i]) {
-	Tcl_DecrRefCount(dbPtr->infoPtr[i]);
-	dbPtr->infoPtr[i] = NULL;
-    }
-    return RatDbSetStatus(interp, dbPtr->listPtr[index], newStatus);
+    return TCL_OK;
 }
 
 
@@ -580,7 +600,7 @@ Db_InfoProcInt(Tcl_Interp *interp, RatFolderInfo *infoPtr,
 	if (type == RAT_FOLDER_INDEX) {
 	    Tcl_GetIntFromObj(interp,
 		    dbPtr->infoPtr[rIndex*RAT_FOLDER_END+type], &i);
-	    if (i < infoPtr->visible
+	    if (i < infoPtr->number
 		&& dbIndex == dbPtr->listPtr[infoPtr->presentationOrder[i]]) {
 		return dbPtr->infoPtr[rIndex*RAT_FOLDER_END+type];
 	    }
@@ -612,6 +632,11 @@ Db_InfoProcInt(Tcl_Interp *interp, RatFolderInfo *infoPtr,
 		Tcl_DStringAppend(&ds, ": ", 2);
 		GetAddressInfo(interp, &ds, entryPtr->content[TO], Db_Name);
 	    }
+	    oPtr = Tcl_NewStringObj(Tcl_DStringValue(&ds), -1);
+	    break;
+	case RAT_FOLDER_ANAME:
+	    Tcl_DStringSetLength(&ds, 0);
+	    GetAddressInfo(interp, &ds, entryPtr->content[FROM],Db_Name);
 	    oPtr = Tcl_NewStringObj(Tcl_DStringValue(&ds), -1);
 	    break;
 	case RAT_FOLDER_MAIL_REAL:
@@ -669,7 +694,7 @@ Db_InfoProcInt(Tcl_Interp *interp, RatFolderInfo *infoPtr,
 	case RAT_FOLDER_DATE_F:
 	    time = atoi(entryPtr->content[DATE]);
 	    tmPtr = localtime(&time);
-	    oPtr = RatFormatDate(interp, tmPtr->tm_mon, tmPtr->tm_mday);
+	    oPtr = RatFormatDate(interp, tmPtr);
 	    break;
 	case RAT_FOLDER_DATE_N:
 	    oPtr = Tcl_NewStringObj(entryPtr->content[DATE], -1);
@@ -748,14 +773,16 @@ Db_InfoProcInt(Tcl_Interp *interp, RatFolderInfo *infoPtr,
 	case RAT_FOLDER_INDEX:
 	    for (i=0; i < infoPtr->number; i++) {
 		if (dbIndex == dbPtr->listPtr[infoPtr->presentationOrder[i]]) {
-		    sprintf(buf, "%d", i+1);
-		    oPtr = Tcl_NewStringObj(buf, -1);
+		    oPtr = Tcl_NewIntObj(i+1);
 		    break;
 		}
 	    }
 	    if (i == infoPtr->number) {
-		oPtr = Tcl_NewStringObj("1", 1);
+		oPtr = Tcl_NewIntObj(1);
 	    }
+	    break;
+	case RAT_FOLDER_UID:
+	    oPtr = Tcl_NewIntObj(dbIndex);
 	    break;
 	case RAT_FOLDER_TO:
 	    oPtr = Tcl_NewStringObj(entryPtr->content[TO], -1);

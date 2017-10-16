@@ -4,7 +4,7 @@
  *      Declarations for things used internally by the Ratatosk
  *      procedures but not exported outside the module.
  *
- * TkRat software and its included text is Copyright 1996-2002 by
+ * TkRat software and its included text is Copyright 1996-2004 by
  * Martin Forssén
  *
  * The full text of the legal notice is contained in the file called
@@ -123,8 +123,8 @@
 #   endif /* TCL_MAJOR_VERSION == 8 && TCL_MINOR_VERSION >= 2 */
 #endif /* TCL_MEM_DEBUG */
 
-#define FILEMODE 0600		/* The mode of created files */
-#define DIRMODE 0700		/* The mode of created directories */
+#define FILEMODE 0666		/* The mode of created files */
+#define DIRMODE 0777		/* The mode of created directories */
 
 /*
  * The structure returned by RatDbGet which describes an entry in the
@@ -156,7 +156,7 @@ typedef struct RatFolderInfo *RatFolderInfoPtr;
  * Current data
  */
 typedef enum {
-    RAT_HOST, RAT_MAILBOX, RAT_PERSONAL, RAT_HELO
+    RAT_HOST, RAT_MAILBOX, RAT_EMAILADDRESS, RAT_PERSONAL, RAT_HELO
 } RatCurrentType;
 
 /*
@@ -165,14 +165,20 @@ typedef enum {
 typedef void *SMTPChannel;
 
 /*
- * A DSN handle
- */
-typedef void *DSNhandle;
-
-/*
  * Hexadecimal characters
  */
 extern char alphabetHEX[17];
+
+/*
+ * This is used by the sender child process to indicate that logging should
+ * be done though its own special function
+ */
+extern int is_sender_child;
+
+/*
+ * Password to use for SMTP authentication
+ */
+extern char *smtp_passwd;
 
 /* ratAppInit.c */
 extern Tcl_Interp *timerInterp;
@@ -186,8 +192,6 @@ extern void RatLogF (Tcl_Interp *interp, RatLogLevel level, char *tag,
 	RatLogType type, ...);
 extern Tcl_Obj *RatMangleNumber(int number);
 extern int RatSearch (char *searchFor, char *searchIn);
-extern long RatTclPuts (void *stream_x, char *string);
-extern long RatStringPuts (void *stream_x, char *string);
 extern long RatDelaySoutr (void *stream_x, char *string);
 extern void RatInitDelayBuffer ();
 extern int RatTranslateWrite(Tcl_Channel channel, CONST84 char *charbuf,
@@ -195,38 +199,27 @@ extern int RatTranslateWrite(Tcl_Channel channel, CONST84 char *charbuf,
 extern MESSAGE *RatParseMsg (Tcl_Interp *interp, unsigned char *message);
 extern int RatIsEmpty (const char *string);
 extern int RatEncodingCompat (Tcl_Interp *interp, char *wanted, char *avail);
-extern char* RatLindex (Tcl_Interp *interp, const char *list, int index);
-extern Tcl_ObjCmdProc RatGenId;
-extern Tcl_Obj *RatFormatDate(Tcl_Interp *interp, int month, int day);
+extern Tcl_ObjCmdProc RatGenIdCmd;
+extern Tcl_Obj *RatFormatDate(Tcl_Interp *interp, struct tm *tm);
 extern int RatGetTimeZone(unsigned long currentTime);
 extern void RatDStringApendNoCRLF(Tcl_DString *ds, const char *s, int length);
-extern unsigned char *RatReadFile(Tcl_Interp *interp, const char *filename,
-			    unsigned long *length, int convert_to_crlf);
 extern CONST84 char *RatGetPathOption(Tcl_Interp *interp, char *name);
-
-
-/* ratHold.c */
-extern Tcl_ObjCmdProc RatHold;
-extern int RatHoldInsert(Tcl_Interp *interp, const char *dir,
-			 char *handler, const char *description);
-extern int RatHoldList(Tcl_Interp *interp, const char *dir,
-		       Tcl_Obj *fileListPtr);
-extern int RatHoldExtract(Tcl_Interp *interp, const char *prefix,
-			  Tcl_Obj *usedArraysPtr, Tcl_Obj *filesPtr);
-extern void RatHoldInitVars(Tcl_Interp *interp);
-extern void RatHoldUpdateVars(Tcl_Interp *interp, const char *dir, int diff);
+extern CONST84 char *RatTranslateFileName(Tcl_Interp *interp,
+					  CONST84 char *name);
+extern char *RatReadAndCanonify(Tcl_Interp *interp, char *filename,
+				unsigned long *size, int canonify);
+extern void RatCanonalize(Tcl_DString *ds);
+extern char* RatGenId();
 
 /* RatSender.c */
-extern void RatSender(Tcl_Interp *interp);
-extern char *RatSendPGPCommand(char *cmd);
+extern void RatNudgeSender(Tcl_Interp *interp);
+extern void RatSenderLog(const char *logcmd);
 
 /* ratFolder.c */
 extern int RatFolderInit (Tcl_Interp *interp);
+extern Tcl_TimerProc RatFolderUpdateTime;
 
 /* ratStdFolder.c */
-extern void AppendToIMAP(Tcl_Interp *interp, const char *mailbox,
-			 const char *flags, const char *date, const char *msg,
-			 int length);
 extern void ClearStdPasswds(int freethem);
 extern Tcl_ObjCmdProc RatCheckEncodingsCmd;
 
@@ -245,25 +238,23 @@ extern Tcl_DString* RatEncodeQP(const unsigned char *line);
 extern Tcl_ObjCmdProc RatEncodeQPCmd;
 extern unsigned char *RatDecodeQP(unsigned char *line);
 extern Tcl_ObjCmdProc RatDecodeQPCmd;
+extern void RatEncodeParameters(Tcl_Interp *interp, PARAMETER *p);
+extern void RatDecodeParameters(Tcl_Interp *interp, PARAMETER *p);
 
 /* ratAddress.c */
-extern Tcl_HashTable aliasTable;
-extern Tcl_ObjCmdProc RatCreateAddressCmd;
-extern Tcl_ObjCmdProc RatAddress;
-extern void RatInitAddresses (Tcl_Interp *interp, ADDRESS *addressPtr);
-extern Tcl_CmdDeleteProc RatDeleteAddress;
-extern int RatAddressIsMe (Tcl_Interp *interp, ADDRESS *adrPtr, int trustUser);
-extern int RatAddressCompare (ADDRESS *adr1Ptr, ADDRESS* adr2Ptr);
-extern void RatAddressTranslate (Tcl_Interp *interp, ADDRESS *adrPtr);
-extern Tcl_ObjCmdProc RatAliasCmd;
-extern void RatAddressTranslate (Tcl_Interp *interp, ADDRESS *adrPtr);
+extern void RatInitAddressHandling(Tcl_Interp *interp);
+extern void RatInitAddresses(Tcl_Interp *interp, ADDRESS *addressPtr);
+extern int RatAddressIsMe(Tcl_Interp *interp, ADDRESS *adrPtr, int trustUser);
+extern int RatAddressCompare(ADDRESS *adr1Ptr, ADDRESS* adr2Ptr);
+extern void RatAddressTranslate(Tcl_Interp *interp, ADDRESS *adrPtr);
+extern void RatAddressTranslate(Tcl_Interp *interp, ADDRESS *adrPtr);
 extern char *RatAddressMail(ADDRESS *adrPtr);
-extern Tcl_ObjCmdProc RatSplitAddresses;
+extern char *RatAddressFull(Tcl_Interp *interp, ADDRESS *adrPtr, char *role);
 extern size_t RatAddressSize(ADDRESS *adrPtr, int all);
 extern void RatGenerateAddresses(Tcl_Interp *interp, const char *role,
 				 char *msgh, ADDRESS **from, ADDRESS **sender);
-extern Tcl_ObjCmdProc RatGenerateAddressesCmd;
 extern CONST84 char *RatFindCharInHeader(CONST84 char *header, char m);
+extern void RatInitAddessHandling(Tcl_Interp *interp);
 
 /* ratDbase.c */
 extern int RatDbInsert (Tcl_Interp *interp, const char *to, const char *from,
@@ -273,49 +264,26 @@ extern int RatDbInsert (Tcl_Interp *interp, const char *to, const char *from,
 			const char *fromline, const char *mail, int length);
 extern int RatDbSetStatus (Tcl_Interp *interp, int index, char *status);
 extern int RatDbSearch (Tcl_Interp *interp, Tcl_Obj *exp, int *numFoundPtr,
-	int **foundPtrPtr);
+	int **foundPtrPtr, int *expError);
 extern RatDbEntry *RatDbGetEntry (int index);
 extern MESSAGE *RatDbGetMessage (Tcl_Interp *interp, int index, char **bufPtr);
 extern char *RatDbGetHeaders (Tcl_Interp *interp, int index);
 extern char *RatDbGetFrom(Tcl_Interp *interp, int index);
 extern char *RatDbGetText (Tcl_Interp *interp, int index);
-extern int RatDbDelete (Tcl_Interp *interp, int index);
 extern int RatDbExpunge (Tcl_Interp *interp);
 extern int RatDbDaysSinceExpire (Tcl_Interp *interp);
 extern int RatDbExpire (Tcl_Interp *interp, char *infolder,
 	char *backupDirectory);
 extern void RatDbClose(void);
 extern int RatDbCheck(Tcl_Interp *interp, int fix);
-
-/* ratSMTP.c */
-extern SMTPChannel RatSMTPOpen (Tcl_Interp *interp, char *host, int verbose,
-				const char *role);
-extern void RatSMTPClose (Tcl_Interp *interp, SMTPChannel channel,int verbose);
-extern void RatSMTPCloseAll (Tcl_Interp *interp, int verbose);
-extern int RatSMTPSend (Tcl_Interp *interp, SMTPChannel channel,
-	ENVELOPE *envelopePtr, BODY *bodyPtr, int requestDSN, int verbose);
-extern Tcl_ObjCmdProc RatSMTPSupportDSN;
-extern long RatTclPutsSMTP (void *stream_x, char *string);
-extern long RatTclPutsSendmail (void *stream_x, char *string);
-extern size_t RatHeaderSize(ENVELOPE *env,BODY *body);
-
-/* ratDSN.c */
-extern int RatDSNInit (Tcl_Interp *interp);
-extern DSNhandle RatDSNStartMessage (Tcl_Interp *interp, const char *id,
-				     const char *subject);
-extern void RatDSNAddRecipient (Tcl_Interp *interp, DSNhandle handle,
-	char *recipient);
-extern void RatDSNAbort (Tcl_Interp *interp, DSNhandle handle);
-extern void RatDSNFinish (Tcl_Interp *interp, DSNhandle handle);
-extern int RatDSNHandle (Tcl_Interp *interp, char *msg);
-extern int RatDSNExtract (Tcl_Interp *interp, Tcl_Obj *body);
+extern Tcl_ObjCmdProc RatDbaseInfoCmd;
 
 /* ratMessage.c */
 extern int RatMessageGetHeader(Tcl_Interp *interp, char *srcHeader);
 Tcl_Obj *RatWrapMessage(Tcl_Interp *interp, Tcl_Obj *oPtr);
 
 /* ratMailcap.c */
-extern Tcl_ObjCmdProc RatMailcapReload;
+extern Tcl_ObjCmdProc RatMailcapReloadCmd;
 
 /* ratCompat.c */
 #ifndef HAVE_SNPRINTF
@@ -336,7 +304,7 @@ extern void RatPasswdCachePurge(Tcl_Interp *interp, int disk_also);
 extern Tcl_ObjCmdProc RatPasswdCachePurgeCmd;
 
 /* ratPrint.c */
-extern Tcl_ObjCmdProc RatPrettyPrintMsg;
+extern Tcl_ObjCmdProc RatPrettyPrintMsgCmd;
 
 /* ratWatchdog.c */
 extern void RatReleaseWatchdog(const char *tmpdir);
@@ -345,5 +313,17 @@ extern void RatReleaseWatchdog(const char *tmpdir);
 extern void RatSetBusy(Tcl_Interp *interp);
 extern void RatClearBusy(Tcl_Interp *interp);
 extern Tcl_ObjCmdProc RatBusyCmd;
+
+/* ratAddrList.c */
+extern Tcl_ObjCmdProc RatGetMatchingAddrsImplCmd;
+
+/* ratSequence.c */
+typedef void *rat_sequence_t;
+extern rat_sequence_t RatSequenceInit(void);
+extern void RatSequenceAdd(rat_sequence_t seq, unsigned long no);
+extern int RatSequenceNotempty(rat_sequence_t seq);
+extern char *RatSequenceGet(rat_sequence_t seq);
+extern void RatSequenceFree(rat_sequence_t seq);
+extern Tcl_ObjCmdProc RatCreateSequenceCmd;
 
 #endif /* _RAT_H */

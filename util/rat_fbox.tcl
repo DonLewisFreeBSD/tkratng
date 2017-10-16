@@ -1,7 +1,7 @@
 # tkfbox.tcl --
 #       This is a special version of the tk file selection box. It has been
 #       subject to the following modifications:
-#	- There is a new argument -mode (open, save, anyopen, dirok)
+#	- There is a new argument -mode (open, save, dirok)
 #       - There is a new argument -ok which sets the text of the ok button
 #       - The file and cancel texts are fetched from the global variables
 #         t(file) and t(cancel)
@@ -20,7 +20,7 @@
 #	files by clicking on the file icons or by entering a filename
 #	in the "Filename:" entry.
 #
-# RCS: @(#) $Id: rat_fbox.tcl,v 1.24 2002/01/01 14:19:34 maf Exp $
+# RCS: @(#) $Id: rat_fbox.tcl,v 1.33 2005-07-03 19:04:05 maf Exp $
 #
 # Copyright (c) 1994-1998 Sun Microsystems, Inc.
 #
@@ -130,6 +130,9 @@ proc ratIconList_Create {w} {
 
     bind $data(canvas) <FocusIn>	[list ratIconList_FocusIn $w]
 
+    bind $data(canvas) <Destroy>        "catch {unset $w}; \
+                                         catch {unset ${w}_itemList}; \
+                                         catch {unset ${w}_textList}"
     return $w
 }
 
@@ -710,28 +713,15 @@ proc rat_fbox::run {args} {
 
     rat_fbox::updateWhenIdle $w
 
-    # Withdraw the window, then update all the geometry information
-    # so we know how big it wants to be, then center the window in the
-    # display and de-iconify it.
-
-    wm withdraw $w
-    update idletasks
-    set x [expr {[winfo screenwidth $w]/2 - [winfo reqwidth $w]/2 \
-	    - [winfo vrootx [winfo parent $w]]}]
-    set y [expr {[winfo screenheight $w]/2 - [winfo reqheight $w]/2 \
-	    - [winfo vrooty [winfo parent $w]]}]
-    wm geom $w [winfo reqwidth $w]x[winfo reqheight $w]+$x+$y
-    wm title $w $data(-title)
-    wm transient $w $data(-parent)
-    wm deiconify $w
+    upvar \#0 $data(icons) icons
+    ::tkrat::winctl::SetGeometry fbox $w $icons(canvas)
 
     # Set a grab and claim the focus too.
 
-    ModalGrab $w $data(ent)
+    ::tkrat::winctl::ModalGrab $w $data(ent)
     $data(ent) delete 0 end
     $data(ent) insert 0 $data(selectFile)
-    $data(ent) select from 0
-    $data(ent) select to   end
+    $data(ent) selection range 0 end
     $data(ent) icursor end
 
     trace variable data(selectPath) w "rat_fbox::setPath $w"
@@ -753,6 +743,7 @@ proc rat_fbox::run {args} {
 		    [linsert [lreplace $previous $i $i] 0 $dir] 0 10]
 	}
     }
+    ::tkrat::winctl::RecordGeometry fbox $w $icons(canvas)
     destroy $w
 
     return $state(selectFilePath)
@@ -831,7 +822,7 @@ proc rat_fbox::config {dataName argList} {
 
 	set old $start_dir
 	cd $data(selectPath)
-	set data(selectPath) $start_dir
+	set data(selectPath) [pwd]
 	cd $old
     }
     set data(selectFile) $data(-initialfile)
@@ -865,15 +856,16 @@ proc rat_fbox::create {w} {
     set data(upBtn) [button $f1.up]
     if {![info exists state(updirImage)]} {
 	set state(updirImage) [image create bitmap -data {
-#define updir_width 28
-#define updir_height 16
-static char updir_bits[] = {
-   0x00, 0x00, 0x00, 0x00, 0x80, 0x1f, 0x00, 0x00, 0x40, 0x20, 0x00, 0x00,
-   0x20, 0x40, 0x00, 0x00, 0xf0, 0xff, 0xff, 0x01, 0x10, 0x00, 0x00, 0x01,
-   0x10, 0x02, 0x00, 0x01, 0x10, 0x07, 0x00, 0x01, 0x90, 0x0f, 0x00, 0x01,
-   0x10, 0x02, 0x00, 0x01, 0x10, 0x02, 0x00, 0x01, 0x10, 0x02, 0x00, 0x01,
-   0x10, 0xfe, 0x07, 0x01, 0x10, 0x00, 0x00, 0x01, 0x10, 0x00, 0x00, 0x01,
-   0xf0, 0xff, 0xff, 0x01};}]
+            #define updir_width 28
+            #define updir_height 16
+            static char updir_bits[] = {
+                0x00, 0x00, 0x00, 0x00, 0x80, 0x1f, 0x00, 0x00, 0x40, 0x20,
+                0x00, 0x00, 0x20, 0x40, 0x00, 0x00, 0xf0, 0xff, 0xff, 0x01,
+                0x10, 0x00, 0x00, 0x01, 0x10, 0x02, 0x00, 0x01, 0x10, 0x07,
+                0x00, 0x01, 0x90, 0x0f, 0x00, 0x01, 0x10, 0x02, 0x00, 0x01,
+                0x10, 0x02, 0x00, 0x01, 0x10, 0x02, 0x00, 0x01, 0x10, 0xfe,
+                0x07, 0x01, 0x10, 0x00, 0x00, 0x01, 0x10, 0x00, 0x00, 0x01,
+                0xf0, 0xff, 0xff, 0x01};}]
     }
     $data(upBtn) config -image $state(updirImage)
 
@@ -1264,7 +1256,7 @@ proc rat_fbox::entFocusOut {w} {
 proc rat_fbox::activateEnt {w from} {
     upvar #0 [winfo name $w] data
 
-    set text [string trim [$data(ent) get]]
+    set text [$data(ent) get]
     set list [rat_fbox::resolveFile $data(selectPath) $text \
 		  $data(-defaultextension)]
     set flag [lindex $list 0]
@@ -1346,8 +1338,9 @@ proc rat_fbox::upDirCmd {w} {
 # Gets called when user presses the "recall" button
 #
 proc rat_fbox::rclCmd {w} {
-    upvar #0 [winfo name $w] data
+    upvar \#0 [winfo name $w] data
 
+    ratIconList_Unselect $data(icons)
     $data(ent) delete 0 end
     $data(ent) insert 0 $data(storedFile)
 }
@@ -1458,18 +1451,22 @@ proc rat_fbox::done {w {selectFilePath ""}} {
 	set state(selectFile)     $data(selectFile)
 	set state(selectPath)     $data(selectPath)
 
-	if {[file exists $selectFilePath] && 
-	    ![string compare $data(-mode) save]} {
-
+	if {[file exists $selectFilePath]} {
+	    if {![string compare $data(-mode) save]} {
 		set reply [tk_messageBox -icon warning -type yesno\
-			-parent $data(-parent) -message "File\
+			       -parent $data(-parent) -message "File\
 			\"$selectFilePath\" already exists.\nDo\
 			you want to overwrite it?"]
 		if {![string compare $reply "no"]} {
 		    return
 		}
+	    } elseif {![string compare $data(-mode) noexists]} {
+		set reply [tk_messageBox -icon warning -type ok \
+			       -parent $data(-parent) -message "File\
+			\"$selectFilePath\" already exists."]
+		return
+	    }
 	}
     }
     set state(selectFilePath) $selectFilePath
 }
-

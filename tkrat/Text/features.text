@@ -1,0 +1,153 @@
+#################################################################
+#
+#  TkRat software and its included text is Copyright 1996-2004 by
+#  Martin Forssen
+#
+#  The full text of the legal notices is contained in the file called
+#  COPYRIGHT, included with this distribution.
+#
+
+
+variable features
+
+# After 2.1
+
+label 1
+en {There is a new mechanism to inform about new features.
+Added support for Mozilla & Galeon as external web-browsers.
+Users can now select how URLs are opened in browsers.}
+de {Neuerungen im Programm werden mit einer neuen Methode bekannt gemacht. 
+Die Web-Browser Mozilla und Galeon werden unterstützt.
+Benutzer können jetzt festlegen, wie eine URL im Browser geladen wird.}
+sv {Det finns en ny mekanism för att informera om nya egenskaper.
+Lade till stöd för Mozilla & Galeon som externa webläsare.
+Användare kan nu välja hur URLer öppnas i webläsarna.}
+fr {Nouveau mécanisme pour informer l'utilisateur des nouvelles fonctionnalités.
+Ajout du support pour les navigateurs externes Galeon et Mozilla
+Possibilité de choisir comment ouvrir les URL dans les navigateurs.}
+
+label 2
+en {Added support for SMTP authentication.}
+de {SMTP mit Anmeldung beim Server (AUTH) wird unterstützt.}
+sv {Lade in stöd för SMTP-autentisering.}
+fr {Support de l'authentification SMTP.}
+
+label 3
+en {There is now a wizard to help defining new folders.}
+de {Beim Anlegen neuer Ordner hilft jetzt ein Assistent.}
+sv {Det finns nu en hjälpreda för att hjälpa till att definiera nya mappar.}
+fr {Il y a maintenant un assistant de création de boîtes à lettres.}
+
+label 4
+en {Implemented a "First use wizard" to help first-time users to get\
+set up.}
+de {Neuen Benutzern hilft jetzt ein Assistent bei den ersten Schritten.}
+sv {Implementerade en Förstagångshjälpreda för att hjälpa dem som kör\
+TkRat för första gången att komma igåg.}
+fr {Implémenté un assistant de première utilisation pour aider à la\
+configuration lors de la première utilisation.}
+
+label 5
+en {You can now use shift-left-mousebutton or middle mousebutton to\
+flag messages.}
+de {Nachrichten können jetzt mit der mittleren Maustaste oder bei\
+gehaltener Umschalttaste mit der linken Maustaste markiert werden.}
+sv {Man kan nu använda shift-vänster-musknapp eller mittenknappen för\
+att markera meddelanden.}
+
+label 6
+en {It is now possible to specify PGP keys and default actions for\
+address book entries.}
+sv {Det är nu möjligt att ange PGP-nyckel och standardinställning\
+för element i adressboken.}
+de {Für Empfänger aus dem Adressbuch können jetzt PGP Schlüssel\
+und Voreinstellungen zum Verschlüsseln und Unterschreiben festgelegt\
+werden.}
+
+label 7
+en {The database search window has been improved. It is now possible\
+to specify a time interval to search within.}
+sv {Databassökningar har nu förbättrats avsevärt. Det är numera\
+möjligt att ange ett tidsintervall att söka inom.}
+de {Die Möglichkeiten zur Suche in der Datenbank wurden erweitert.\
+Es kann nun ein Datumsbereich zum Durchsuchen vorgegeben werden.}
+
+label 8
+en {It is now possible to forward (separately or in one message) and\
+bounce a group of messages.}
+sv {Det är nu möjligt att vidarebefodra (separat eller i ett brev)\
+och studsa en grupp av meddelanden.}
+de {Eine Gruppe markierter Nachrichten kann nun (einzeln oder\
+innerhalb einer einzigen Nachricht) weitergeleitet oder an einen\
+neuen Empfänger umgeleitet werden.}
+
+label 9
+en {Messages sent while in offline mode are placed in the "Outgoing"\
+folder. There you can delete them or make changes by selecting\
+"Continue composing" in the message menu.}
+sv {Brev som skickas medan du är nedkopplad läggs i
+"Utgående"-mappen. Där kan du radera eller ändra brev genom att välja
+"Fortsätt skriv" i meddelandemenyn.}
+de {Nachrichten, die Sie im offline Modus absenden, werden im Ordner\
+"Abgehende" gespeichert. Nachrichten in diesem Ordner können jetzt\
+weiter bearbeitet oder auch gelöscht werden.}
+
+label 10
+en {Added in-line spelling checker to compose window. By default it\
+will guess the language based on the first ten words you\
+write. Misspelled words are underlined in red, right-click for\
+replacements menu.}
+sv {Lade till stavningskontroll i "skriva brev"-fönstret. Normalt så\
+gissar den sig till språket baserat på de tio första orden du\
+skriver. Felstavade ord rödmakeras, tryck höger musknapp för en meny\
+med alternativ.}
+de {Beim Schreiben einer Nachricht kann die Rechtschreibung geprüft\
+werden. In der Voreinstellung versucht TkRat anhand der ersten zehn\
+Wörter die Sprache zu erraten. Rechtschreibfehler werden rot\
+unterstrichen. Mit der rechten Maustaste lässt sich ein Menü mit\
+Korrekturvorschlägen anzeigen.}
+
+label 11
+en {Now supports both aspell and ispell as spelling checker commands}
+sv {Stöder nu både ispell och aspell för stavningskontroll}
+de {Sowohl ispell als auch aspell können zur Kontrolle der\
+Rechtschreibung verwendet werden.}
+
+label 12
+en {It is now possible to filter the list of messages}
+sv {Man kan nu filtrera listan av brev}
+de {Die Liste der Nachrichten in einem Ordner kann nun nach\
+Suchbegriffen gefiltert werden.}
+
+label 13
+en {There is now an address history list. It pops up automatically\
+when you start writing an address and shows possible completions\
+from the last 500 addresses you sent email to.}
+sv {Det finns nu en addresshistoria. Den dyker upp så fort man börjar\
+skriva in en adress och visar möjliga adresser bland de senaste 500 du\
+har skickat till.}
+de {Bei der Eingabe einer E-Mail Adresse steht jetzt eine Liste der\
+zuletzt verwendeten Adressen zur Verfügung. Sobald Sie die Eingabe einer\
+Adresse beginnen, erscheint eine Liste der möglichen Vervollständigungen,\
+welche aus den letzten 500 Adressen gebildet wird, an die E-Mails\
+verschickt wurden.}
+
+label 14
+en {It is now possible to change the way dates are formatted in the\
+list of messages.}
+sv {Man kan nu ändra hur datum visas i brevlistan.}
+de {Das in der Nachrichtenliste verwendete Datumsformat kann\
+jetzt eingestellt werden.}
+
+label 15
+en {TkRat can now list and save the files contained in winmail.dat\
+attachments (if the tnef command is installed).}
+sv {TkRat kan nu lista och spara filer som är packade i\
+winmail.bat-bilagor (om kommandot tnef är installerat).}
+de {TkRat kann jetzt Anhänge im winmail.dat Format anzeigen und\
+speichern, falls tnef installiert ist.}
+
+label 16
+en {It is now possible to delete attchments from stored messages.}
+sv {Man kan nu radera bilagor från lagradde meddelanden.}
+de {Anhänge an einer Nachricht lassen sich jetzt löschen.}

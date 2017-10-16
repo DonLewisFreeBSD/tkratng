@@ -3,7 +3,7 @@
 # This file contains code which handles dbase checks
 #
 #
-#  TkRat software and its included text is Copyright 1996-2002 by
+#  TkRat software and its included text is Copyright 1996-2004 by
 #  Martin Forssén
 #
 #  The full text of the legal notices is contained in the file called
@@ -18,6 +18,17 @@
 
 proc Expire {} {
     global option t inbox vFolderDef expAfter idCnt fixedNormFont vFolderInbox
+
+    # Sanity check
+    # If it has been over a year and there are more than 100 messages in
+    # the database then we ask the user for confirmation.
+    if {[RatDaysSinceExpire] > 365 && [lindex [RatDbaseInfo] 0] > 100} {
+        set action [RbatDialog "" $t(really_expire_title) \
+                        $t(really_expire) question 1 $t(expire) $t(cancel)]
+        if {$action != 0} {
+            return
+        }
+    }
 
     # Prepare for next expiration
     if {1 > $option(expire_interval)} {
@@ -138,7 +149,6 @@ proc DbaseCheck {fix} {
     text $w.mess.text \
 	    -yscroll "$w.mess.scroll set" \
 	    -setgrid true
-    Size $w.mess.text dbcheckList
     pack $w.mess.scroll -side right -fill y
     pack $w.mess.text -expand 1 -fill both
     foreach m [lindex $result 5] {
@@ -146,16 +156,14 @@ proc DbaseCheck {fix} {
     }
 
     # Button
-    button $w.dismiss -text $t(dismiss) \
-	    -command "RecordSize $w.mess.text dbcheckList; \
-		      RecordPos $w dbCheckW; \
-		      destroy $w"
+    button $w.dismiss -text $t(dismiss) -command "destroy $w"
 
     # Pack it
     pack $w.top -side top
     pack $w.mess -side top -expand 1 -fill both
     pack $w.dismiss -pady 5
 
-    # Place it
-    Place $w dbCheckW
+    # handle geometry
+    ::tkrat::winctl::SetGeometry dbCheckW $w $w.mess.text
+    bind $w.mess.text <Destroy> "::tkrat::winctl::RecordGeometry dbCheckW $w $w.mess.text"
 }

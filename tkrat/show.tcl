@@ -3,7 +3,7 @@
 # This file contains code which handles the actual displaying of a message
 #
 #
-#  TkRat software and its included text is Copyright 1996-2002 by
+#  TkRat software and its included text is Copyright 1996-2004 by
 #  Martin Forssén
 #
 #  The full text of the legal notice is contained in the file called
@@ -30,11 +30,11 @@ set mimeHandler(multipart/encrypted)	{ ShowMultiEnc $handler $body $msg }
 set mimeHandler(multipart)		{ ShowMultiMixed $handler $body $msg }
 set mimeHandler(message/rfc822)		{ ShowMessage 0 $handler \
 	                                              [$body message] }
-set mimeHandler(message/delivery-status) {ShowDSN $handler $body }
 set mimeHandler(image)			{ ShowImage $handler $body \
                                                       [lindex $type 1]}
 set mimeHandler(application/pgp-keys)	{ ShowPGPKeys $handler $body }
 set mimeHandler(application/pgp)	{ ShowTextPlain $handler $body $msg}
+set mimeHandler(application/ms-tnef)    { ShowMSTnef $handler $body }
 
 if {![catch {package require Img} err]} {
     set extensions(Img) 1
@@ -43,7 +43,7 @@ if {![catch {package require Img} err]} {
 	image/x-portable-pixmap image/x-png image/x-bmp
     lappend ImageTypes jpeg tiff bmp xpm png pjpeg x-png
 }
-if {![catch {package require Tkhtml} err]} {
+if {![catch {package require Tkhtml 2.0} err]} {
     set extensions(Tkhtml) 1
     lappend GoodTypes text/html
     set mimeHandler(text/html) {RatBusy {ShowTextHtml $handler $body $msg}}
@@ -58,9 +58,13 @@ if {![catch {package require Tkhtml} err]} {
 # handler -	The handler which identifies the show text widget
 
 proc ShowNothing handler {
+    upvar \#0 $handler fh
+
     $handler configure -state normal
     $handler delete 0.0 end
     $handler configure -state disabled
+
+    set fh(width_adjust) {}
 }
 
 # Show --
@@ -74,15 +78,20 @@ proc ShowNothing handler {
 
 proc Show {handler msg browse} {
     global option b fixedBoldFont
-    upvar #0 $handler fh \
-    	     msgInfo_$msg msgInfo
+    upvar \#0 $handler fh \
+        msgInfo_$msg msgInfo
 
-    set fh(id) 0
-    set fh(current) $msg
+    if {[info exists fh(current_msg)]} {
+        upvar \#0 msgInfo_$fh(current_msg) oldMsgInfo
+        set oldMsgInfo(scrollpos) [lindex [$handler yview] 0]
+    }
+
+    set fh(current_msg) $msg
     set fh(sigstatus) pgp_none
     set fh(pgpOutput) ""
     set fh(browse) $browse
     set fh(toplevel) [winfo toplevel $handler]
+    set fh(width_adjust) {}
 
     # Enable updates & clear data
     $handler configure -state normal
@@ -95,7 +104,7 @@ proc Show {handler msg browse} {
     $handler tag configure CenterNoSpacing -justify center
     if { 4 < [winfo cells $handler]} {
 	$handler tag configure URL -foreground $option(url_color) -underline 1
-	$handler tag configure Found -background #ffff80
+	$handler tag configure Found -background #ff8000
     } else {
 	$handler tag configure URL -underline 1
 	$handler tag configure Found -borderwidth 2 -relief raised
@@ -117,7 +126,6 @@ proc Show {handler msg browse} {
     foreach n [array names fh charset_*] {
 	unset fh($n)
     }
-    set fh(lastType) ""
     foreach bn [array names b $handler.*] {unset b($bn)}
     foreach bn [array names b $fh(struct_menu)*] {unset b($bn)}
 
@@ -132,6 +140,11 @@ proc Show {handler msg browse} {
 
     # Don't allow the user to change this
     $handler configure -state disabled
+
+    # Scroll to last position if any
+    if {[info exists msgInfo(scrollpos)]} {
+        $handler yview moveto $msgInfo(scrollpos)
+    }
 
     # Return the signature status
     set msgInfo(pgp,signed_parts) $fh(signed_parts)
@@ -149,10 +162,10 @@ proc Show {handler msg browse} {
 
 proc InsertHeader {gtag w header {width 1}} {
     global t showAddrHdr
-    upvar #0 $w fh
+    upvar \#0 $w fh
 
     set hn [lindex $header 0]
-    regsub -all -- - [string tolower $hn] _ hni
+    set hni [string map {- _} [string tolower $hn]]
     if {[info exists t($hni)]} {
 	set hn $t($hni)
     }
@@ -183,11 +196,11 @@ proc InsertHeader {gtag w header {width 1}} {
 # msg     -	Message to show
 
 proc ShowMessage {first handler msg} {
-    global option t
-    upvar #0 $handler fh \
-    	     msgInfo_$msg msgInfo
+    global option t idCnt
+    upvar \#0 $handler fh \
+        msgInfo_$msg msgInfo
 
-    set tag t[incr fh(id)]
+    set tag t[incr idCnt]
     if {![info exists msgInfo(show,$msg)]} {
         set msgInfo(show,$msg) 1
     }
@@ -196,6 +209,7 @@ proc ShowMessage {first handler msg} {
 			        \[lsearch \[set ${handler}(struct_list)\] \
 			        $msg\]"
     } else {
+	$handler tag bind $tag <3> "tk_popup $fh(struct_menu) %X %Y"
 	set fh(signed_parts) {}
     }
 
@@ -289,8 +303,8 @@ proc ShowMessage {first handler msg} {
 # msg     -	The message name
 
 proc ShowBody {handler body msg} {
-    global option mimeHandler
-    upvar #0 $handler fh \
+    global option mimeHandler idCnt
+    upvar \#0 $handler fh \
     	     msgInfo_$msg msgInfo
 
     if {!$msgInfo(show,$body)} {
@@ -311,25 +325,12 @@ proc ShowBody {handler body msg} {
     # We will need this later on.
     set type [string tolower [$body type]]
 
-    # Draw separator between items only if the previous entity was of
-    # the same type and not multipart.
-    set mtype [lindex $type 0]
-    if {[string compare $mtype multipart]} {
-        if {![string compare $mtype $fh(lastType)]} {
-	    frame $handler.f[incr fh(id)] -width 12c -height 2 \
-		    -relief sunken -bd 2
-	    $handler window create insert -window $handler.f$fh(id) -pady 10
-	    $handler insert insert "\n"
-        }
-        set fh(lastType) $mtype
-    }
-
     # Switch for subroutines which does the actual drawing
     set tp [join $type /]
     if {[string equal $tp application/octet-stream]} {
-		set type [GetHandlerFromExtension [$body filename]]
-		set tp [join $type /]
-	}
+        set type [GetHandlerFromExtension [$body filename]]
+        set tp [join $type /]
+    }
     if {[info exists mimeHandler($tp)]} {
 	set mh $mimeHandler($tp)
     } elseif {[info exists mimeHandler([lindex $type 0])]} {
@@ -350,11 +351,11 @@ proc ShowBody {handler body msg} {
 # msg     -	The message name
 
 proc ShowTextPlain {handler body msg} {
-    global option b charsetName propNormFont
-    upvar #0 $handler fh \
+    global option b charsetName propNormFont idCnt
+    upvar \#0 $handler fh \
     	     msgInfo_$msg msgInfo
 
-    set tag t[incr fh(id)]
+    set tag t[incr idCnt]
     $handler tag bind $tag <3> "tk_popup $fh(struct_menu) %X %Y \
 			        \[lsearch \[set ${handler}(struct_list)\] \
 			        $body\]"
@@ -363,7 +364,7 @@ proc ShowTextPlain {handler body msg} {
 	$handler insert insert [$body data false] $tag
     } else {
 	global t
-	set w $handler.w[incr fh(id)]
+	set w $handler.w[incr idCnt]
 	frame $w -relief raised -bd 2 -cursor top_left_arrow
 	if {[string length [$body description]]} {
 	    label $w.desc -text "$t(description): [$body description]" \
@@ -428,7 +429,7 @@ proc ShowTextPlain {handler body msg} {
 # charset -	What to assume
 
 proc ShowTextCharset {body msg hd w tag charset} {
-    upvar #0 $hd fh \
+    upvar \#0 $hd fh \
     	     msgInfo_$msg msgInfo
     global t
 
@@ -457,11 +458,11 @@ proc ShowTextCharset {body msg hd w tag charset} {
 # msg     -	The message name
 
 proc ShowTextEnriched {handler body msg} {
-    global option b charsetName propNormFont
-    upvar #0 $handler fh \
+    global option b charsetName propNormFont idCnt
+    upvar \#0 $handler fh \
     	     msgInfo_$msg msgInfo
 
-    set tag t[incr fh(id)]
+    set tag t[incr idCnt]
     $handler tag bind $tag <3> "tk_popup $fh(struct_menu) %X %Y \
 			        \[lsearch \[set ${handler}(struct_list)\] \
 			        $body\]"
@@ -483,8 +484,8 @@ proc ShowTextEnriched {handler body msg} {
 # msg     -	The message name
 
 proc ShowTextOther {handler body msg} {
-    global t b fixedBoldFont
-    upvar #0 $handler fh \
+    global t b fixedBoldFont idCnt
+    upvar \#0 $handler fh \
     	     msgInfo_$msg msgInfo
 
     set type [$body type]
@@ -492,7 +493,7 @@ proc ShowTextOther {handler body msg} {
     set mailcap [$body findShowCommand]
     set width 0
 
-    set w $handler.w[incr fh(id)]
+    set w $handler.w[incr idCnt]
     frame $w -relief raised -bd 2 -cursor top_left_arrow
     if {[string length [lindex $mailcap 4]]} {
 	if {![catch {image create bitmap $body.icon \
@@ -501,7 +502,8 @@ proc ShowTextOther {handler body msg} {
 	    pack $w.icon -side left
 	}
     }
-    text $w.text -relief flat -cursor top_left_arrow
+    text $w.text -relief flat -cursor top_left_arrow \
+        -background [$w cget -background]
     $w.text tag configure Bold -font $fixedBoldFont
     if {[string length [$body description]]} {
 	set width [string length "$t(description): [$body description]"]
@@ -577,7 +579,7 @@ proc ShowTextOther {handler body msg} {
 # msg     -	The message name
 
 proc ShowTextOtherDo {handler body msg} {
-    upvar #0 $handler fh \
+    upvar \#0 $handler fh \
     	     msgInfo_$msg msgInfo
     
     set oldState [$handler cget -state]
@@ -603,8 +605,8 @@ proc ShowTextOtherDo {handler body msg} {
 # msg     -	The message name
 
 proc ShowMultiAlt {handler body msg} {
-    global GoodTypes
-    upvar #0 $handler fh \
+    global GoodTypes option
+    upvar \#0 $handler fh \
     	     msgInfo_$msg msgInfo
 
     if {![info exists msgInfo(alternated,$body)]} {
@@ -624,6 +626,18 @@ proc ShowMultiAlt {handler body msg} {
 	    }
 	    set type [string tolower [lindex $typelist 0]/[lindex $typelist 1]]
 	    if { -1 != [lsearch $GoodTypes $type] } {
+                if {$i >
+                    0 && "text/html" == $type
+                    && $option(prefer_other_over_html)} {
+                    set pc [lindex $children [expr $i-1]]
+                    set ptl [$pc type]
+                    set pt [string tolower [lindex $ptl 0]/[lindex $ptl 1]]
+                    if {-1 != [lsearch $GoodTypes $pt]} {
+                        set msgInfo(show,$pc) 1
+                        set found 1
+                        break
+                    }
+                }
 		set msgInfo(show,$child) 1
 		set found 1
 	        break
@@ -651,19 +665,20 @@ proc ShowMultiAlt {handler body msg} {
 # msg     -	The message name
 
 proc ShowMultiEnc {handler body msg} {
-    upvar #0 $handler fh
+    upvar \#0 $handler fh
+    global idCnt
 
     set children [$body children]
     if {[llength $children] != 2} {
 	return
     }
     set b [lindex $children 1]
-    set tag t[incr fh(id)]
+    set tag t[incr idCnt]
     $handler tag bind $tag <3> "tk_popup $fh(struct_menu) %X %Y \
 			        \[lsearch \[set ${handler}(struct_list)\] \
 			        $body\]"
 
-    regsub -all "\r" [$b data false] "" data
+    set data [string map [list "\r" ""] [$b data false]]
     $handler insert insert $data $tag
 }
 
@@ -677,11 +692,26 @@ proc ShowMultiEnc {handler body msg} {
 # msg     -	The message name
 
 proc ShowMultiMixed {handler body msg} {
-    global option t
-    upvar #0 $handler fh \
+    global option t idCnt
+    upvar \#0 $handler fh \
     	     msgInfo_$msg msgInfo
 
+    set first 1
     foreach child [$body children] {
+        # Add horizontal lines between the different parts
+        if {$first} {
+            set first 0
+        } else {
+            if {[$handler compare insert > "insert linestart"]} {
+                $handler insert insert "\n"
+            }
+            frame $handler.f[incr idCnt] -width 12c -height 2 \
+                -relief sunken -bd 2
+            $handler window create insert -window $handler.f$idCnt -pady 10
+            $handler insert insert "\n"
+        }
+
+        # Show the bodypart
 	if {![info exists msgInfo(show,$child)]} {
 	    set msgInfo(show,$child) $msgInfo(show,$msg)
 	}
@@ -699,14 +729,14 @@ proc ShowMultiMixed {handler body msg} {
 # subtype -	The type of image
 
 proc ShowImage {handler body subtype} {
-    global option rat_tmp
+    global option rat_tmp idCnt
     global ImageTypes
-    upvar #0 $handler fh
+    upvar \#0 $handler fh
 
     if {[lsearch $ImageTypes $subtype] != "-1"} {
-	set tag t[incr fh(id)]
+	set tag t[incr idCnt]
 	set filename $rat_tmp/rat.[RatGenId]
-	set fid [open $filename w 0600]
+	set fid [open $filename w]
 	fconfigure $fid -encoding binary
 	$body saveData $fid 0 0
 	close $fid
@@ -719,7 +749,7 @@ proc ShowImage {handler body subtype} {
 	file delete -force -- $filename
 	set imgheight [image height $img]
 	set imgwidth [image width $img]
-	set frame [frame $handler.f[incr fh(id)] -cursor left_ptr]
+	set frame [frame $handler.f[incr idCnt] -cursor left_ptr]
 	set c [canvas $frame.canvas -width $imgwidth \
 		-height $imgheight \
 		-xscrollcommand [list $frame.xscroll set] \
@@ -729,7 +759,8 @@ proc ShowImage {handler body subtype} {
 	set xscroll [scrollbar $frame.xscroll -command [list $c xview] \
 		-orient horizontal]
 	grid $c -row 0 -column 0 -sticky news
-	if {[expr {$imgheight>[winfo height $handler]}]} {
+	if {[expr {$imgheight>[winfo height $handler]}]
+            && [info tclversion] < 8.5} {
 	    $frame configure -height [winfo height $handler]
 	    grid $yscroll -row 0 -column 1 -sticky ns
 	} else {
@@ -771,46 +802,6 @@ proc ShowImage {handler body subtype} {
 }
 
 
-# ShowDSN --
-#
-# Show message/delivery-status entities
-#
-# Arguments:
-# handler -	The handler which identifies the show text widget
-# body    -	The body which contains this DSN
-
-proc ShowDSN {handler body} {
-    global t
-    upvar #0 $handler fh
-
-    set tag t[incr fh(id)]
-    $handler tag bind $tag <3> "tk_popup $fh(struct_menu) %X %Y \
-				 \[lsearch \[set ${handler}(struct_list)\] \
-				 $body\]"
-    $handler insert insert \n $tag
-    set dsn [$body dsn]
-    foreach h [lindex $dsn 0] {
-	set hn [lindex $h 0]
-	if {[info exists t([string tolower $hn])]} {
-	    set hn $t([string tolower $hn])
-	}
-	$handler insert insert [format "%21s: " $hn] "$tag HeaderName"
-	$handler insert insert [lindex $h 1]\n $tag
-    }
-    foreach r [lindex $dsn 1] {
-	$handler insert insert \n $tag
-	foreach h $r {
-	    set hn [lindex $h 0]
-	    if {[info exists t([string tolower $hn])]} {
-		set hn $t([string tolower $hn])
-	    }
-	    $handler insert insert [format "%21s: " $hn] "$tag HeaderName"
-	    $handler insert insert [lindex $h 1]\n $tag
-	}
-    }
-    $handler insert insert \n $tag
-}
-
 # ShowPGPKeys --
 #
 # Handles embedded pgp keys
@@ -820,12 +811,12 @@ proc ShowDSN {handler body} {
 # body    -	The bodypart to show
 
 proc ShowPGPKeys {handler body} {
-    global t b
-    upvar #0 $handler fh
+    global t b idCnt
+    upvar \#0 $handler fh
 
     set mailcap [$body findShowCommand]
 
-    set w $handler.w[incr fh(id)]
+    set w $handler.w[incr idCnt]
     frame $w -relief raised -bd 2 -cursor top_left_arrow
     if {[string length [lindex $mailcap 4]]} {
 	if {![catch {image create bitmap $body.icon \
@@ -863,17 +854,18 @@ proc ShowPGPKeys {handler body} {
 # Arguments:
 # handler -	The handler which identifies the show text widget
 # body    -	The bodypart to show
+# desc    -     Extra description
 
-proc ShowDefault {handler body} {
-    global t fixedBoldFont
-    upvar #0 $handler fh
+proc ShowDefault {handler body {desc {}}} {
+    global t fixedBoldFont idCnt
+    upvar \#0 $handler fh
 
     set type [$body type]
     set typename [string tolower [lindex $type 0]/[lindex $type 1]]
     set mailcap [$body findShowCommand]
     set width 0
 
-    set w $handler.w[incr fh(id)]
+    set w $handler.w[incr idCnt]
     frame $w -relief raised -bd 2 -cursor top_left_arrow
     if {[string length [lindex $mailcap 4]]} {
 	if {![catch {image create bitmap $body.icon \
@@ -882,11 +874,19 @@ proc ShowDefault {handler body} {
 	    pack $w.icon -side left
 	}
     }
-    text $w.text -relief flat -cursor top_left_arrow
+    text $w.text -relief flat -cursor top_left_arrow \
+        -background [$w cget -background]
     $w.text tag configure Bold -font $fixedBoldFont
     if {[string length [$body description]]} {
 	set width [string length "$t(description): [$body description]"]
 	$w.text insert insert "$t(description): " Bold [$body description]\n
+    }
+    if {[string length $desc]} {
+	set l [string length $desc]
+	if { $l > $width } {
+	    set width $l
+	}
+	$w.text insert insert $desc\n Bold
     }
     if {[string length [lindex $mailcap 3]]} {
 	set l [string length "$t(type_description): [lindex $mailcap 3]"]
@@ -903,6 +903,10 @@ proc ShowDefault {handler body} {
     $w.text insert insert "$t(here_is): " Bold \
 	    "[string tolower [lindex $type 0]/[lindex $type 1]]" {} \
 	    " ([RatMangleNumber [$body size]] bytes)"
+    set filename [$body filename]
+    if {[string length $filename]} {
+        $w.text insert insert "\n$t(filename): " Bold "$filename" {}
+    }
     $w.text configure \
 	    -height [lindex [split [$w.text index end-1c] .] 0] \
 	    -width $width \
@@ -921,6 +925,9 @@ proc ShowDefault {handler body} {
     set b($w.save) save_bodypart
     set b($w.view_int) view_source
     pack $w.save $w.view_int -side left -padx 5
+    if {[$handler compare insert > "insert linestart"]} {
+        $handler insert insert "\n"
+    }
     $handler window create insert -window $w -padx 5 -pady 5
     foreach win [concat $w [pack slaves $w]] {
 	bind $win <3> "tk_popup $fh(struct_menu) %X %Y \
@@ -1009,10 +1016,19 @@ proc SaveBody {body parent} {
 
     set convertNL [regexp -nocase text [lindex [$body type] 0]]
 
-    set filename [rat_fbox::run -ok $t(save) -mode save -parent $parent \
-	    -title $t(save_to_file) -initialfile [$body filename]]
+    set filename [rat_fbox::run \
+                      -ok $t(save) \
+                      -mode save \
+                      -parent $parent \
+                      -title $t(save_to_file) \
+                      -initialdir $option(initialdir) \
+                      -initialfile [$body filename]]
     if {"" == $filename} {
 	return
+    }
+    if {$option(initialdir) != [file dirname $filename]} {
+        set option(initialdir) [file dirname $filename]
+        SaveOptions
     }
 
     if { 0 == [catch [list open $filename w] fh]} {
@@ -1033,7 +1049,7 @@ proc SaveBody {body parent} {
 # msg     -	The message we should display the structure of
 
 proc BuildStructMenu {handler msg} {
-    upvar #0 $handler fh \
+    upvar \#0 $handler fh \
 	msgInfo_$msg msgInfo
 
     # Clear the old menu
@@ -1064,21 +1080,21 @@ proc BuildStructMenu {handler msg} {
 # preamble-	The preamble to add before this entry
 
 proc BuildStructEntry {handler m msg body preamble} {
-    global b
-    upvar #0 $handler fh \
+    global b idCnt
+    upvar \#0 $handler fh \
     	     msgInfo_$msg msgInfo
 
     if {![string length $body]} { return }
 
     lappend fh(struct_list) $body
-    set sm $m.m[incr fh(id)]
+    set sm $m.m[incr idCnt]
     set typepair [$body type]
     set type [string tolower [lindex $typepair 0]/[lindex $typepair 1]]
     $m add cascade -label $preamble$type -menu $sm
     set b($m,[$m index end]) bodypart_entry
     menu $sm -tearoff 0 \
     	     -disabledforeground [$m cget -activeforeground] \
-	     -postcommand "PopulateStructEntry $handler $sm $msg $body $type"
+        -postcommand [list PopulateStructEntry $handler $sm $msg $body $type]
 
 
     # See if we have children to show
@@ -1116,10 +1132,13 @@ proc BuildStructEntry {handler m msg body preamble} {
 
 proc PopulateStructEntry {handler m msg body type} {
     global t b showParams
-    upvar #0 $handler fh \
-    	     msgInfo_$msg msgInfo
+    upvar \#0 $handler fh \
+        msgInfo_$msg msgInfo
 
     $m delete 0 end
+    foreach slave [winfo children $m] {
+	destroy $slave
+    }
 
     if {[string length [$body description]]} {
         $m add command -label [$body description] -state disabled
@@ -1144,6 +1163,10 @@ proc PopulateStructEntry {handler m msg body type} {
     } else {
         set sp {{}}
     }
+    if {"" != [$body filename]} {
+        $m add command -label "$t(filename): [$body filename]" \
+            -state disabled
+    }
     $m add command -label "$t(size): [RatMangleNumber [$body size]]" \
     		    -state disabled
     $m add separator
@@ -1152,14 +1175,60 @@ proc PopulateStructEntry {handler m msg body type} {
     }
     $m add checkbutton -label $t(show) -onvalue 1 -offvalue 0 \
     	    -variable msgInfo_${msg}(show,$body) \
-    	    -command "Show $handler $fh(current) 0"
+    	    -command "Show $handler $fh(current_msg) 0"
     set b($m,[$m index end]) bodypart_show
+    if {"message/rfc822" == $type} {
+        $m add cascade -label $t(copy) -menu $m.copy
+        menu $m.copy -postcommand \
+            [list ShowCopyEmbedded $handler $body $m.copy]
+    }
     $m add command -label $t(save_to_file)... \
 	    -command "SaveBody $body $fh(toplevel)"
     set b($m,[$m index end]) bodypart_save
     $m add command -label $t(view_source)... -command "ShowSource $body"
     set b($m,[$m index end]) view_source
     bind $m <Unmap> "after idle {if {\[winfo exists $m\]} {$m delete 0 end}}"
+}
+
+# ShowCopyEmbedded --
+#
+# Popup to copy menu for an embedded message
+#
+# Arguments:
+# handler - The handler which identifies the show text widget
+# body    - The bodypart containing the message to copy
+# m       - The menu to populate
+
+proc ShowCopyEmbedded {handler body m} {
+    global t
+
+    $m delete 0 end
+    VFolderBuildMenu $m 0 "CopyEmbedded $body" 1
+    $m add separator
+    $m add command -label $t(to_file)... \
+	    -command "CopyEmbedded $body \
+		      \[InsertIntoFile [winfo toplevel $handler]\]"
+    $m add command -label $t(to_dbase)... \
+	    -command "CopyEmbedded $body \
+		      \[InsertIntoDBase [winfo toplevel $handler]\]"
+    FixMenu $m
+}
+
+# CopyEmbedded --
+#
+# Actually copy an embedded message
+#
+# Arguments:
+# body    - Bodypart containing the message
+# copy_to - Folder to copy to
+
+proc CopyEmbedded {body copy_to} {
+    if {1 == [llength $copy_to]} {
+	global vFolderDef
+	set copy_to $vFolderDef($copy_to)
+    }
+
+    [$body message] copy $copy_to
 }
 
 # RunMailcap --
@@ -1174,13 +1243,13 @@ proc RunMailcap {body mailcap} {
     global option t idCnt rat_tmp
 
     set id id[incr idCnt]
-    upvar #0 $id rm
+    upvar \#0 $id rm
     set cmd "sh -c {[lindex $mailcap 0]}"
 
     # Fix files
-    set rm(fileName) $rat_tmp/rat.[RatGenId]
+    set rm(fileName) $rat_tmp/[$body filename gen_if_empty]
     if {[regexp %s $cmd]} {
-	regsub -all %s $cmd $rm(fileName) cmd
+	set cmd [string map [list %s $rm(fileName)] $cmd]
     } else {
 	if {[lindex $mailcap 1]} {
 	    Popup "$t(cant_pipe): \"$cmd\""
@@ -1205,18 +1274,18 @@ proc RunMailcap {body mailcap} {
 		-relief sunken -bd 1 \
 		-setgrid 1 \
 		-highlightthickness 0
-	Size $w.text extView
 	scrollbar $w.scroll \
 		-relief sunken \
 		-bd 1 \
 		-command "$w.text yview" \
 		-highlightthickness 0
-	button $w.button -text $t(dismiss) -command "RecordPos $w extView; \
-		RecordSize $w.text extView; destroy $w"
+	button $w.button -text $t(dismiss) -command "destroy $w"
 	pack $w.button -side bottom -pady 5
 	pack $w.scroll -side right -fill y
 	pack $w.text -expand 1 -fill both
-	Place $w extView
+        bind $w.text <Destroy> \
+            "::tkrat::winctl::RecordGeometry extView $w $w.text"
+        ::tkrat::winctl::SetGeometry extView $w $w.text
 	$w.text insert insert [eval "exec $cmd"]
 	$w.text configure -state disabled
 	file delete -force -- $rm(fileName) &
@@ -1239,39 +1308,10 @@ proc RunMailcap {body mailcap} {
 # op           -        Operation
 
 proc RunMailcapDone {name1 name2 op} {
-    upvar #0 $name1 rm
+    upvar \#0 $name1 rm
 
     after 30000 "file delete -force -- $rm(fileName)"
     unset rm
-}
-
-# SubstArg --
-#
-# replace all occurences of the symbolic argument (typically, "%u") by
-# the effective argument
-#
-# we profitably avoid the painful 'regsub' function for simple
-# substitutions like this one: it brings incredibly tricky
-# backslashing issues when the $url contains "&" or "\n". See tcl
-# regsub manual page for details.
-#
-# Arguments:
-# cmd       - original command
-# symbolArg - string to search and replace with...
-# realArg   - ... the effective argument
-
-proc SubstArg {cmd symbolArg realArg} {
-    set si end
-    while {[set urlArgPos [string last $symbolArg $cmd $si]] != -1} {
-	set cmd \
-	    [string replace \
-		 $cmd \
-		 $urlArgPos \
-		 [expr $urlArgPos + [string length $symbolArg] -1] \
-		 $realArg]
-	set si [expr $urlArgPos-1]
-    }
-    return $cmd
 }
 
 # RatShowURL --
@@ -1285,7 +1325,7 @@ proc SubstArg {cmd symbolArg realArg} {
 # x, y	  -	Mouse coordinates
 
 proc RatShowURL {url win tag x y} {
-    global option urlstatus
+    global option
 
     # Flash URL for feedback
     $win tag configure $tag -underline 1
@@ -1309,9 +1349,9 @@ proc RatShowURL {url win tag x y} {
 proc RatShowURLLaunch {url win} {
     global option urlstatus
 
-    regsub -all , $url %2c url
-    regsub -all {\$} $url %24 url
-    regsub -all {&} $url {\\&} url
+    set url [string map {
+	    ! \\! $ %24 , %2c & \\& ( \\( ) \\) ? \\? * \\* [ \\[ ] \\] \\ \\\\
+	} $url]
     # Start viewer
     switch -regexp $option(url_viewer) {
 	RatUP {
@@ -1319,19 +1359,33 @@ proc RatShowURLLaunch {url win} {
 		Popup $error [winfo toplevel $win]
 	    }
 	}
-        netscape|opera {
+        netscape|opera|mozilla|firefox {
+	    switch $option(url_behavior) {
+		old_window {set extra ""}
+		new_window {set extra ",new-window"}
+		new_tab    {set extra ",new-tab"}
+	    }
 	    trace variable urlstatus($url) w [list RatMaybeStartBrowser $url]
-	    RatBgExec urlstatus($url) "$option($option(url_viewer)) -remote \
-		    \"openURL($url,new-window)\" >&/dev/null"
+	    catch {RatBgExec urlstatus($url) \
+                       "$option(browser_cmd) -remote \
+		    \"openURL($url$extra)\" >&/dev/null"}
+	}
+        galeon {
+	    switch $option(url_behavior) {
+		old_window {set extra "--existing"}
+		new_window {set extra "--new-window"}
+		new_tab    {set extra "--new-tab"}
+	    }
+	    RatBgExec unused "$option(browser_cmd) $extra \"$url\" >/dev/null"
 	}
         lynx {
-	    set cmd [SubstArg $option(lynx) "%u" $url]
+	    set cmd [string map [list %u $url] $option(browser_cmd)]
 	    if {[catch {eval exec $cmd &} error]} {
 		Popup $error [winfo toplevel $win]
 	    }
 	}
         other {
-	    set cmd [SubstArg $option(other_browser) "%u" $url]
+	    set cmd [string map [list %u $url] $option(browser_cmd)]
 	    if {[catch {eval exec $cmd &} error]} {
 		Popup $error [winfo toplevel $win]
 	    }
@@ -1348,7 +1402,7 @@ proc RatShowURLLaunch {url win} {
 # name1, name2, op - trace information
 
 proc RatMaybeStartBrowser {url name1 name2 op} {
-    upvar #0 ${name1}($name2) status
+    upvar \#0 ${name1}($name2) status
 
     trace vdelete ${name1}($name2) w [list RatMaybeStartBrowser $url]
     if {0 == $status} {
@@ -1358,14 +1412,19 @@ proc RatMaybeStartBrowser {url name1 name2 op} {
 
     unset status
     global option
-    if {[catch {eval exec $option($option(url_viewer)) "$url" &} error]} {
+    if {[catch {eval exec $option(browser_cmd) "$url" &} error]} {
 	Popup $error
     }
 }
 
 # RatFindURL --
 #
-# Search for an URL in a part of a text widget
+# Search for an URL in a part of a text widget. This one must find a lot
+# of different formats. For example (URLs with surrounding text)
+#
+# Foo http://www.tkrat.org bar
+# Foo <http://www.tkrat.org> bar
+# <a href="http://www.tkrat.org/foo.asp?bar=with%20space">Foo Bar</a>
 #
 # Arguments:
 # t	- Text widget
@@ -1407,19 +1466,20 @@ proc RatScrollShow {t scrollw sfrac efrac} {
 	return
     }
 
-    upvar #0 $t fh
+    global idCnt
+    upvar \#0 $t fh
 
     set start searched
     set end [$t index @0,20000+1c+20l]
 
     set result [RatFindURL $t $start $end]
     while {[llength $result] == 2} {
-	set tag t[incr fh(id)]
+	set tag t[incr idCnt]
 	set s [lindex $result 0]
 	set e [lindex $result 1]
 	$t tag add URL $s $e
 	$t tag add $tag $s $e
-	regsub -all % [$t get $s $e] %% url
+	set url [string map {% %%} [$t get $s $e]]
 	$t tag bind $tag <ButtonRelease-1> [list RatShowURL $url %W $tag %x %y]
 	$t tag bind $tag <1> \
 		"$t tag configure $tag -underline 0; update idletasks"
@@ -1464,14 +1524,14 @@ proc ResizeFrame {frame parent reqHeight reqWidth xscroll yscroll} {
 
     # Determine if we need scrollbars. The deal is that if reqWidth or
     # reqHeight is -1 then always put the scrollbars
-    if {[expr {$reqHeight > $parHeight}]} {
+    if {[expr {$reqHeight > $parHeight}] && [info tclversion] < 8.5} {
         incr totalWidth [winfo width $yscroll]
     }
     if {[expr {$reqWidth > $parWidth}]} {
         incr totalHeight [winfo height $xscroll]
     }
 
-    if {[expr {$totalHeight > $parHeight}]} {
+    if {[expr {$totalHeight > $parHeight}] && [info tclversion] < 8.5} {
         $frame configure -height $parHeight -bg blue
         grid $yscroll -row 0 -column 1 -sticky ns
     } else {
@@ -1502,19 +1562,115 @@ proc ResizeFrame {frame parent reqHeight reqWidth xscroll yscroll} {
 #   application/octet-stream
 
 proc GetHandlerFromExtension {filename} {
-	global mimeHandler
-	set mimeType [list application octet-stream]
-	set extension [string tolower [file extension $filename]]
-	# Remove the '.' in the extension
-	set extension [string trim $extension .]
+    global mimeHandler
+    global GoodTypes
+    set mimeType [list application octet-stream]
+    set extension [string tolower [file extension $filename]]
+    # Remove the '.' in the extension
+    set extension [string trim $extension .]
+    
+    # Check image types
+    if {[lsearch -exact $GoodTypes image/$extension] != -1} {
+        set mimeType [list image $extension]
+    } elseif {[string equal jpg $extension]} {
+        # JPEGs often end in .jpg
+        set mimeType [list image jpeg]
+    }
 
-	# Check image types
-	if {[info exists mimeHandler(image/$extension)]} {
-		set mimeType [list image $extension]
-	} elseif {[string equal jpg $extension]} {
-		# JPEGs often end in .jpg
-		set mimeType [list image jpeg]
-	}
+    return $mimeType
+}
 
-	return $mimeType
+# ShowMSTnef --
+#
+# Show a application/ms-tnef body, if the tnef program can be found
+#
+# Arguments:
+# handler -	The handler which identifies the show text widget
+# body    -	The bodypart to show
+
+proc ShowMSTnef {handler body} {
+    upvar \#0 $handler fh
+    global idCnt option rat_tmp fixedBoldFont t
+
+    # Check if tnef program is present and generate list of contents
+    set filename $rat_tmp/winmail_list.[RatGenId]
+    if {[catch {open "|$option(tnef) --list 2>$filename >$filename" w} tnef]} {
+        ShowDefault $handler $body $t(no_tnef_found)
+        return
+    }
+    $body saveData $tnef 0 0
+    catch {close $tnef}
+    
+    # Read list
+    set f [open $filename r]
+    set contents {}
+    while {-1 != [gets $f line]} {
+        lappend contents $line
+    }
+    close $f
+    file delete $filename
+
+    # Add markers
+    foreach c $contents {
+        set w $handler.w[incr idCnt]
+        frame $w -relief raised -bd 2 -cursor top_left_arrow
+        label $w.label -font $fixedBoldFont -text $c
+        pack $w.label -side top -anchor w
+        button $w.save -text $t(save_to_file) \
+	    -command [list SaveTnefBody $body $c $fh(toplevel)]
+        pack $w.save -side left -padx 5
+        $handler insert insert "\n"
+        $handler window create insert -window $w -padx 5 -pady 5
+        $handler insert insert "\n"
+    }
+}
+
+# SaveTnefBody --
+#
+# Save a part of a tnef bodypart to file.
+#
+# Arguments:
+# body -	The bodypart containing winmail.dat
+# child -       Which of the children in the winmail.dat to save
+# parent -	Parent of window
+
+proc SaveTnefBody {body child parent} {
+    global idCnt t option rat_tmp
+
+    regsub -all {\\} $child / childs
+    set filename [rat_fbox::run \
+                      -ok $t(save) \
+                      -mode save \
+                      -parent $parent \
+                      -title $t(save_to_file) \
+                      -initialdir $option(initialdir) \
+                      -initialfile $childs]
+    if {"" == $filename} {
+	return
+    }
+    if {$option(initialdir) != [file dirname $filename]} {
+        set option(initialdir) [file dirname $filename]
+        SaveOptions
+    }
+
+    set dir $rat_tmp/tnef.[RatGenId]
+    file mkdir $dir
+
+    if {[catch {open "|$option(tnef) --maxsize=$option(tnef_max_size) --directory=$dir" w} tnef]} {
+        RatLog 4 "$t(save_failed): $tnef"
+        file delete -force $dir
+        return
+    }
+    $body saveData $tnef 0 0
+    if {[catch {close $tnef} err]} {
+        RatLog 4 "$t(save_failed): $err"
+        file delete -force $dir
+        return
+    }
+    if {[catch {file copy -force $dir/$childs $filename} err]} {
+        RatLog 4 "$t(save_failed): $err"
+        file delete -force $dir
+        return
+    }
+    file delete -force $dir
 }

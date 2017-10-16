@@ -3,7 +3,7 @@
 # This file contains code which handles help windows
 #
 #
-#  TkRat software and its included text is Copyright 1996-2002 by
+#  TkRat software and its included text is Copyright 1996-2004 by
 #  Martin Forssén
 #
 #  The full text of the legal notice is contained in the file called
@@ -17,7 +17,6 @@ set helporder { intro
 		dbase
 		deleting
 		grouping
-		notification
 		userproc
 		bugreport}
 
@@ -39,7 +38,7 @@ proc Help {{subject intro}} {
 
     # Create identifier
     set id helpWin[incr idCnt]
-    upvar #0 $id hd
+    upvar \#0 $id hd
     set w .$id
     set hd(w) $w
 
@@ -59,11 +58,12 @@ proc Help {{subject intro}} {
 	-bd 1 \
 	-exportselection false \
 	-highlightthickness 0 \
-	-selectmode single
+	-selectmode single \
+        -width 20 \
+        -height 9
     set hd(list) $w.subjlist
-    Size $hd(list) subjlist
     set b($hd(list)) help_subjlist
-    button $w.dismiss -text $t(dismiss) -command "DismissHelp $id"
+    button $w.dismiss -text $t(dismiss) -command "destroy $w"
     set b($w.dismiss) dismiss
     scrollbar $w.textscroll \
 	-relief sunken \
@@ -77,7 +77,6 @@ proc Help {{subject intro}} {
 	-bd 1 \
 	-highlightthickness 0
     set hd(text) $w.texttext
-    Size $hd(text) helptext
     set b($hd(text)) help_text
 
     grid $w.subjects
@@ -92,14 +91,14 @@ proc Help {{subject intro}} {
     bind $w <Key-space> "$hd(text) yview scroll 1 pages"
     bind $w <Key-BackSpace> "$hd(text) yview scroll -1 pages"
     bind $hd(list) <ButtonRelease-1> "SelectHelp $id"
-    wm protocol $w WM_DELETE_WINDOW "DismissHelp $id"
+    bind $hd(text) <Destroy> "DismissHelp $id"
 
     # Populate list
     foreach topic $helporder {
 	$hd(list) insert end $help(title,$topic)
     }
 
-    Place $w help
+    ::tkrat::winctl::SetGeometry help $w $hd(text)
 
     ShowHelp $id $subject
 }
@@ -113,7 +112,7 @@ proc Help {{subject intro}} {
 
 proc SelectHelp {id} {
     global helporder
-    upvar #0 $id hd
+    upvar \#0 $id hd
 
     set topic [lindex $helporder [$hd(list) curselection]]
     ShowHelp $id $topic
@@ -130,7 +129,7 @@ proc SelectHelp {id} {
 
 proc ShowHelp {id topic} {
     global help helporder
-    upvar #0 $id hd
+    upvar \#0 $id hd
 
     # The subject list
     set i [lsearch -exact $helporder $topic]
@@ -154,11 +153,8 @@ proc ShowHelp {id topic} {
 # id	- The help-window identifier
 
 proc DismissHelp {id} {
-    upvar #0 $id hd
+    upvar \#0 $id hd
 
-    RecordSize $hd(list) subjlist
-    RecordSize $hd(text) helptext
-    RecordPos $hd(w) help
-    destroy $hd(w)
+    ::tkrat::winctl::RecordGeometry help $hd(w) $hd(text)
     unset hd
 }

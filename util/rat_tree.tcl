@@ -61,8 +61,8 @@ proc rat_tree::create {win args} {
     scrollbar $win.scrollx -relief sunken -command "$win.c xview" \
 	    -highlightthickness 0 -orient horizontal -bd 1 -takefocus 0
     if { 0 < [llength $a(-sizeid)]} {
-	Size $ts(c) $a(-sizeid)
-	bind $win.c <Delete> "RecordSize $a(-sizeid)"
+	::tkrat::winctl::Size $a(-sizeid) $ts(c)
+	bind $win.c <Delete> "::tkrat::winctl::RecordSize $a(-sizeid) $ts(c)"
     }
     set ts(scrollx) $win.scrollx
     set ts(scrolly) $win.scrolly

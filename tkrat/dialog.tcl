@@ -1,5 +1,5 @@
 #
-#  TkRat software and its included text is Copyright 1996-2002 by
+#  TkRat software and its included text is Copyright 1996-2004 by
 #  Martin Forssén
 #
 #  The full text of the legal notices is contained in the file called
@@ -44,12 +44,12 @@ proc RatLogin {host trial user prot port} {
 	 $w.store \
 	 $w.buttons -side top -fill both -pady 2
     
-    Place $w ratLogin
-    ModalGrab $w $w.passwd.entry
-
+    ::tkrat::winctl::SetGeometry ratLogin $w
+    ::tkrat::winctl::ModalGrab $w $w.passwd.entry
+    
     tkwait variable ${id}(done)
 
-    RecordPos $w ratLogin
+    ::tkrat::winctl::RecordGeometry ratLogin $w
     destroy $w
     unset m($w.store)
     update idletasks
@@ -114,12 +114,18 @@ proc RatDialog {parent title text bitmap default args} {
     frame $w.top -relief raised -bd 1
     pack $w.top -side top -fill both -expand 1
 
+    if {80 > [string length $text] && -1 == [string first $text "\n"]} {
+        set aspect 3000
+    } else {
+        set aspect 600
+    }
+
     # 2. Fill the top part with bitmap and message (use the option
     # database for -wraplength so that it can be overridden by
     # the caller).
 
     option add *Dialog.msg.wrapLength 3i widgetDefault
-    message $w.msg -justify left -text $text -aspect 600
+    message $w.msg -justify left -text $text -aspect $aspect
     pack $w.msg -in $w.top -side right -expand 1 -fill both -padx 3m -pady 3m
     if {$bitmap != ""} {
 	label $w.bitmap -bitmap $bitmap
@@ -177,7 +183,7 @@ proc RatDialog {parent title text bitmap default args} {
     } else {
 	set f $w
     }
-    ModalGrab $w $f
+    ::tkrat::winctl::ModalGrab $w $f
 
     # 7. Wait for the user to respond, then restore the focus and
     # return the index of the selected button.  Restore the focus
@@ -201,7 +207,7 @@ proc RatDialog {parent title text bitmap default args} {
 proc RatText {title text} {
     global idCnt t
 
-    regsub -all "\a" $text {} text
+    set text [string map [list "\a" ""] $text]
 
     # Create identifier
     set id rattext[incr idCnt]
@@ -212,10 +218,8 @@ proc RatText {title text} {
     wm title $w $title
 
     # Message part
-    button $w.button -text $t(close) -command "RecordPos $w ratText; \
-	    RecordSize $w.text ratText; destroy $w"
+    button $w.button -text $t(close) -command "destroy $w"
     text $w.text -yscroll "$w.scroll set" -relief sunken -bd 1
-    Size $w.text ratText
     scrollbar $w.scroll -relief sunken -bd 1 \
 	    -command "$w.text yview"
     pack $w.button -side bottom -padx 5 -pady 5
@@ -223,7 +227,9 @@ proc RatText {title text} {
     pack $w.text -expand 1 -fill both
     $w.text insert end $text\n
     $w.text configure -state disabled
-    Place $w ratText
+
+    bind $w.text <Destroy> "::tkrat::winctl::RecordGeometry ratText $w $w.text"
+    ::tkrat::winctl::SetGeometry ratText $w $w.text
 }
 
 # bgerror --

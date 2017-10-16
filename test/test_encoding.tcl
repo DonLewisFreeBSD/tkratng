@@ -9,7 +9,6 @@ proc test_encoding::test_encoding {} {
 }
 
 proc test_encoding::test_qp_encoding {} {
-    global LEAD errors verbose
 
     #
     # List of test cases
@@ -27,36 +26,28 @@ proc test_encoding::test_qp_encoding {} {
 	set charset [lindex $te 1]
 	set out [lindex $te 2]
 
-	if {$verbose} {
-	    puts "Encoding '$in' in '$charset'"
-	}
+        StartTest "Encoding '$in' in '$charset'"
 	if {[catch {RatEncodeQP $charset $in} result]} {
-	    puts "$LEAD RatEncodeQP failed: $result"
-	    incr errors
+	    ReportError "RatEncodeQP failed: $result"
 	    continue
 	}
 	if {$result != $out} {
-	    puts "$LEAD RatEncodeQP encoded '$in' in '$charset' to '$result' expected '$out'"
-	    incr errors
+	    ReportError "RatEncodeQP encoded '$in' in '$charset' to '$result' expected '$out'"
 	    continue
 	}
 	if {[catch {RatDecodeQP $charset $out} result]} {
-	    puts "$LEAD RatDecodeQP failed: $result"
-	    incr errors
+	    ReportError "RatDecodeQP failed: $result"
 	    continue
 	}
 	if {$result != $in} {
-	    puts "$LEAD RatDecodeQP encoded '$out' in '$charset' to '$result' expected '$in'"
-	    incr errors
+	    ReportError "RatDecodeQP encoded '$out' in '$charset' to '$result' expected '$in'"
 	    continue
 	}
     }
-    exit 1
 }
 
 proc test_encoding::test_header_encoding {} {
-    global LEAD errors verbose
-
+    global tcl_version
     set encodings {us-ascii iso-8859-1 iso-2022-jp}
 
     #
@@ -69,18 +60,18 @@ proc test_encoding::test_header_encoding {} {
 	{"" "Not ok in any \u01a9"}
     }
     lappend tests [list "us-ascii" "Long string [string repeat { } 16385]"]
+    set index 0
     foreach te $tests {
 	set data [lindex $te 1]
+	StartTest "Encoding body\[[incr index]\] in [lindex $te 0]"
 	set logdata [string range $data 0 20]
 	if {[catch {RatCheckEncodings data $encodings} enc]} {
-	    puts "$LEAD Failed to check encodings for {$logdata}: $enc"
-	    incr errors
+	    ReportError "Failed to check encodings for {$logdata}: $enc"
 	    continue
 	}
 	if {[lindex $te 0] != $enc} {
-	    puts [concat "$LEAD Suggested frong encoding for {$logdata}." \
+	    ReportError [concat "Suggested frong encoding for {$logdata}." \
 		  "Expected [lindex $te 0] but got $enc"]
-	    incr errors
 	}
     }
 
@@ -96,43 +87,58 @@ proc test_encoding::test_header_encoding {} {
 	{0 "R\ue4kan lever?" "=?iso-8859-1?Q?R=E4kan_lever=3F?="}
 	{0 "R\ue4ksm\uf6rg\ue5s" "=?iso-8859-1?Q?R=E4ksm=F6rg=E5s?="}
 	{0 "\ue5\ue4\uf6" "=?iso-8859-1?Q?=E5=E4=F6?="}
-	{0 "\u306f" "=?iso-2022-jp?Q?=1B(B=1B$@$O?="}
-	{43 "\u306f\u306f" "=?iso-2022-jp?Q?=1B(B=1B$@$O$O?="}
-	{44 "\u306f\u306f" "=?iso-2022-jp?Q?=1B(B=1B$@$O?=\n =?iso-2022-jp?Q?=1B(B=1B$@$O?="}
-	{9 "(linuxppc-jp:11528) Performa5410 \u3067\u306e\u30cd\u30c3\u30c8\u30ef\u30fc\u30af" "(linuxppc-jp:11528) Performa5410\n =?iso-2022-jp?Q?=1B(B=1B$@$G$N%M%C%H%o!<%/?="}
 	{8 "Fwd: From our Home and Family to your Home and Family . . .                                                                                    0001a" "Fwd: From our Home and Family to your Home and Family . . .        \n                                                                           \n 0001a"}
     }
+    # The way iso2022-jp is encoded changes between versions
+    if {8.4 > $tcl_version} {
+	set tests [concat $tests {
+	    {0 "\u306f" "=?iso-2022-jp?Q?=1B=28B=1B=24=40=24O?="}
+	    {33 "\u306f\u306f" "=?iso-2022-jp?Q?=1B=28B=1B=24=40=24O=24O?="}
+	    {34 "\u306f\u306f" "=?iso-2022-jp?Q?=1B=28B=1B=24=40=24O?=\n =?iso-2022-jp?Q?=1B=28B=1B=24=40=24O?="}
+	    {9 "(linuxppc-jp:11528) Performa5410 \u3067\u306e\u30cd\u30c3\u30c8\u30ef\u30fc\u30af" "(linuxppc-jp:11528) Performa5410\n =?iso-2022-jp?Q?=1B=28B=1B=24=40=24G=24N=25M=25C=25H=25o!=3C=25/?="}
+	}]
+    } elseif {8.4 == $tcl_version} {
+	set tests [concat $tests {
+	    {0 "\u306f" "=?iso-2022-jp?Q?=1B$B$O=1B(B?="}
+	    {43 "\u306f\u306f" "=?iso-2022-jp?Q?=1B$B$O$O=1B(B?="}
+	    {44 "\u306f\u306f" "=?iso-2022-jp?Q?=1B$B$O=1B(B?=\n =?iso-2022-jp?Q?=1B$B$O=1B(B?="}
+	    {9 "(linuxppc-jp:11528) Performa5410 \u3067\u306e\u30cd\u30c3\u30c8\u30ef\u30fc\u30af" "(linuxppc-jp:11528) Performa5410\n =?iso-2022-jp?Q?=1B$B$G$N%M%C%H%o!<%/=1B(B?="}
+	}]
+    } else {
+	set tests [concat $tests {
+	    {0 "\u306f" "=?iso-2022-jp?Q?=1B=24B=24O=1B=28B?="}
+	    {35 "\u306f\u306f" "=?iso-2022-jp?Q?=1B=24B=24O=24O=1B=28B?="}
+	    {36 "\u306f\u306f" "=?iso-2022-jp?Q?=1B=24B=24O=1B=28B?=\n =?iso-2022-jp?Q?=1B=24B=24O=1B=28B?="}
+	    {9 "(linuxppc-jp:11528) Performa5410 \u3067\u306e\u30cd\u30c3\u30c8\u30ef\u30fc\u30af" "(linuxppc-jp:11528) Performa5410\n =?iso-2022-jp?Q?=1B=24B=24G=24N=25M=25C=25H=25o!=3C=25/=1B=28B?="}
+	}]
+    }
+
+    set index 0
     foreach te $tests {
+	StartTest "Encoding header\[[incr index]\] [lindex $te 1]"
 	# Encode header
 	if {[catch {RatTest encode_header $encodings \
 	    [lindex $te 0] [lindex $te 1]} e]} {
-	    puts "$LEAD Failed to encode header line: $e"
-	    incr errors
+	    ReportError "Failed to encode header line: $e"
 	    continue
 	}
 	# Check encoded version
 	if {$e != [lindex $te 2]} {
-	    puts "$LEAD Incorrectly encoded header-line"
-	    if {$verbose} {
-		puts [list "Got" $e]
-		puts [list "Expected" [lindex $te 2]]
-	    }
+	    ReportError [join [list "Incorrectly encoded header-line" \
+				   "     Got [list $e]" \
+				   "Expected [list [lindex $te 2]]"] "\n"]
 	}
 	# Decode the encoded
 	if {[catch {RatTest decode_header $e} d]} {
-	    puts "$LEAD Failed to decode header line: $e"
-	    incr errors
+	    ReportError "Failed to decode header line: $e"
 	    continue
 	}
 	# Check decoded version
 	if {$d != [lindex $te 1]} {
-	    puts "$LEAD Incorrectly decoded header-line"
-	    incr errors
-	    if {$verbose} {
-		puts [list "Decoded" $e]
-		puts [list "Got" $d]
-		puts [list "Expected" [lindex $te 1]]
-	    }
+	    ReportError [join [list "Incorrectly decoded header-line" \
+				   " Decoded [list $e]" \
+				   "     Got [list $d]" \
+				   "Expected [list [lindex $te 1]]"] "\n"]
 	}
     }
 }

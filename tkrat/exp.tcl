@@ -3,7 +3,7 @@
 # This file contains code for handling message selection expressions
 #
 #
-#  TkRat software and its included text is Copyright 1996-2002 by
+#  TkRat software and its included text is Copyright 1996-2004 by
 #  Martin Forssén
 #
 #  The full text of my legal notices is contained in the file called
@@ -66,7 +66,7 @@ proc ExpCreate {handler {addproc {}}} {
     frame $w.buttons
     button $w.buttons.ok -text $t(ok) -default active -command "ExpDone $id 1"
     button $w.buttons.clear -text $t(clear) -command "ExpClear $id"
-    button $w.buttons.cancel -text $t(cancel) -command "ExpDone $id 0"
+    button $w.buttons.cancel -text $t(cancel) -command "destroy $w"
     pack $w.buttons.ok \
 	 $w.buttons.clear \
 	 $w.buttons.cancel -side left -expand 1
@@ -77,7 +77,6 @@ proc ExpCreate {handler {addproc {}}} {
     set b($w.buttons.ok) exp_ok
     set b($w.buttons.clear) clear
     set b($w.buttons.cancel) dismiss
-    wm protocol $w WM_DELETE_WINDOW "ExpDone $id 0"
 
     set hd(mode) {}
     set hd(action) create
@@ -86,7 +85,8 @@ proc ExpCreate {handler {addproc {}}} {
     } else {
 	ExpModeAdv $id
     }
-    Place $w ratExpression
+    bind $w.buttons.ok <Destroy> "ExpClose $id"
+    ::tkrat::winctl::SetGeometry ratExpression $w
 }
 
 # ExpEdit --
@@ -123,7 +123,8 @@ proc ExpEdit {name namechange} {
     pack $w.buttons -side bottom -pady 5 -fill x
     pack $w.f
 
-    Place $w ratExpEdit
+    bind $w.buttons.ok <Destroy> "ExpClose $id"
+    ::tkrat::winctl::SetGeometry ratExpEdit $w
 }
 
 # ExpModeBasic --
@@ -299,8 +300,8 @@ proc ExpClear {handler} {
 # action	- what we should do
 
 proc ExpDone {handler action} {
-    upvar #0 $handler hd
-    upvar #0 $hd(handler) fHd
+    upvar \#0 $handler hd
+    upvar \#0 $hd(handler) fHd
     global t b option expList expExp
 
     if {![info exist expList]} {
@@ -315,11 +316,8 @@ proc ExpDone {handler action} {
 		    if {[string length $exp]} {
 			set exp "$exp $hd(op) "
 		    }
-		    if {[string compare reply-to $f]} {
-			set exp "${exp}$f has [list $hd($f)]"
-		    } else {
-			set exp "${exp}reply-to has [list $hd($f)]"
-		    }
+                    regsub -all {\\} $hd($f) {\\\\} m
+                    set exp "${exp}$f has [list $m]"
 		}
 	    }
 	    if {[catch {RatParseExp $exp} expId]} {
@@ -373,13 +371,19 @@ proc ExpDone {handler action} {
 	}
 	RatFreeExp $expId
     }
+    destroy $hd(w)
+}
+
+proc ExpClose {handler} {
+    upvar \#0 $handler hd
+    global b option
+    
     if {"create" == $hd(action)} {
-	RecordPos $hd(w) ratExpression
+        ::tkrat::winctl::RecordGeometry ratExpression $hd(w)
     } else {
-	RecordPos $hd(w) ratExpEdit
+        ::tkrat::winctl::RecordGeometry ratExpEdit $hd(w)
     }
     catch {focus $hd(oldfocus)}
-    destroy $hd(w)
     foreach bn [array names b $hd(w).*] {unset b($bn)}
     if {[string compare $hd(mode) $option(expression_mode)]} {
 	set option(expression_mode) $hd(mode)

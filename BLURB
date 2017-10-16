@@ -50,11 +50,6 @@ following is a non exhaustive list of the capabilities:
 	folders. Messages are sent via SMTP or any user configured program
 	(for example sendmail).
 
-    * Supports Delivery Status Notifications
-	TkRat supports the DSN standard. This lets you see if  your message
-	has arrived safely at the destination. This requires an MTA that
-	handles the DSN ESMTP extension.
-    
     * Composing
 	Messages are composed with the built in editor (tk's text widget plus
 	many extensions) or an external editor of your choice.

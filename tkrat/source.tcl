@@ -3,7 +3,7 @@
 # This file contains code which handles shows the source of a bodypart
 #
 #
-#  TkRat software and its included text is Copyright 1996-2002 by
+#  TkRat software and its included text is Copyright 1996-2004 by
 #  Martin Forssén
 #
 #  The full text of the legal notice is contained in the file called
@@ -87,22 +87,22 @@ proc ShowSource {body} {
          -wrap char \
          -bd 0 \
          -highlightthickness 0
-    Size $w.text.text source
     pack $w.text.scroll -side right -fill y
     pack $w.text.text -expand yes -fill both
     pack $w.text -side top -expand yes -fill both
 
     # The buttons
-    button $w.dismiss -text $t(dismiss) -command "RecordPos $w showSource; \
-	    RecordSize $w.text.text source; destroy $w"
+    button $w.dismiss -text $t(dismiss) -command "destroy $w"
     button $w.save -text $t(save_to_file)... -command "SaveBody $body $w"
     pack $w.save \
          $w.dismiss -side left -expand 1 -pady 5
 
     # Insert the source into the text widget
-    regsub -all "\r\n" [$body data true] "\n" data
+    set data [string map [list "\r\n" "\n"] [$body data true]]
     $w.text.text insert end $data
     $w.text.text configure -state disabled
 
-    Place $w showSource
+    bind $w.text.text <Destroy> \
+        "::tkrat::winctl::RecordGeometry showSource $w $w.text.text"
+    ::tkrat::winctl::SetGeometry showSource $w $w.text.text
 }

@@ -1,6 +1,6 @@
 #############################################################################
-# TkRat software and its included text is Copyright 1996-2002 by
-# Martin Forssén.                                                        #
+# TkRat software and its included text is Copyright 1996-2004 by            #
+# Martin Forssén.                                                           #
 #                                                                           #
 # The full text of the legal notice is contained in the file called         #
 # COPYRIGHT, included with this distribution.                               #
@@ -40,15 +40,16 @@ INSTALL_PREFIX = @INSTALL_PREFIX@
 
       INDEX = tclIndex
    INDEXSRC = alias.tcl client.tcl compose.tcl convert.tcl dbase.tcl \
-              dialog.tcl dsn.tcl exp.tcl folder.tcl font.tcl help.tcl \
-              info.tcl keydef.tcl languages.tcl options.tcl pgp.tcl \
+              dialog.tcl exp.tcl folder.tcl font.tcl help.tcl \
+              info.tcl keydef.tcl options.tcl pgp.tcl fontedit.tcl \
               preferences.tcl print.tcl show.tcl source.tcl start.tcl \
               vfolder.tcl vfolderdef.tcl watcher.tcl winctl.tcl html.tcl \
-              mime.tcl @TEXTFILES@
+              mime.tcl vfolderwizard.tcl firstwizard.tcl addrlist.tcl \
+	      delattachments.tcl .messages/languages.tcl @TEXTFILES@
 
-  LANGUAGES = languages.tcl
+  LANGUAGES = .messages/languages.tcl
     LANGSRC = Text/balloon.text Text/changes.text Text/help.text \
-              Text/messages.text
+              Text/messages.text Text/features.text
 
 all: ${LANGUAGES} ${INDEX} tkrat.install
 
@@ -62,23 +63,30 @@ install.shared: ${INDEX} ${INDEXSRC}
 	if test ! -d ${INSTALL_PREFIX}${DATA_DIR} ; then \
 	    ${INSTALL} -m 0755 -d ${INSTALL_PREFIX}${DATA_DIR} ;\
 	fi
-	${INSTALL} ${INDEX} ${INSTALL_PREFIX}${DATA_DIR}/${INDEX}
 	for i in `ls ${INDEXSRC}` ; \
 	do \
 	    ${INSTALL} -m 0644 $$i ${INSTALL_PREFIX}${DATA_DIR} ;\
 	done
 	cd ${INSTALL_PREFIX}${DATA_DIR}; \
-		echo "if [catch {pkg_mkIndex -verbose . *.tcl} \
+		echo "auto_mkindex . *.tcl" | ${TCLSH}
+	cd ${INSTALL_PREFIX}${DATA_DIR}; \
+		echo "if [catch {pkg_mkIndex . *.tcl} \
 			error] \
 		  {puts \$$error; exit 1}" | ${TCLSH}
 
-install: install.shared install.data
+install: install.shared install.bin
 
 ${LANGUAGES}: ${LANGSRC}
-	(cd Text; ${TCLSH} dotext.tcl -nowarn)
+	[ -d .messages ] || mkdir .messages
+	cd Text; ${TCLSH} dotext.tcl -nowarn
 
-${INDEX}: ${INDEXSRC} ${LANGUAGES}
+${INDEX}: ${INDEXSRC} ${LANGUAGES} Makefile
 	${INDEXCMD}
+
+Makefile: Makefile.in ../config.status
+	cd ..; ./config.status tkrat/Makefile
+	${MAKE} || exit 1
+	exit 0
 
 tkrat.install: Makefile
 	rm -f $@
@@ -100,7 +108,8 @@ backup:
 		`ls ${INDEXSRC}` Makefile Text
 
 clean:
-	rm -f core tkrat.install tcl.tmp text_*.tcl ${LANGUAGES} ${INDEX}
+	rm -rf .messages
+	rm -f core tkrat.install tcl.tmp ${INDEX}
 
 tags-internal:
 	${ETAGS} --append --output=../TAGS --lang=none \

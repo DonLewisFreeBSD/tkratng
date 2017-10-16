@@ -2,8 +2,8 @@
 # This is the toplevel makefile for ratatosk
 #
 #############################################################################
-# TkRat software and its included text is Copyright 1996-2002 by
-# Martin Forssén.                                                        #
+# TkRat software and its included text is Copyright 1996-2004 by            #
+# Martin Forssén.                                                           #
 #                                                                           #
 # The full text of the legal notice is contained in the file called         #
 # COPYRIGHT, included with this distribution.                               #
@@ -12,13 +12,18 @@
 @SET_MAKE@
 OSTYPE = @OSTYPE@
 SHELL = /bin/sh
-EXTRACFLAGS=@NATIVE_SHLIB_CFLAGS@ @MEM_DEBUG_FLAGS@ @TCL_INCLUDE@
+EXTRACFLAGS=@NATIVE_SHLIB_CFLAGS@ @MEM_DEBUG_FLAGS@ @TCL_INCLUDE@ @CCLIENT_FLAGS@
 IMAPFLAGS = @IMAPFLAGS@
 ETAGS = @etags@
 
 all: build
 
 build:
+	if test -e imap/OSTYPE ; then \
+	    if test "Makefile" = `ls -t Makefile imap/OSTYPE|head -1` ; then \
+		cd imap; ${MAKE} clean; \
+	    fi; \
+	fi
 	cd imap; \
 	if test "`cat OSTYPE 2>/dev/null || true`" = "${OSTYPE}" ; then \
 	    ${MAKE} ${IMAPFLAGS} EXTRACFLAGS="${EXTRACFLAGS}"; \
@@ -59,4 +64,4 @@ tags:
 distclean: clean
 	rm -f config.status config.log config.cache config.h \
 	      Makefile lib/Makefile tkrat/Makefile script/Makefile \
-	      misc/Makefile util/Makefile
+	      misc/Makefile util/Makefile test/run tkrat/tkrat

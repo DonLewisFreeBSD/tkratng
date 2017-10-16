@@ -5,7 +5,7 @@
 # already exists, it is just unmapped and raised (if possible).
 #
 #
-#  TkRat software and its included text is Copyright 1996-2002 by
+#  TkRat software and its included text is Copyright 1996-2004 by
 #  Martin Forssén
 #
 #  The full text of the legal notice is contained in the file called
@@ -25,6 +25,28 @@ proc Preferences {} {
     }
 }
 
+# Images
+set checkmark_img [image create photo -data {
+    R0lGODlhDwAPAIQcADSNHjWOHzeQIjmRIzuTJj6VKT+WKkGXLEKYLUicM0ue
+    Nk6gOV+sTGqzWG61XHy+bH2/boHBconFeovGfJzQkKTUmafVm6nWnqvXoLPc
+    qbzgs8Xkvf///////////////yH5BAEKAB8ALAAAAAAPAA8AAAUv4CeOZGme
+    aKp+E7R+EfYuzHs0r5Og2VB9EsIGpUEEPoKH6gIoGF4KgOU1obyu2BAAOw==}]
+set error_img [image create photo -data {
+    R0lGODlhDwAPAMZAALgEALoGCcUBDMUFAM8ABNEAAKcUFtEBFNsAAtsADd4B
+    AL4NF6UaItwAGNsAKekAA84QJcMoI8MnMtEgPr5BULxMU7xOXLNXUs5MStdF
+    WOBFTeJDU+VDWvBBSPg9VrhhcNBdYOhSYNpbb/xidsaAhvFyj99/feh+ktmJ
+    jf55gr+XjfCChbqenNqSrt2WosOrtdmps/+kpPatoPmvtfq7t/jQy9fv09z7
+    6uP/+fH/6v/1/O3/+/758f/76/z+6v7+/v//////////////////////////
+    ////////////////////////////////////////////////////////////
+    ////////////////////////////////////////////////////////////
+    ////////////////////////////////////////////////////////////
+    /////////////////////////////////////////////////yH5BAEKAEAA
+    LAAAAAAPAA8AAAfCgECCgh0BAwcYg4otFgwJCwILDRAiixkLAw0yMTQeCA0U
+    gxaYBQs5PzgmAAMCFUAqEAUICAGnO6oFCg0nGAmzBQc8Oj8jCAUEAiEQBwUD
+    AAc1OzkbCM4BEQerCAIJM9IbCc8FBRG+AAQHKTk+sQAPCREhBQ8AshwlJAIE
+    A7QXQAYPBhAIYGMHjxQAzi1wAeRDtQcFfKBKMS+BKyAvJgQgkKDHjRsrCBCQ
+    oAhGBQgKPITI4ODARUVAWIAwMACCBhSKAgEAOw==}]
+
 
 # BuildPreferences --
 #
@@ -33,286 +55,184 @@ proc Preferences {} {
 # Arguments:
 
 proc BuildPreferences {} {
-    global t b pref
+    global t b pref option
 
     # Initialize data table
     foreach l [GetLanguages] {
 	lappend lang [lrange $l 0 1]
     }
 
+    # Give initial values
+    set spell_dictionaries [list [list auto $t(auto)]]
+    set pref(dictionaries) {}
+
+    # Font families
+    if {![info exists pref(families)]} {
+        foreach f [lsort -dictionary [font families]] {
+            lappend pref(families) [list $f [string totitle $f]]
+        }
+    }
+
     # The lists here can have the following elements
     # option var label_id value_list
+    # checkbutton var label_id onvalue offvalue
+    # bool var label_id
     # entry var label_id
     # entry_unit var label_id unit
-    # bool var label_id true_text false_text
+    # spinbox var label_id from increment to
+    # spinbox_unit var label_id unit from increment to
     # special var label_id special_proc
-    # label label_text font_options anchor
-    set pref(appearance) "\
-	{option language language [list $lang]} \
-	{entry charset charset} \
-	{bool useinputmethods useinputmethods \
-	        {{$t(true)} {$t(false)}}} \
-    "
-    set pref(appearance,graphics) "\
-	{special color_set color_scheme SetupColor} \
-	{label $t(fonts) underline center} \
-	{special prop_norm prop_norm {SelectFont prop_norm}} \
-	{special prop_light prop_light {SelectFont prop_light}} \
-	{special fixed_norm fixed_norm {SelectFont fixed_norm}} \
-	{special fixed_bold fixed_bold {SelectFont fixed_bold}} \
-	{special watcher_font watcher_font {SelectFont watcher_font}} \
-    "
-    set pref(appearance,msglist) "\
-	{entry list_format list_format} \
-	{option show_header show_headers \
-		{{all {$t(show_all_headers)}} \
-		 {selected {$t(show_selected_headers)}} \
-		 {none {$t(show_no_headers)}}}} \
-	{entry show_header_selection show_header_selection} \
-	{option browse default_browse_mode \
-		{{normal {$t(no_browse)}} \
-		 {browse {$t(do_browse)}} \
-		 {folder {$t(use_folder_default)}}}} \
-	{option folder_sort sort_order \
-		{{threaded {$t(sort_threaded)}} \
-		 {subject {$t(sort_subject)}} \
-		 {subjectonly {$t(sort_subjectonly)}} \
-		 {sender {$t(sort_sender)}} \
-		 {folder {$t(sort_folder)}} \
-		 {reverseFolder {$t(sort_reverseFolder)}} \
-		 {date {$t(sort_date)}} \
-		 {reverseDate {$t(sort_reverseDate)}} \
-		 {size {$t(sort_size)}}\
-		 {reverseSize {$t(sort_reverseSize)}}}} \
-	{option start_selection start_selection \
-		{{first {$t(first_message)}} \
-		 {last {$t(last_message)}} \
-		 {first_new {$t(first_new_message)}} \
-		 {before_new {$t(before_first_new_message)}}}} \
-    "
-    set pref(appearance,html) "\
-	{special html_prop_font html_prop_font {SelectFont html_prop_font}} \
-	{special html_fixed_font html_fixed_font \
-	        {SelectFont html_fixed_font}} \
-	{entry html_prop_font_sizes html_prop_font_sizes} \
-	{entry html_fixed_font_sizes html_fixed_font_sizes} \
-	{bool html_show_images html_show_images \
-		{{$t(true)} {$t(false)}}} \
-        "
-    set pref(network) "\
-	{message {} {$t(start_online_mode)}} \
-	{option start_online_mode start_mode \
-	    {{last {$t(som_last)}} \
-	     {online {$t(som_online)}} \
-             {offline {$t(som_offline)}}}} \
-    "
-    set pref(network,www) "\
-	{option url_viewer url_viewer \
-		{{RatUP {$t(userproc): RatUP_ShowURL}} \
-		 {netscape Netscape} \
-		 {opera Opera} \
-		 {lynx Lynx} {other $t(other)}}} \
-	{entry netscape netscape_cmd} \
-	{entry opera opera_cmd} \
-	{entry lynx lynx_cmd} \
-	{entry other_browser other_browser_cmd} \
-    "
-    set pref(replies) "\
-	{bool wrap_cited wrap_cited \
-		{{$t(true)} {$t(false)}}} \
-	{bool skip_sig on_reply \
-		{{$t(skip_sig)} {$t(keep_sig)}}} \
-        {bool append_sig append_sig \
-                {{$t(true)} {$t(false)}}} \
-        {bool reply_bottom reply_bottom \
-                {{$t(at_bottom)} {$t(at_top)}}} \
-    "
-    set pref(roles) "\
-	{entry name role_name} \
-	{entry signature signature_file} \
-	{special save_outgoing save_out SetupDefaultSave} \
-	{custom SetupRole} \
-    "
-    set pref(roles,address) "\
-	{entry from use_from_address} \
-	{entry bcc default_bcc} \
-	{entry reply_to default_reply_to} \
-	{message $t(tip) {$t(test_by)}} \
-	{entry pgp_keyid pgp_keyid} \
-    "
-    set pref(roles,sending) "\
-	{option sendprot sendprot \
-		{{smtp {$t(smtp)}} {prog {$t(user_program)}}}} \
-	{entry smtp_hosts smtp_hosts} \
-	{entry sendprog sendprog} \
-	{bool sendprog_8bit progin \
-		{{$t(eightbit)} {$t(sevenbit)}}} \
-	{special dsn_request default_action SetupDSNRequest} \
-    "
-    set pref(roles,advanced) "\
-        {label {$t(normally_ok)} {} center} \
-        {label {$t(unqual_adr_domain)} {} w} \
-        {entry uqa_domain domain} \
-        {label {$t(smtp_from_long)} {} w} \
-        {entry smtp_helo host}
-    "
-    set pref(advanced) "\
-	{entry main_window_name window_name} \
-	{entry icon_name icon_name} \
-	{option icon icon_bitmap \
-		{{normal {$t(normal_bitmap)}} \
-		 {small {$t(small_bitmap)}} \
-		 {none {$t(none)}}}} \
-    "
-    set pref(advanced,behaviour) "\
-	{bool iconic startup_mode \
-		{{$t(iconic)} {$t(normal)}}} \
-	{bool info_changes show_changes \
-		{{$t(show)} {$t(dont_show)}}} \
-	{bool mail_steal check_stolen_mail \
-		{{$t(check)} {$t(dont_check)}}} \
-	{option print_header print_headers \
-		{{all {$t(all)}} {selected {$t(selected)}} {none {$t(none)}}}} \
-	{bool expunge_on_close expunge_on_close \
-		{{$t(do)} {$t(do_not)}}} \
-	{bool keep_pos remember_pos \
-		{{$t(do_remember)} {$t(dont_remember)}}} \
-	{bool checkpoint_on_unmap checkpoint_on_unmap
-		{{$t(true)} {$t(false)}}} \
-	{entry_unit checkpoint_interval checkpoint_interval {$t(seconds)}} \
-    "
-    set pref(advanced,appearance) "\
-	{bool override_color override_color \
-		{{$t(true)} {$t(false)}}} \
-	{bool override_fonts override_fonts \
-		{{$t(true)} {$t(false)}}} \
-	{bool tearoff menu_tearoff \
-		{{$t(true)} {$t(false)}}} \
-	{entry_unit log_timeout log_timeout {$t(seconds)}} \
-    "
-    set pref(advanced,ssh) "\
-	{entry ssh_path ssh_path} \
-	{entry_unit ssh_timeout ssh_timeout {$t(seconds)}} \
-    "
-    set pref(advanced,files) "\
-	{entry tmp tmp_dir} \
-	{entry permissions file_permissions} \
-	{entry userproc userproc_file} \
-	{entry mailcap_path mailcap_path} \
-	{entry print_command print_command} \
-	{entry terminal terminal_command} \
-	{entry ispell_path ispell_cmd} \
-	{entry debug_file debug_file} \
-	{entry mimeprog mimeprog} \
-    "
-    set pref(advanced,caching) "\
-	{bool cache_passwd cache_passwd \
-		{{$t(do_cache)} {$t(do_not_cache)}}} \
-	{entry_unit cache_passwd_timeout cache_timeout {$t(seconds)}} \
-	{bool cache_conn cache_conn \
-		{{$t(do_cache)} {$t(do_not_cache)}}} \
-	{entry_unit cache_conn_timeout cache_timeout {$t(seconds)}} \
-    "
-    set pref(advanced,folder_dynamic) "\
-	{option dynamic_behaviour dynamic_behaviour \
-		{{expanded {$t(dyn_expanded)}} \
-		 {closed {$t(dyn_closed)}}}} \
-    "
-    set pref(advanced,network) "\
-	{entry domain domain} \
-	{entry remote_user remote_user} \
-	{entry remote_host remote_host} \
-	{entry imap_port imap_port} \
-	{entry pop3_port pop3_port} \
-	{entry urlprot url_protocols} \
-	{entry url_color url_color} \
-    "
-    set pref(advanced,dbase) "\
-	{option def_extype extype \
-		{{none {$t(none)}} \
-		 {remove {$t(remove)}} \
-		 {incoming {$t(incoming)}} \
-		 {backup {$t(backup)}}}} \
-	{entry_unit def_exdate exdate {$t(days)}} \
-	{entry dbase_backup dbase_backup} \
-	{entry_unit chunksize chunksize {$t(messages)}} \
-	{entry_unit expire_interval expire_interval {$t(days)}} \
-    "
-    set pref(advanced,watcher) "\
-	{entry_unit watcher_time intervals {$t(seconds)}} \
-	{entry watcher_name window_name} \
-	{entry_unit watcher_max_height max_height {$t(lines)}} \
-	{option watcher_show show_messages \
-		{{new {$t(new)}} {all {$t(all)}}}} \
-	{entry watcher_format list_format} \
-	{entry watcher_bell bell_ringings} \
-    "
-    set pref(advanced,compose) "\
-	{entry compose_headers headers} \
-	{entry_unit wrap_length wrap_length {$t(characters)}} \
-	{bool sigdelimit sigdelimit \
-		{{$t(true)} {$t(false)}}} \
-	{bool lookup_name lookup_name \
-		{{$t(do_lookup)} {$t(dont_lookup)}}} \
-	{bool copy_attached copy_attached_files \
-		{{$t(true)} {$t(false)}}} \
-	{option alias_expand alias_expansion \
-		{{0 {$t(alias_0)}} {1 {$t(alias_1)}} {2 {$t(alias_2)}}}} \
-	{bool always_editor always_use_external_editor \
-		{{$t(true)} {$t(false)}}} \
-    "
-    set pref(advanced,replies) "\
-	{entry re_regexp reply_regexp} \
-	{entry attribution attribution} \
-	{entry forwarded_message forwarded_label} \
-	{entry no_subject no_subject} \
-	{entry reply_lead reply_lead} \
-	{entry citexp citexp} \
-    "
-    set pref(advanced,sending) "\
-	{bool create_sender create_sender \
-		{{$t(true)} {$t(false)}}} \
-	{entry_unit smtp_timeout smtp_timeout {$t(seconds)}} \
-	{bool smtp_reuse smtp_reuse \
-		{{$t(true)} {$t(false)}}} \
-	{option smtp_verbose smtpv \
-		{{0 {$t(none)}} \
-		 {1 {$t(terse)}} \
-		 {2 {$t(normal)}} \
-		 {3 {$t(verbose)}}}} \
-	{bool force_send force_send \
-		{{$t(force)} {$t(no_force)}}} \
-    "
-    set pref(advanced,notification) "\
-	{entry dsn_directory dsn_directory} \
-	{bool dsn_snarf_reports folderwindow \
-		{{$t(snarf_dsn)} {$t(not_snarf_dsn)}}} \
-	{entry_unit dsn_expiration dsn_expiration {$t(days)}} \
-	{special dsn_verbose report_level SetupDSNVerbose} \
-    "
-    set pref(advanced,pgp) "\
-	{option pgp_version pgp_version \
-		{{0 $t(none)} {gpg-1 {GPG-1}} {2 {PGP-2}} \
-		 {5 {PGP-5}} {6 {PGP-6}} {auto {$t(auto)}}}} \
-	{entry pgp_path pgp_path} \
-	{entry pgp_args pgp_extra_args} \
-	{entry pgp_keyring pgp_keyring} \
-	{bool cache_pgp cache_passwd \
-		{{$t(do_cache)} {$t(do_not_cache)}}} \
-	{entry_unit cache_pgp_timeout cache_timeout {$t(seconds)}} \
-	{bool pgp_sign sign_outgoing \
-		{{$t(true)} {$t(false)}}} \
-	{bool pgp_encrypt encrypt_outgoing \
-		{{$t(true)} {$t(false)}}} \
-    "
+    # label label_text anchor
+    # custom custom_proc
+    set pref(roles) \
+        [list \
+             [list entry name role_name] \
+             [list entry signature signature_file] \
+             [list special save_outgoing save_out SetupDefaultSave] \
+             [list custom SetupRole]]
+    set pref(roles,address) \
+        [list \
+             [list entry from use_from_address] \
+             [list entry bcc default_bcc] \
+             [list entry reply_to default_reply_to] \
+             [list message $t(tip) $t(test_by)] \
+             [list entry pgp_keyid pgp_keyid]]
+    set pref(roles,sending) \
+        [list \
+             [list option sendprot sendprot \
+                  [list [list smtp $t(smtp)] \
+                       [list prog $t(user_program)]]] \
+             [list entry smtp_hosts smtp_hosts] \
+             [list entry smtp_user smtp_user] \
+             [list entry smtp_passwd passwd] \
+             [list bool validate_cert ssl_check_cert] \
+             [list entry sendprog sendprog] \
+             [list bool sendprog_8bit sendprog_8bit] \
+             [list bool same_sending_prefs same_sending_prefs]]
+    set pref(roles,advanced) \
+        [list \
+             [list label $t(normally_ok) center] \
+             [list label $t(unqual_adr_domain) w] \
+             [list entry uqa_domain domain] \
+             [list label $t(smtp_from_long) w] \
+             [list entry smtp_helo host]]
+    set pref(roles,pgp) \
+        [list \
+             [list bool sign_outgoing sign_outgoing] \
+             [list special sign_as sign_as PrefSetupSignAs]]
+    set pref(appearance) \
+        [list \
+             [list option language language $lang] \
+             [list special color_set color_scheme SetupColor] \
+             [list option font_family_prop prop_font_family $pref(families)] \
+             [list option font_family_fixed fixed_font_family $pref(families)]\
+             [list spinbox font_size font_size 1 1 120] \
+             [list special watcher_font watcher_font\
+                  [list SelectFont watcher_font]] \
+             [list bool useinputmethods useinputmethods] \
+            ]
+    set pref(general) \
+        [list \
+             [list bool iconic startup_iconic] \
+             [list option start_online_mode start_mode \
+                  [list [list last $t(som_last)] \
+                       [list online $t(som_online)] \
+                       [list offline $t(som_offline)]]] \
+             [list option start_selection start_selection \
+                  [list [list first $t(first_message)] \
+                       [list last $t(last_message)] \
+                       [list first_new $t(first_new_message)] \
+                       [list before_new $t(before_first_new_message)]]] \
+             [list entry list_format list_format] \
+             [list entry date_format date_format] \
+             [list entry show_header_selection show_header_selection] \
+             [list spinbox_unit checkpoint_interval \
+                  checkpoint_interval $t(seconds) 0 30 1000000] \
+             [list bool expunge_on_close expunge_on_close] \
+            ]
+    set pref(html) \
+        [list \
+             [list special url_viewer url_viewer SetupURLViewer] \
+             [list label "" center] \
+             [list label $t(html_messages) center] \
+             [list bool prefer_other_over_html avoid_html] \
+             [list bool html_show_images html_show_images] \
+             [list spinbox html_min_image_size html_min_image_size \
+                  0 1 1000000] \
+             [list entry html_proxy_host html_proxy_host] \
+             [list spinbox html_proxy_port html_proxy_port 1 1 65535] \
+             [list spinbox_unit html_timeout html_timeout $t(ms) \
+                  0 1000 10000000] \
+            ]
+    set pref(new_messages) \
+        [list \
+             [list spinbox_unit watcher_time watcher_intervals $t(seconds) \
+                 0 1 1000000] \
+             [list spinbox_unit watcher_max_height max_height $t(lines) \
+                 1 1 1000] \
+             [list option watcher_show show_messages \
+                  [list [list new $t(new)] [list all $t(all)]]] \
+             [list entry watcher_format list_format] \
+             [list spinbox watcher_bell bell_ringings 0 1 1000] \
+            ]
+    set pref(composing) \
+        [list \
+             [list bool always_editor always_use_external_editor] \
+             [list entry compose_headers headers] \
+             [list spinbox_unit compose_backup compose_backup $t(seconds) \
+                 0 10 1000000] \
+             [list spinbox_unit compose_last_chance compose_last_chance \
+                  $t(seconds) 0 30 1000000] \
+             [list entry re_regexp reply_regexp] \
+             [list entry attribution attribution] \
+             [list bool wrap_cited wrap_cited] \
+             [list bool skip_sig skip_sig] \
+             [list bool reply_bottom reply_bottom] \
+            ]
+    set pref(spell_checking) \
+        [list \
+             [list option def_spell_dict dictionary $spell_dictionaries] \
+             [list special auto_dicts auto_dicts SetupCheckDicts] \
+             [list special spell_path spell_cmd SetupSpellPath] \
+            ]
+    set pref(dbase) \
+        [list \
+             [list option def_extype extype \
+                  [list [list none $t(none)] \
+                       [list remove $t(remove)] \
+                       [list incoming $t(incoming)] \
+                       [list backup $t(backup)]]] \
+             [list entry_unit def_exdate exdate $t(days)] \
+             [list entry dbase_backup dbase_backup] \
+            ]
+    set pref(paths) \
+        [list \
+             [list entry tmp tmp_dir] \
+             [list entry print_command print_command] \
+             [list entry terminal terminal_command] \
+             [list entry ssh_path ssh_path] \
+             [list entry tnef tnef_path] \
+            ]
+    set pref(pgp) \
+        [list \
+             [list option pgp_version pgp_version \
+                  [list [list 0 $t(none)] [list gpg-1 GPG-1] [list 2 PGP-2] \
+                       [list 5 PGP-5] [list 6 PGP-6] [list auto $t(auto)]]] \
+             [list entry pgp_path pgp_path] \
+             [list entry pgp_args pgp_extra_args] \
+             [list entry pgp_keyring pgp_keyring] \
+             [list bool cache_pgp cache_passwd] \
+             [list spinbox_unit cache_pgp_timeout cache_timeout $t(seconds)\
+                 0 30 1000000] \
+             [list bool pgp_encrypt encrypt_outgoing] \
+            ]
 
     # Create top window structures
     set w .pref
     toplevel $w -class TkRat
     wm title $w $t(preferences)
-    frame $w.pane -bd 2 -relief flat
-    Size $w.pane prefPane
-    set pref(pane) $w.pane
+    set pref(scrollpane) $w.pane
+    set pref(pane) [rat_scrollframe::create $w.pane -bd 2 -relief flat]
     set pref(lastPref) ""
     set pref(selected) ""
 
@@ -324,25 +244,23 @@ proc BuildPreferences {} {
     set pref(rnode) \
 	    [$topnode add folder -label $t(roles) -state open -id rnode]
     PrefPopulateRoles
-    set onode [$topnode add folder -label $t(options) -state open]
-    foreach n {{appearance {graphics msglist html}}
-               {network {www}}
-               replies
-               {advanced {behaviour appearance ssh files caching
-                          folder_dynamic network dbase watcher compose
-	                  replies sending notification pgp}}} {
+
+    # Preferences
+    foreach n {appearance general html new_messages composing spell_checking
+        dbase paths pgp} {
 	set n0 [lindex $n 0]
 	set name $t($n0)
 	if {1 != [llength $n]} {
-	    set node [$onode add folder -label $name -state closed \
+	    set node [$topnode add folder -label $name -state closed \
 		    -id [list option $n0]]
 	    foreach n1 [lindex $n 1] {
 		$node add leaf -label $t($n1) -id [list option $n0,$n1]
 	    }
 	} else {
-	    $onode add leaf -label $name -id [list option $n0]
+	    $topnode add leaf -label $name -id [list option $n0]
 	}
     }
+
     $pref(tree) redraw
 
     # The buttons
@@ -361,8 +279,7 @@ proc BuildPreferences {} {
 		     }
     button $w.buttons.close -text $t(close) \
 	    -command "PrefCheck $w; \
-		      RecordPos $w preferences; \
-		      RecordSize $w.pane prefPane; \
+                      ::tkrat::winctl::RecordGeometry preferences $w $w.pane; \
 		      wm withdraw $w"
     pack $w.buttons.ok \
 	 $w.buttons.reset \
@@ -380,8 +297,8 @@ proc BuildPreferences {} {
     grid columnconfigure $w 1 -weight 5
     grid propagate $w.pane 0
 
-    Place $w preferences
-
+    ::tkrat::winctl::SetGeometry preferences $w $w.pane
+    
     # Initialize tracing function
     set pref(traceChanges) 0
     trace variable pref w PrefTraceProc
@@ -416,6 +333,7 @@ proc PrefSelectPane {pane} {
 	    PrefBuildRnode $pref(pane)
 	}
     }
+    rat_scrollframe::recalc $pref(scrollpane)
     return ok
 }
 
@@ -429,7 +347,7 @@ proc PrefSelectPane {pane} {
 # rp   - Role prefix
 
 proc PrefBuild {pane w rp} {
-    global t b option pref
+    global t b option pref propNormFont tk_version
 
     set pref(traceChanges) 0
     set row 0
@@ -448,67 +366,109 @@ proc PrefBuild {pane w rp} {
 	    } else {
 		set pref(opt,$var) {}
 	    }
-
-	    label $w.r${row}_lab -text $t([lindex $p 2]):
-	    grid $w.r${row}_lab -row $row -sticky ne -pady 1
 	}
 	switch [lindex $p 0] {
 	    entry {
-		    entry $w.r${row}_item -textvariable pref(opt,$var)
-		    grid $w.r${row}_item - -row $row -column 1 -sticky we
-		    set b($w.r${row}_item) pref_$bvar
-		}
+		label $w.r${row}_lab -text $t([lindex $p 2]):
+		grid $w.r${row}_lab -row $row -sticky ne -pady 1
+		entry $w.r${row}_item -textvariable pref(opt,$var)
+		grid $w.r${row}_item - -row $row -column 1 -sticky we
+		set b($w.r${row}_item) pref_$bvar
+	    }
 	    entry_unit {
-		    entry $w.r${row}_item -textvariable pref(opt,$var)
-		    label $w.r${row}_unit -text ([lindex $p 3])
-		    grid $w.r${row}_item -row $row -column 1 -sticky we
-		    grid $w.r${row}_unit -row $row -column 2 -sticky w
-		    set b($w.r${row}_item) pref_$bvar
-		    set b($w.r${row}_unit) unit_pref
-		}
-	    bool {
-		    if {$pref(opt,$var)} {
-			set pref(opt,$var) 1
-		    } else {
-			set pref(opt,$var) 0
-		    }
-		    set v [lindex $p 3]
-		    set v [list [list 1 [lindex $v 0]] [list 0 [lindex $v 1]]]
-    		    OptionMenu $w.r${row}_item pref(opt,$var) pref(text,$var) \
-			    $v
-		    grid $w.r${row}_item - -row $row -column 1 -sticky w
-		    set b($w.r${row}_item) pref_$bvar
-		}
+		label $w.r${row}_lab -text $t([lindex $p 2]):
+		grid $w.r${row}_lab -row $row -sticky ne -pady 1
+		entry $w.r${row}_item -textvariable pref(opt,$var)
+		label $w.r${row}_unit -text ([lindex $p 3])
+		grid $w.r${row}_item -row $row -column 1 -sticky we
+		grid $w.r${row}_unit -row $row -column 2 -sticky w
+		set b($w.r${row}_item) pref_$bvar
+	    }
+	    spinbox {
+		label $w.r${row}_lab -text $t([lindex $p 2]):
+		grid $w.r${row}_lab -row $row -sticky ne -pady 1
+                if {$tk_version >= 8.4} {
+                    spinbox $w.r${row}_item -textvariable pref(opt,$var) \
+                        -from [lindex $p 3] -increment [lindex $p 4] \
+                        -to [lindex $p 5] -validate all \
+                        -vcmd [list ValidateInt %P [lindex $p 3] [lindex $p 5]]
+                } else {
+                    entry $w.r${row}_item -textvariable pref(opt,$var) \
+                        -validate all \
+                        -vcmd [list ValidateInt %P [lindex $p 3] [lindex $p 5]]
+                }
+		grid $w.r${row}_item - -row $row -column 1 -sticky we
+		set b($w.r${row}_item) pref_$bvar
+	    }
+	    spinbox_unit {
+		label $w.r${row}_lab -text $t([lindex $p 2]):
+		grid $w.r${row}_lab -row $row -sticky ne -pady 1
+                if {$tk_version >= 8.4} {
+                    spinbox $w.r${row}_item -textvariable pref(opt,$var) \
+                        -from [lindex $p 4] -increment [lindex $p 5] \
+                        -to [lindex $p 6] -validate all \
+                        -vcmd [list ValidateInt %P [lindex $p 4] [lindex $p 6]]
+                } else {
+                    entry $w.r${row}_item -textvariable pref(opt,$var) \
+                        -validate all \
+                        -vcmd [list ValidateInt %P [lindex $p 4] [lindex $p 6]]
+                }
+		label $w.r${row}_unit -text ([lindex $p 3])
+		grid $w.r${row}_item -row $row -column 1 -sticky we
+		grid $w.r${row}_unit -row $row -column 2 -sticky w
+		set b($w.r${row}_item) pref_$bvar
+	    }
 	    option {
-    		    OptionMenu $w.r${row}_item pref(opt,$var) \
-			    pref(text,$var) [lindex $p 3]
-		    grid $w.r${row}_item - -row $row -column 1 -sticky w
-		    set b($w.r${row}_item) pref_$bvar
+		label $w.r${row}_lab -text $t([lindex $p 2]):
+		grid $w.r${row}_lab -row $row -sticky ne -pady 1
+		OptionMenu $w.r${row}_item $var [lindex $p 3]
+		grid $w.r${row}_item - -row $row -column 1 -sticky w
+		set b($w.r${row}_item) pref_$bvar
+	    }
+	    checkbutton {
+		checkbutton $w.r${row}_cb -text $t([lindex $p 2]) \
+		    -variable pref(opt,$var) -onvalue [lindex $p 3] \
+		    -offvalue [lindex $p 4]
+		grid $w.r${row}_cb - -row $row -column 1 -sticky w
+		set b($w.r${row}_cb) pref_$bvar
+	    }
+	    bool {
+		checkbutton $w.r${row}_cb -text $t([lindex $p 2]) \
+		    -variable pref(opt,$var)
+		if {$pref(opt,$var)} {
+		    set pref(opt,$var) 1
+		} else {
+                    set pref(opt,$var) 0
 		}
+		grid $w.r${row}_cb - -row $row -column 1 -sticky w
+		set b($w.r${row}_cb) pref_$bvar
+	    }
 	    special {
-		    eval "[lindex $p 3] $w.r${row}_item"
-		    grid $w.r${row}_item - -row $row -column 1 -sticky we
-		}
+		label $w.r${row}_lab -text $t([lindex $p 2]):
+		grid $w.r${row}_lab -row $row -sticky ne -pady 1
+		eval "[lindex $p 3] $w.r${row}_item"
+		grid $w.r${row}_item - -row $row -column 1 -sticky we
+	    }
 	    label {
-		label $w.r${row}_lab -text [lindex $p 1] -anchor [lindex $p 3]
+		frame $w.r${row}_lab
 		grid $w.r${row}_lab -row $row -columnspan 2 -sticky new -pady 1
-		$w.r${row}_lab configure \
-			-font "[$w.r${row}_lab cget -font] [lindex $p 2]"
+		rat_flowmsg::create $w.r${row}_lab.l -text [lindex $p 1] \
+		    -anchor [lindex $p 2] -padx 0 -font $propNormFont
+		pack $w.r${row}_lab.l -fill both -expand 1
 	    }
 	    message {
 		label $w.r${row}_lab -text [lindex $p 1]
-		message $w.r${row}_message -text [lindex $p 2] \
-			-padx 0 -anchor w
+		frame $w.r${row}_message
 		grid $w.r${row}_lab -row $row -sticky ne -pady 1
 		grid $w.r${row}_message -row $row -column 1 -sticky we
-		bind $w.r${row}_message <Configure> \
-			"$w.r${row}_message configure \
-			 -width \[winfo width $w.r${row}_message\]"
+		rat_flowmsg::create $w.r${row}_message.m \
+		    -text [lindex $p 2] -padx 0 -anchor w
+		pack $w.r${row}_message.m -fill both -expand 1
 	    }
 	    custom {
-		    eval "[lindex $p 1] $w.r${row}_item"
-		    grid $w.r${row}_item - -row $row -column 1 -sticky we
-		}
+		eval "[lindex $p 1] $w.r${row}_item"
+		grid $w.r${row}_item - -row $row -column 1 -sticky we
+	    }
 	    default {puts "Internal error <$p>"}
 	}
 	if {![regexp {^(label|message|custom)$} [lindex $p 0]]} {
@@ -548,6 +508,60 @@ proc PrefBuildRnode {w} {
     grid x $w.nrole -sticky w
 }
 
+# PrefValidate --
+#
+# Check for errors in new preferences
+#
+# Arguments:
+# parent -	Parent window
+
+proc PrefValidate {parent} {
+    global option pref t folderWindowList tk_version
+
+    set rp $pref(rolePrefix)
+    switch $pref(lastPref) {
+        general {
+            set r [RatCheckListFormat $pref(opt,list_format)]
+            if {"ok" != $r} {
+                Popup $r $parent
+                return "fail"
+            }
+        }
+	paths {
+	    if {![regexp %p $pref(opt,print_command)]} {
+		Popup $t(no_pp_in_print_command) $parent
+                return "fail"
+	    }
+	}
+	composing {
+	    if {[catch {regexp -nocase $pref(opt,re_regexp) ""} e]} {
+		Popup "$t(re_regexp_error): $e" $parent
+		return "fail"
+	    }
+	    if {[catch {regexp -nocase $pref(opt,citexp) ""} e]} {
+		Popup [format $t(illegal_regexp): $e] $parent
+		return "fail"
+	    }
+	}
+	roles,sending {
+	    if {[string compare $option(${rp}sendprog) \
+		     $pref(opt,${rp}sendprog)]
+		&& ![file executable [lindex $pref(opt,${rp}sendprog) 0]]} {
+		Popup $t(warning_sendprog) $parent
+		return "fail"
+	    }
+	}
+        watcher_format {
+            set r [RatCheckListFormat $pref(opt,watcher_format)]
+            if {"ok" != $r} {
+                Popup $r $parent
+                return "fail"
+            }
+        }
+    }
+    return "ok"
+}
+
 # PrefApply --
 #
 # Applies any changes to the preferences made in the current window.
@@ -558,6 +572,10 @@ proc PrefBuildRnode {w} {
 proc PrefApply {parent} {
     global option pref t folderWindowList tk_version
 
+    if {"ok" != [PrefValidate $parent]} {
+        return
+    }
+
     set hasChanged 0
     set needRestart 0
     set rp $pref(rolePrefix)
@@ -566,31 +584,6 @@ proc PrefApply {parent} {
 	    if {[string compare $option(useinputmethods) \
 		    $pref(opt,useinputmethods)] && 8.3 <= $tk_version} {
 		tk useinputmethods $pref(opt,useinputmethods)
-	    }
-	    if {[string compare $option(charset) $pref(opt,charset)]} {
-		set option(charset_candidates) \
-		    [linsert $option(charsets) 1 $pref(opt,charset)]
-	    }
-	}
-	advanced,files {
-	    if {![regexp %p $pref(opt,print_command)]} {
-		Popup $t(no_pp_in_print_command) $parent
-	    }
-	    if {[string compare $option(mailcap_path) \
-		    $pref(opt,mailcap_path)]} {
-		set option(mailcap_path) $pref(opt,mailcap_path)
-		RatMailcapReload
-		set hasChanged 1
-	    }
-	}
-	advanced,replies {
-	    if {[catch {regexp -nocase $pref(opt,re_regexp) ""} e]} {
-		Popup "$t(re_regexp_error): $e" $parent
-		return
-	    }
-	    if {[catch {regexp -nocase $pref(opt,citexp) ""} e]} {
-		Popup [format $t(illegal_regexp): $e] $parent
-		return
 	    }
 	}
 	roles {
@@ -608,26 +601,34 @@ proc PrefApply {parent} {
 	    }
 	}
 	roles,sending {
-	    if {[string compare $option(${rp}sendprog) \
-		    $pref(opt,${rp}sendprog)]
-	    && ![file executable [lindex $pref(opt,${rp}sendprog) 0]]} {
-		Popup $t(warning_sendprog) $parent
-	    }
-	}
-	advanced {
-	    if {[string compare $option(icon) $pref(opt,icon)]} {
-		SetIcon . $pref(opt,icon)
-	    }
-	}
-	advanced,network {
-	    if {[string compare $option(url_color) $pref(opt,url_color)]} {
-		foreach fw [array names folderWindowList] {
-		    upvar #0 $fw fh
-		    $fh(text) tag configure URL \
-			    -foreground $pref(opt,url_color)
+	    if {$pref(opt,${rp}same_sending_prefs) != 
+		$option(${rp}same_sending_prefs)} {
+		if {1 == $pref(opt,${rp}same_sending_prefs)} {
+		    if [CheckSameSendingPrefs $rp] {
+			set pref(opt,${rp}same_sending_prefs) 0
+			return
+		    }
+		}
+		set hasChanged 1
+		foreach r $option(roles) {
+		    set pref(opt,${r},same_sending_prefs) \
+			$pref(opt,${rp}same_sending_prefs)
 		}
 	    }
 	}
+        html {
+            if {[string compare $option(html_proxy_host) \
+                     $pref(opt,html_proxy_host)]} {
+                ::http::config -proxyhost $pref(opt,html_proxy_host)
+                if {![string length $pref(opt,html_proxy_host)]} {
+                    set pref(opt,html_proxy_port) ""
+                }
+            }
+            if {[string compare $option(html_proxy_port) \
+                     $pref(opt,html_proxy_port)]} {
+                ::http::config -proxyport $pref(opt,html_proxy_port)
+            }
+        }
     }
     foreach prefs [array names pref opt,*] {
 	set opt [string range $prefs 4 end]
@@ -639,10 +640,11 @@ proc PrefApply {parent} {
 	    set hasChanged 1
 	    if { -1 != [lsearch -exact {language charset fontsize
 		    			main_window_name icon_name
-					default_folder watcher_name pgp_enable
+					default_folder pgp_enable
 					override_fonts prop_norm prop_light
 					fixed_norm fixed_bold watcher_font
-	                                charset} \
+	                                charset prop_big fixed_italic
+                                        color_set} \
 				$opt]} {
 		set needRestart 1
 	    }
@@ -651,17 +653,28 @@ proc PrefApply {parent} {
 
     if {$hasChanged} {
 	switch $pref(lastPref) {
-	    appearance,msglist {
+	    general {
 		foreach f [array names folderWindowList] {
 		    Sync $f update
 		}
 	    }
-	    advanced,pgp {
+	    pgp {
 		InitPgp
+		foreach v {pgp_version pgp_path pgp_keyring} {
+		    set pref(opt,$v) $option($v)
+		}
 	    }
 	    roles,sending {
-		RatSend kill
+		if {1 == $option(${rp}same_sending_prefs)} {
+		    foreach r $option(roles) {
+			foreach v {sendprot smtp_hosts validate_cert
+			    sendprog sendprog_8bit smtp_user smtp_passwd} {
+			set option(${r},$v) $option(${rp}$v)
+			set pref(opt,${r},$v) $option(${rp}$v)
+		    }
+		}
 	    }
+	}
 	}
 
 	SaveOptions
@@ -699,7 +712,8 @@ proc PrefCheck {parent} {
 		PrefApply $parent
 	    } else {
 		foreach n [array names pref opt,*] {
-		    unset pref($n)
+                    set opt [string range $n 4 end]
+                    set pref(opt,$opt) $option($opt)
 		}
 	    }
 	    return
@@ -718,36 +732,51 @@ proc PrefCheck {parent} {
 #
 # Arguments:
 # w	  -	Name of menubutton to create
-# varName -	Variable to set to value
-# textVar -	Variable to use for the text we show
+# varid -	Variable to set to value
 # values  -	A list of lists which describes the values of this button
 
-proc OptionMenu {w varName textVar values} {
-    upvar #0 $varName var
-    upvar #0 $textVar text
+proc OptionMenu {w varid values} {
+    upvar \#0 pref(opt,$varid) var
+    global pref
 
-    set width 10
-    menubutton $w -textvariable $textVar -indicatoron 1 \
+    menubutton $w -textvariable pref(text,$varid) -indicatoron 1 \
 		  -relief raised -menu $w.m -pady 1
+    set pref(w,$varid) $w
     menu $w.m -tearoff 0
+    PrefPopulateOptionsMenu $varid $values
+
+    trace variable var w "PrefTraceOptionProc $varid"
+}
+
+proc PrefPopulateOptionsMenu {varid values} {
+    upvar \#0 pref(opt,$varid) var
+    upvar \#0 pref(text,$varid) text
+    global pref
+
+    set pref(values,$varid) $values
+    $pref(w,$varid).m delete 0 end
+    set width 10
+    set text ""
     foreach elem $values {
 	if {![string compare [lindex $elem 0] $var]} {
 	    set text [lindex $elem 1]
 	}
-	$w.m add command -label [lindex $elem 1] \
-		-command "set $varName [list [lindex $elem 0]]"
+	$pref(w,$varid).m add command -label [lindex $elem 1] \
+            -command "set pref(opt,$varid) [list [lindex $elem 0]]"
 	if { $width < [string length [lindex $elem 1]]} {
 	    set width [string length [lindex $elem 1]]
 	}
     }
-    $w configure -width $width
-
-    trace variable var w "PrefTraceOptionProc $varName $textVar {$values}"
+    if {"" == $text && 0 < [llength $values]} {
+        set text [lindex [lindex $values 0] 1]
+    }
+    $pref(w,$varid) configure -width $width
 }
 
-proc PrefTraceOptionProc {varName textVar values args} {
-    upvar #0 $varName var
-    upvar #0 $textVar text
+proc PrefTraceOptionProc {varid args} {
+    upvar \#0 pref(opt,$varid) var
+    upvar \#0 pref(text,$varid) text
+    upvar \#0 pref(values,$varid) values
 
     foreach v $values {
 	if {![string compare $var [lindex $v 0]]} {
@@ -767,17 +796,22 @@ proc SetupColor {w} {
     set b($w.mb) pref_color_scheme
     menu $w.mb.m -tearoff 0
     set width 20
-    foreach c { {gray85 black} {PeachPuff2 black} {bisque black}
-                {SlateBlue1 black} {SteelBlue4 white} {SkyBlue1 black}
-                {aquamarine2 black} {SpringGreen4 black}} {
+    foreach c {
+        {\#dde3eb black white black}
+        {PeachPuff2 black white black}
+        {SlateBlue1 black white black}
+        {SteelBlue4 white LightBlue black}
+        {SkyBlue1 black white black}
+        {aquamarine2 black white black}
+        {SpringGreen4 black PaleGreen black}
+        {gray85 black gray85 black}} {
 	set name $t([lindex $c 0])
 	if {![string compare $c $option(color_set)]} {
 	    set pref(text,color_set) $name
 	}
 	$w.mb.m add command -label $name \
 		-command "set pref(opt,color_set) [list $c]; \
-		set pref(text,color_set) [list $name]; \
-		SetColor $c" \
+		set pref(text,color_set) [list $name]" \
 		-background [lindex $c 0] -foreground [lindex $c 1]
 	if { $width < [string length $name]} {
 	    set width [string length $name]
@@ -785,106 +819,6 @@ proc SetupColor {w} {
     }
     $w.mb configure -width $width
     pack $w.mb -side left
-}
-
-proc SetupDSNRequest {w} {
-    global option t pref b
-    frame $w
-
-    set var "$pref(rolePrefix)dsn_request"
-    OptionMenu $w.menu pref(opt,$var) pref(text,$var) \
-	     [list [list 0 $t(not_request_dsn)]\
-		   [list 1 $t(request_dsn)]]
-    button $w.but -text $t(probe)... \
-	    -command [list PrefProbeDSN $pref(rolePrefix)] -pady 0
-    pack $w.menu -side top
-    pack $w.but -side left
-    set b($w) pref_dsn_request
-    set b($w.menu) pref_dsn_request
-    set b($w.but) pref_dsn_probe
-}
-
-proc SetupDSNVerbose {w} {
-    global option t pref b
-
-    foreach elem $option(dsn_verbose) {
-	set pref(opt,[lindex $elem 0]) [lindex $elem 1]
-    }
-    frame $w
-    set irow 0
-    foreach cat {failed delayed delivered relayed expanded} {
-	set sf $w.$cat
-	label ${sf}_l -text $t($cat): -anchor e
-	OptionMenu ${sf}_mbut pref(opt,$cat) pref(text,$cat) \
-		[list [list none $t(rl_none)] \
-		      [list status $t(rl_status)] \
-		      [list notify $t(rl_notify)]]
-	if {[RatIsLocked option(dsn_verbose)]} {
-	    ${sf}_mbut configure -state disabled
-	}
-	grid ${sf}_l -row $irow -column 0 -sticky e
-	grid ${sf}_mbut -row $irow -column 1 -sticky w
-	incr irow
-	set b(${sf}_mbut) pref_dsn_verbose
-    }
-    set b($w) pref_dsn_verbose
-    grid columnconfigure $w 2 -weight 1
-}
-
-# PrefProbeDSN --
-#
-# Probe the current SMTP servers for DSN support.
-#
-# Arguments:
-# rp - Role prefix
-
-proc PrefProbeDSN {rp} {
-    global idCnt option t fixedNormFont
-
-    # Create identifier
-    set id probeWin[incr idCnt]
-    upvar #0 $id hd
-    set w .$id
-    set hd(w) $w
-
-    # Create toplevel
-    toplevel $w -class TkRat
-    wm title $w $t(probe)
-
-    if {[string compare $option(${rp}sendprot) smtp]} {
-	message $w.message -aspect 600 -text $t(dsn_need_smtp)
-	button $w.button -text $t(dismiss) \
-		-command "RecordPos $w prefProbeDSN; destroy $w; unset $id"
-	pack $w.message \
-	     $w.button -side top -padx 5 -pady 5
-	return
-    }
-
-    set row 0
-    foreach h $option(${rp}smtp_hosts) {
-	label $w.l$row -text $h -width 32 -anchor e
-	label $w.a$row -textvariable ${id}($h) -font $fixedNormFont -width 32 \
-		-anchor w
-	grid $w.l$row -row $row -column 0 -sticky e
-	grid $w.a$row -row $row -column 1 -sticky w
-	incr row
-    }
-    button $w.button -text $t(dismiss) -command "destroy $w; unset $id" \
-	    -state disabled
-    grid $w.button -row $row -column 0 -columnspan 2
-    Place $w prefProbeDSN
-    wm protocol $w WM_DELETE_WINDOW "destroy $w; unset $id"
-
-    foreach h $option(${rp}smtp_hosts) {
-        set hd($h) $t(probing)...
-	update idletasks
-	if {[RatSMTPSupportDSN $h]} {
-	    set hd($h) $t(supports_dsn)
-	} else {
-	    set hd($h) $t(no_dsn_support)
-	}
-    }
-    $w.button configure -state normal
 }
 
 # SetupNetworkSync --
@@ -916,14 +850,13 @@ proc SetupNetworkSync {} {
     wm title $w $t(setup_netsync)
 
     checkbutton $w.cmd -variable setupNS(runcmd) -text $t(run_command)
-    grid $w.cmd - -sticky w
     entry $w.cmdentry -textvariable setupNS(cmd)
-    grid x $w.cmdentry -sticky ew
+    grid $w.cmd $w.cmdentry -sticky w
 
     checkbutton $w.def -variable setupNS(deferred) -text $t(send_deferred)
     grid $w.def - -sticky w
 
-    checkbutton $w.dis -variable setupNS(disconnected) -text $t(sync_dis)
+    checkbutton $w.dis -variable setupNS(disconnected) -text $t(sync_folders)
     grid $w.dis -  -sticky w
 
     frame $w.f
@@ -939,7 +872,7 @@ proc SetupNetworkSync {} {
     button $w.f.cancel -text $t(cancel) \
 	    -command {destroy $setupNS(w); unset setupNS}
     pack $w.f.ok $w.f.cancel -side left -expand 1
-    grid $w.f - -sticky nsew -pady 5
+    grid $w.f - -sticky nsew
 }
 
 # SelectFont --
@@ -951,18 +884,18 @@ proc SetupNetworkSync {} {
 # w - window to build
 
 proc SelectFont {f w} {
-    global pref fixedNormFont t b
+    global pref fixedNormFont t b prefFontLabel
 
     set d [ConvertFontToText $pref(opt,$f)]
 
+    set prefFontLabel($f) $w.l
     frame $w
     label $w.l -text $d -font [RatCreateFont $pref(opt,$f)] -anchor w
     pack $w.l -side left
     set b($w) pref_$f
     set b($w.l) pref_$f
 
-    button $w.e -text $t(edit)... -padx 2 -pady 1 \
-	    -command "DoEditFont $f $w.l $w"
+    button $w.e -text $t(edit)... -command "::tkrat::fontedit::edit $f $w.l $w"
     pack $w.e -side right -fill x
 }
 
@@ -997,238 +930,6 @@ proc ConvertFontToText {s} {
 
 }
 
-# DoEditFont --
-#
-# Show the edit font window
-#
-# Arguments:
-# font	 - Font setting to edit
-# l	 - Label to update afterwards
-# parent - Parent window
-
-proc DoEditFont {font l parent} {
-    global t idCnt pref
-    
-    set id doEditFont[incr idCnt]
-    upvar #0 $id hd
-
-    # Initialization
-    set hd(done) 0
-    set hd(new_spec) $pref(opt,$font)
-    set hd(old_spec) ""
-    set hd(font_name) ""
-
-    if {"components" == [lindex $hd(new_spec) 0]} {
-	set hd(family) [lindex $hd(new_spec) 1]
-	set hd(size) [lindex $hd(new_spec) 2]
-	set hd(weight) [lindex $hd(new_spec) 3]
-	set hd(slant) [lindex $hd(new_spec) 4]
-	set hd(underline) [lindex $hd(new_spec) 5]
-	set hd(overstrike) [lindex $hd(new_spec) 6]
-	set hd(method) components
-    } else {
-	set hd(name) [lindex $hd(new_spec) 1]
-	set hd(method) name
-	set hd(family) Helvetica
-	set hd(size) 12
-    }
-
-    # Create toplevel
-    set w .fontedit
-    toplevel $w -class TkRat
-    wm title $w $t(edit_font)
-    wm transient $w $parent
-
-    # Top label
-    label $w.topl -text $t(use_one_method)
-
-    # Specification method frame
-    frame $w.s -bd 1 -relief raised
-    radiobutton $w.s.select -variable ${id}(method) -value components \
-	    -command "UpdateFontSpec $id components"
-    label $w.s.fl -text $t(family):
-    set m $w.s.family.m
-    menubutton $w.s.family -bd 1 -relief raised -indicatoron 1 -menu $m \
-	    -textvariable ${id}(family) -width 15
-    menu $m -tearoff 0
-    if {![info exists pref(families)]} {
-	set pref(families) [lsort -dictionary [font families]]
-    }
-    foreach f $pref(families) {
-	$m add command -label $f -command \
-		"set ${id}(family) [list $f]; UpdateFontSpec $id components"
-    }
-    FixMenu $m
-    label $w.s.sl -text "  $t(size):"
-    set m $w.s.size.m
-    menubutton $w.s.size -bd 1 -relief raised -indicatoron 1 -menu $m \
-	    -textvariable ${id}(size) -width 3
-    menu $m -tearoff 0
-    foreach s {4 5 6 7 8 9 10 11 12 13 14 15 16 18 20 22 24 26 30 36} {
-	$m add command -label $s -command \
-		"set ${id}(size) $s; UpdateFontSpec $id components"
-    }
-    checkbutton $w.s.weight -text "$t(bold) " -onvalue bold -offvalue normal \
-	    -variable ${id}(weight) -command "UpdateFontSpec $id components"
-    checkbutton $w.s.italic -text "$t(italic) " -onvalue italic -offvalue roman\
-	    -variable ${id}(slant) -command "UpdateFontSpec $id components"
-    checkbutton $w.s.underline -text "$t(underline) " \
-	    -variable ${id}(underline) -command "UpdateFontSpec $id components"
-    checkbutton $w.s.overstrike -text $t(overstrike) \
-	    -variable ${id}(overstrike) -command "UpdateFontSpec $id components"
-
-    pack $w.s.select \
-	 $w.s.fl $w.s.family \
-	 $w.s.sl $w.s.size \
-	 $w.s.weight \
-	 $w.s.italic \
-	 $w.s.underline \
-	 $w.s.overstrike -side left -pady 2
-
-    # Name method frame
-    frame $w.n -bd 1 -relief raised 
-    radiobutton $w.n.select -variable ${id}(method) -value name \
-	    -command "UpdateFontSpec $id name"
-    label $w.n.l -text $t(name):
-    entry $w.n.e -width 20 -textvariable ${id}(name)
-    set hd(updateButton) $w.n.set
-    button $w.n.set -text $t(update) -command "UpdateFontSpec $id name" -bd 1
-    pack $w.n.select \
-	 $w.n.l \
-	 $w.n.e \
-	 $w.n.set -side left -pady 2
-    trace variable hd(name) w "UpdateFontUpdateButton $id"
-    UpdateFontUpdateButton $id
-
-    # Sample text
-    message $w.sample -text $t(ratatosk) -aspect 200 -justify left
-    set hd(sample) $w.sample
-
-    # Buttons
-    OkButtons $w $t(ok) $t(cancel) "set ${id}(done)"
-    set hd(okbutton) $w.buttons.ok
-
-    # Pack things
-    pack $w.topl \
-	 $w.s \
-	 $w.n -side top -fill x -pady 2 -padx 2
-    pack $w.buttons -side bottom -fill x -pady 2 -padx 2
-    pack $w.sample -fill x -pady 2 -padx 2
-
-    # Bindings
-    bind $w.n.e <Tab> "UpdateFontSpec $id name"
-    bind $w.n.e <Return> "UpdateFontSpec $id name; break"
-
-    # Update sample font
-    UpdateFont $id
-
-    # Show window and wait for completion
-    Place $w editFont
-    ModalGrab $w
-    pack propagate $w 0
-    tkwait variable ${id}(done)
-
-    # Finalization
-    RecordPos $w editFont
-    destroy $w
-    set pref(opt,$font) $hd(old_spec)
-    if {"" != $hd(font_name)} {
-	font delete $hd(font_name)
-    }
-    unset hd
-    $l configure -text [ConvertFontToText $pref(opt,$font)] \
-	    -font [RatCreateFont $pref(opt,$font)]
-}
-
-# UpdateFontUpdateButton --
-#
-# Set state of the update button
-#
-# Arguments:
-# handler - Handler of font window
-# args    - Possibly standard trace args
-
-proc UpdateFontUpdateButton {handler args} {
-    upvar #0 $handler hd
-
-    if {"" != $hd(name) && "name" == $hd(method)} {
-	set state normal
-    } else {
-	set state disabled
-    }
-    $hd(updateButton) configure -state $state
-}
-
-# UpdateFontSpec --
-#
-# Update the shown font
-#
-# Arguments:
-# handler - Handler of font window
-# method  - which method to use
-
-proc UpdateFontSpec {handler method} {
-    upvar #0 $handler hd
-
-    if {"components" == $method} {
-	set hd(new_spec) [list components $hd(family) $hd(size) $hd(weight) \
-				    $hd(slant) $hd(underline) $hd(overstrike)]
-	set hd(method) components
-    } else {
-	set hd(new_spec) [list name $hd(name)]
-	set hd(method) name
-    }
-    UpdateFont $handler
-}
-
-# UpdateFont --
-#
-# Update the sample text
-#
-# Arguments:
-# handler - Handler of font window
-
-proc UpdateFont {handler} {
-    upvar #0 $handler hd
-    global t
-
-    if {"$hd(new_spec)" == "$hd(old_spec)"} {
-	return
-    }
-    if {[lindex $hd(new_spec) 0] == "components"} {
-	if {"" == $hd(font_name)} {
-	    set op create
-	    set hd(font_name) fontedit
-	} else {
-	    set op configure
-	}
-	font $op $hd(font_name) \
-		-family [lindex $hd(new_spec) 1] \
-		-size -[lindex $hd(new_spec) 2] \
-		-weight [lindex $hd(new_spec) 3] \
-		-slant [lindex $hd(new_spec) 4] \
-		-underline [lindex $hd(new_spec) 5] \
-		-overstrike [lindex $hd(new_spec) 6]
-	set fn $hd(font_name)
-    } else {
-	set fn [lindex $hd(new_spec) 1]
-    }
-
-    set hd(old_spec) $hd(new_spec)
-
-    if {[catch {$hd(sample) configure -font $fn} err]} {
-	set okstatus disabled
-	set msg $t(invalid_font)
-	set aspect 1000
-	$hd(sample) configure -font fixed
-    } else {
-	set okstatus normal
-	set msg $t(ratatosk)
-	set aspect 200
-    }
-    $hd(sample) configure -text $msg -aspect $aspect
-    $hd(okbutton) configure -state $okstatus
-}
 
 # SetupRole --
 #
@@ -1264,7 +965,8 @@ proc SetupRole {w} {
 	$w.default configure -state disabled; \
 	$w.delete configure -state disabled; \
 	PrefPopulateRoles; \
-	$pref(tree) redraw \
+	$pref(tree) redraw; \
+	SaveOptions \
     "
     button $w.delete -text $t(delete) -pady 0 -width $l -state $s \
 	    -command "PrefDeleteRole $id"
@@ -1319,14 +1021,6 @@ proc PrefTraceProc {name1 name2 op} {
     if {!$pref(traceChanges)} {return}
 
     if {[regexp {^opt,} $name2]} {
-	if {[info exists pref(opt,failed)]} {
-	    set pref(opt,dsn_verbose) [list [list failed $pref(opt,failed)] \
-		    [list delayed $pref(opt,delayed)] \
-		    [list delivered $pref(opt,delivered)] \
-		    [list relayed $pref(opt,relayed)] \
-		    [list expanded $pref(opt,expanded)]]
-	}
-
 	set state disabled
 	foreach v $pref(vars,$pref(lastPref)) {
 	    if {$option($v) != $pref(opt,$v)} {
@@ -1357,7 +1051,7 @@ proc PrefPopulateRoles {} {
 	}
 	set node [$pref(rnode) add folder -label $name -state closed \
 		-id [list role $r roles]]
-	foreach p {address sending advanced} {
+	foreach p {address sending pgp advanced} {
 	    $node add leaf -label $t($p) -id [list role $r roles,$p]
 	}
     }
@@ -1435,9 +1129,10 @@ proc SetupDefaultSave {w} {
 proc PopulateDefaultSave {m} {
     global t
 
-    $m delete 1 end
+    $m delete 0 end
     VFolderBuildMenu $m 0 "SelectDefaultSave" 1
     $m add command -label "-- $t(none) --" -command {SelectDefaultSave ""}
+    FixMenu $m
 }
 
 proc SelectDefaultSave {id} {
@@ -1448,5 +1143,313 @@ proc SelectDefaultSave {id} {
 	set pref(text,save_outgoing) "-- $t(none) --"
     } else {
 	set pref(text,save_outgoing) [lindex $vFolderDef($id) 0]
+    }
+}
+
+# CheckSameSendingPrefs --
+#
+# Checks if all roles uses the same sending preferences as the ones
+# currently being shown. If not show a dialog and give the user the
+# option to abort
+#
+# Arguments:
+# rp - role we are currently editing
+
+proc CheckSameSendingPrefs {rp} {
+    global option pref t
+    
+    set differs 0
+    foreach r $option(roles) {
+	foreach v {sendprot smtp_hosts validate_cert sendprog sendprog_8bit} {
+	    if {$option(${r},$v) != $pref(opt,${rp}$v)} {
+		set differs 1
+		break
+	    }
+	}
+    }
+
+    if {1 == $differs} {
+	return [RatDialog .pref $t(send_settings_differs) \
+		    $t(roles_use_other_send_settings) {} \
+		    1 $t(continue) $t(cancel)]
+    } else {
+	return 0
+    }
+}
+
+# PrefSetupSignAs --
+#
+# Draw the sign-as parts of the preference dialog.
+#
+# Arguments:
+# w - Window to build
+
+proc PrefSetupSignAs {w} {
+    global pref
+
+    SetupSignAsWidget $w pref(opt,$pref(rolePrefix)sign_as)
+}
+
+# SetupCheckDicts --
+#
+# Setup the check dictionaries stuff
+#
+# Arguments:
+# w - Window to build
+
+proc SetupCheckDicts {w} {
+    global pref b t
+
+    frame $w -bd 2
+    scrollbar $w.scroll \
+        -bd 1 \
+        -highlightthickness 0 \
+        -command "$w.list yview"
+    listbox $w.list \
+        -yscroll "$w.scroll set" \
+        -bd 1 \
+        -exportselection false \
+        -highlightthickness 0 \
+        -selectmode multiple
+    button $w.mark_all -text $t(mark_all) -command "CheckDictsMarkAll $w"
+    button $w.clear_all -text $t(clear_all) -command "CheckDictsClearAll $w"
+    grid $w.list - - $w.scroll -sticky nsew
+    grid x $w.mark_all $w.clear_all x
+    grid rowconfigure $w 0 -weight 1
+    grid columnconfigure $w 0 -weight 1
+
+    set pref(list,auto_dicts) $w.list
+    set pref(dictionaries_state) normal
+    PrefPopulateCheckDicts
+    $w.list configure -height 10
+
+    bind $w.list <<ListboxSelect>> {CheckDictsSelect %W}
+    set b($w.list) pref_auto_dicts
+}
+
+proc PrefPopulateCheckDicts {} {
+    global pref tk_version
+
+    if {$tk_version >= 8.4} {
+        $pref(list,auto_dicts) configure -state normal
+    }
+    $pref(list,auto_dicts) delete 0 end
+    foreach l $pref(dictionaries) {
+        $pref(list,auto_dicts) insert end [string totitle $l]
+        if {-1 != [lsearch -exact $pref(opt,auto_dicts) $l]
+            || 0 == [llength $pref(opt,auto_dicts)]} {
+            $pref(list,auto_dicts) selection set end
+        }
+    }
+    if {$tk_version >= 8.4} {
+        $pref(list,auto_dicts) configure -state $pref(dictionaries_state)
+    }
+}
+
+proc CheckDictsSelect {w} {
+    global pref
+
+    set n {}
+
+    if {$pref(dictionaries_state) == "normal"} {
+        foreach s [$w curselection] {
+            lappend n [lindex $pref(dictionaries) $s]
+        }
+    }
+    set pref(opt,auto_dicts) $n
+}
+
+proc CheckDictsMarkAll {w} {
+    global pref
+    set pref(opt,auto_dicts) $pref(dictionaries)
+    $pref(list,auto_dicts) selection set 0 end
+}
+
+proc CheckDictsClearAll {w} {
+    global pref
+    set pref(opt,auto_dicts) {}
+    $pref(list,auto_dicts) selection clear 0 end
+}
+
+# SetupSpellPath --
+#
+# Setup the spell checker path entry
+#
+# Arguments:
+# w - Window to build
+
+proc SetupSpellPath {w} {
+    global pref b checkmark_img
+
+    frame $w
+
+    entry $w.entry -textvariable pref(opt,spell_path)
+    label $w.status -image $checkmark_img
+
+    pack $w.status -side right -fill y
+    pack $w.entry -fill x -pady 2
+
+    set b($w.entry) pref_spell_path
+    set pref(last,spell_path) ""
+    trace variable pref(opt,spell_path) w [list SpellPathChanged $w.status]
+    bind $w.entry <Map> [list UpdateSpellPath $w.status 0]
+    bind $w.entry <FocusOut> [list UpdateSpellPath $w.status 0]
+    UpdateSpellPath $w.status 1
+}
+
+# SpellPathChanged --
+#
+# Called when the pref(opt,spell_path) variable has been updated
+#
+# Arguments:
+# lab - label argument to UpdateSpellPath
+# normal trace function arguments
+
+proc SpellPathChanged {lab args} {
+    global pref
+
+    if {[info exists pref(spell_path_afterid)]} {
+        after cancel $pref(spell_path_afterid)
+    }
+    set pref(spell_path_afterid) [after 1000 UpdateSpellPath $lab 0]
+}
+
+# UpdateSpellPath --
+#
+# Check which dictionaries the spelling-checker provides and update
+# the display accordingly
+#
+# Arguments:
+# lab   - label to configure icon of
+# force - if true update everything even if the value has not changed
+
+proc UpdateSpellPath {lab force} {
+    global t pref option b checkmark_img error_img
+
+    # Cancel any outstanding calls
+    if {[info exists pref(spell_path_afterid)]} {
+        after cancel $pref(spell_path_afterid)
+    }
+
+    # Ignore if unchanged
+    if {$pref(last,spell_path) == $pref(opt,spell_path) && !$force} {
+        return
+    }
+
+    set old_spell_path $option(spell_path)
+    set option(spell_path) $pref(opt,spell_path)
+    set spell_dictionaries [list [list auto $t(auto)]]
+    set pref(dictionaries) [lsort [rat_spellutil::get_dicts 1]]
+    set option(spell_path) $old_spell_path
+    set pref(last,spell_path) $pref(opt,spell_path)
+    foreach l $pref(dictionaries) {
+        lappend spell_dictionaries [list $l [string totitle $l]]
+    }
+    PrefPopulateOptionsMenu def_spell_dict $spell_dictionaries
+
+    if {0 == [llength $pref(dictionaries)]} {
+        if {"" == [rat_spellutil::get_cmd]} {
+            set err no_spell
+        } else {
+            set err no_dictionaries
+        }
+        lappend pref(dictionaries) $t($err)
+        set pref(dictionaries_state) disabled
+        set b($lab) $err
+        $lab configure -image $error_img
+    } else {
+        set pref(dictionaries_state) normal
+        $lab configure -image $checkmark_img
+        catch {unset b($lab)}
+    }
+    PrefPopulateCheckDicts
+}
+
+# SetupURLViewer --
+#
+# Setup the url viewer entries
+#
+# Arguments:
+# w - Window to populate
+
+proc SetupURLViewer {w} {
+    global pref t option b
+
+    foreach var {url_behavior browser_cmd} {
+        set pref(opt,$var) $option($var)
+        set pref(old,$var) $pref(opt,$var)
+    }
+
+    frame $w
+    OptionMenu $w.viewer url_viewer \
+        [list [list RatUP "$t(userproc): RatUP_ShowURL"] \
+             [list mozilla "Mozilla"] \
+             [list firefox "Firefox"] \
+             [list galeon "Galeon"] \
+             [list netscape "Netscape"] \
+             [list opera "Opera"] \
+             [list lynx Lynx] \
+             [list other $t(other)]]
+    set b($w.viewer) pref_url_viewer
+
+    trace variable pref(opt,url_viewer) w PrefUpdateURLCmd
+    lappend pref(vars,$pref(lastPref)) browser_cmd
+    lappend pref(vars,$pref(lastPref)) url_behavior
+
+    label $w.mode_label -text $t(open_in):
+    OptionMenu $w.mode url_behavior \
+        [list [list old_window $t(reuse_old_window)] \
+             [list new_window $t(new_window)] \
+             [list new_tab $t(new_tab)]]
+    set b($w.mode) pref_url_behavior
+
+    label $w.cmd_label -text $t(cmd): -anchor w
+    entry $w.cmd -textvariable pref(opt,browser_cmd)
+    set b($w.cmd) pref_url_viewer_cmd
+
+    grid $w.viewer - -sticky w
+    grid $w.mode_label $w.mode -sticky w
+    grid $w.cmd_label $w.cmd -sticky we
+    grid columnconfigure $w 1 -weight 1
+}
+
+# PrefUpdateURLCmd --
+#
+# Trace function for url_viewer
+#
+# Arguments:
+# Standard trace function arguments
+
+proc PrefUpdateURLCmd {args} {
+    global pref
+
+    switch $pref(opt,url_viewer) {
+        "RatUP" {set pref(opt,browser_cmd) ""}
+        "mozilla" {set pref(opt,browser_cmd) "mozilla"}
+        "firefox" {set pref(opt,browser_cmd) "firefox"}
+        "galeon" {set pref(opt,browser_cmd) "galeon"}
+        "netscape" {set pref(opt,browser_cmd) "netscape"}
+        "opera" {set pref(opt,browser_cmd) "opera"}
+        "lynx" {set pref(opt,browser_cmd) \
+                    {xterm -T "Lynx:%u" +sb -e lynx "%u"}}
+        "other" {set pref(opt,browser_cmd) "other_browser %u"}
+    }
+}
+
+# ValidateInt --
+#
+# Check that the goiven command is an integer in the given interval
+#
+# Arguments:
+# value - Value to check
+# min   - The smallest valid value
+# max   - The largest valid value
+
+proc ValidateInt {value min max} {
+    if {![string is integer $value]
+        || $value < $min || $value > $max} {
+        return 0
+    } else {
+        return 1
     }
 }

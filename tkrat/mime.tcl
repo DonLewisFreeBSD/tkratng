@@ -9,6 +9,8 @@
 #  COPYRIGHT, included with this distribution.
 
 
+set fileGroksMime 1
+
 # RatType --
 #
 # Determines the MIME type and encoding of the file.  The algorithm is to
@@ -20,32 +22,41 @@
 # to application/octet-stream.
 #
 # Arguments: 
-# filename - Name of the file to check
-proc RatType {filename} {
+# fname - Name of the file to check
+
+proc RatType {fname} {
     global option
+    global fileGroksMime
     
-    if {![file exists $filename]} {
-	error "error opening file $filename"
+    if {![file exists $fname]} {
+	error "error opening file $fname"
     }
     
     # Get the encoding
-    # TODO: is it really necessary to have this as a C function? Can't it be
-    # done using regular Tcl commands?
-    set encoding [RatEncoding $filename]
-    
-    # Get the MIME type. Protect the filename in case it has a space in it
-    set mimetype [eval exec $option(mimeprog) [list $filename] 2>/dev/null]
+    set encoding [RatEncoding $fname]
+
+    set mimetype ""
+    if {-1 == [string first {--mime} $option(mimeprog)] && $fileGroksMime} {
+        set cmd "exec $option(mimeprog) --mime [list $fname]"
+        if {[catch {eval $cmd} mimetype]} {
+            set fileGroksMime 0
+            set mimetype ""
+        }
+    }
+    if {"" == $mimetype} {
+        set mimetype [eval exec $option(mimeprog) [list $fname] 2>/dev/null]
+    }
     
     # Parse the result
     if {[regexp {^[^ ]+/[^ ]+$} $mimetype]} {
 	# Cool, the MIME type is set for us. Nothing to do!
-    } elseif {[regexp {^([^ ]+)/([^, ]+),.*$} $mimetype -> partA partB]}  {
+    } elseif {[regexp {^([^ ]+)/([^;, ]+),.*$} $mimetype -> partA partB]}  {
 	# Almost ok. The MIME type returns with stuff at the end. Strip the
 	# stuff and just keep the MIME type. "stuff" is anything after the
 	# first comma
 	set mimetype "$partA/$partB"
-    } elseif {[regexp {^([^:]+): ([^ ]+)/([^, ]+).*$} $mimetype -> name \
-	    partA partB] && [string equal $name $filename]} {
+    } elseif {[regexp {^([^:]+): ([^ ]+)/([^;, ]+).*$} $mimetype -> name \
+	    partA partB] && [string equal $name $fname]} {
 	# Hmm... not cool. We get back the filename followed by the mime type.
 	# We'll assume that there may or may not be a comma after the MIME
 	# type.

@@ -3,7 +3,7 @@
  *
  *	This file handles the expressions.
  *
- * TkRat software and its included text is Copyright 1996-2002 by
+ * TkRat software and its included text is Copyright 1996-2004 by
  * Martin Forssén
  *
  * The full text of my legal notices is contained in the file called

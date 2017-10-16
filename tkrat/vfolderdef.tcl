@@ -1,6 +1,6 @@
 # vfolderdef.tcl -
 #
-#  TkRat software and its included text is Copyright 1996-2002 by
+#  TkRat software and its included text is Copyright 1996-2004 by
 #  Martin Forssén
 #
 #  The full text of the legal notice is contained in the file called
@@ -11,9 +11,12 @@
 # Folders are stored in the vfolderlist file. This file is a valid tcl-file
 # and is read by sourcing it. It should define four variables and two-three
 # arrays of lists. The variables are:
-# vFolderVersion - Version of thsi file, this should be '7'
-# vFolderInbox   - The identifier of the default folder, this is the first
-#                  folder which is opened upon startup.
+# vFolderVersion  - Version of this file, this should be '8'
+# vFolderInbox    - The identifier of the default folder, this is the first
+#                   folder which is opened upon startup.
+# vFolderSpecials - List of special folders. Currently only the following two
+# vFolderOutgoing - Id of folder holding the outqueue
+# vFolderHold     - Id of folder where held messagaes are kept
 #
 # The first array is vFolderStruct which defines the layout of the folder
 # menu. Index '0' is the top and must always exist. Each item in this
@@ -43,8 +46,9 @@
 # import:       {name import flags folderdef pattern {ids}}
 #
 #
-# The final array is mailServer. Indexes into this array are usually the
-# name of the server. Each entry in the array contains the following list:
+# The final array is mailServer. Indexes into this array are, for imap servers
+# the display name of the server and for pop3 servers an integer.
+# Each entry in the array contains the following list:
 #    {host port flags user}
 # Valid flags are: pop3 ssl validate-cert
 #
@@ -61,7 +65,7 @@
 # Arguments:
 
 proc VFolderDef {} {
-    global t b vf vfd_old vFolderDef
+    global t b vf vfd_old vFolderDef vFolderSpecials
 
     # Create identifier
     set id vfolderdef
@@ -72,10 +76,10 @@ proc VFolderDef {} {
 	return
     }
     upvar #0 $id hd
-    set hd(w) $w
-    set hd(done) 0
-    set hd(dragging) 0
-    set hd(oldfocus) [focus]
+    set vf(w) $w
+    set vf(done) 0
+    set vf(dragging) 0
+    set vf(oldfocus) [focus]
     set vf(drag_after) {}
     set vf(w) $w
     set vf(selected) {}
@@ -88,34 +92,23 @@ proc VFolderDef {} {
     wm title $w $t(vfolderdef)
 
     # Populate window
-    FindAccelerators a {window create admin}
     frame $w.mbar -relief raised -bd 1
-    set m $w.mbar.w.m
-    menubutton $w.mbar.w -menu $m -text $t(window) -underline $a(window)
+    set m $w.mbar.a.m
+    menubutton $w.mbar.a -menu $m -text $t(actions) -underline 0
     menu $m
-    $m add command -label $t(close) -command "VFolderWinClose $id"
-    set b($m,[$m index end]) dismiss
-
-    set m $w.mbar.create.m
-    menubutton $w.mbar.create -menu $m -text $t(create) -underline $a(create)
-    menu $m
-    $m add command -label $t(new_submenu)... -command "VFolderNew struct menu"
-    $m add command -label $t(new_mailbox)... -command "VFolderNew folder menu"
-    $m add command -label $t(new_imap_server)... -command VFolderNewServer
-
-    set m $w.mbar.admin.m
-    menubutton $w.mbar.admin -menu $m -text $t(admin) -underline $a(admin)
-    menu $m
-    $m add command -label $t(reimport_all) -command VFolderReimportAll
+    $m add command -label $t(new_folder_wizard)... \
+	-command "VFolderWizardStart menu"
+    $m add command -label $t(new_submenu)... -command "VFolderNewStruct menu"
+    $m add separator
+    $m add command -label $t(reimport_all) -command VFolderReimportAll    
     set b($m,[$m index end]) reimport_all
+    $m add separator
+    $m add command -label $t(close) -command "VFolderWinClose 0"
+    set b($m,[$m index end]) dismiss
+    pack $w.mbar.a -side left -padx 5
 
-    pack $w.mbar.w \
-	 $w.mbar.create \
-	 $w.mbar.admin -side left -padx 5
-
-    # This has to be created after the menubar to make teh Destroy logic work
+    # This has to be created after the menubar to make the Destroy logic work
     frame $w.d
-    Size $w.d vFolderDef
 
     # Paning button
     frame $w.d.handle -width 10 -height 10 \
@@ -141,9 +134,10 @@ proc VFolderDef {} {
     set vf(mw) [expr {int($vf(mw)*0.9)}]
 
     # Folder details
-    set vf(details) $w.d.r.details
     frame $w.d.r -relief sunken
-    frame $vf(details) -bd 10 -highlightthickness 0
+    set vf(detframe) $w.d.r.details
+    set vf(details) [rat_scrollframe::create $vf(detframe) -bd 10 \
+			 -highlightthickness 0]
     label $vf(details).name_lab -width $vf(mw)
     entry $vf(details).name -width 40 -state disabled -relief flat
     grid $vf(details).name_lab $vf(details).name -sticky ew
@@ -157,14 +151,16 @@ proc VFolderDef {} {
     set vf(but_apply) $w.d.r.buttons.apply
     set vf(but_restore) $w.d.r.buttons.restore
     grid $w.d.r.details -column 1 -row 1 -sticky nsew	 
-    grid $w.d.r.buttons -column 1 -row 3 -sticky nsew
-    grid rowconfigure $w.d.r 2 -weight 1
+    grid $w.d.r.buttons -column 1 -row 2 -sticky nsew
+    grid columnconfigure $w.d.r 1 -weight 1
+    grid rowconfigure $w.d.r 1 -weight 1
+    grid rowconfigure $vf(details) 100 -weight 1
     pack $w.mbar -side top -fill x
     pack $w.d -fill both -expand 1
 
 
     # Do packing of paning window
-    VFolderPane $id [GetPane vFolderPane]
+    VFolderPane [::tkrat::winctl::GetPane vFolderDef]
     place $w.d.t -relheight 1
     place $w.d.r -relheight 1 -relx 1 -anchor ne
     place $w.d.handle -anchor s
@@ -175,19 +171,19 @@ proc VFolderDef {} {
 	     set y \[expr \[winfo height %W\] - 10\];\
              place configure $w.d.handle -y \$y"
     bind $w.d.handle <B1-Motion> \
-	"VFolderPane $id \[expr (%X-\$${id}(X0))/\$${id}(W).0\]"
+	"VFolderPane \[expr (%X-\$${id}(X0))/\$${id}(W).0\]"
 
     menu $w.mf -tearoff 0
-    $w.mf add command -label $t(delete)... -command "VFolderDelete folder"
-    set b($w.mf,[$w.mf index end]) vd_delete
+    $w.mf add command -label $t(delete)... -command "VFolderDeleteFolder"
+    set vf(folder_menu_delete) [$w.mf index end]
+    $w.mf add command -label $t(new_folder_wizard)... \
+	-command "VFolderWizardStart tree"
     $w.mf add command -label $t(new_submenu)... \
-	    -command "VFolderNew struct tree"
-    $w.mf add command -label $t(new_mailbox)... \
-	    -command "VFolderNew folder tree"
+	-command "VFolderNewStruct tree"
     set vf(folder_menu) $w.mf
 
     menu $w.mm -tearoff 0
-    $w.mm add command -label $t(delete)... -command "VFolderDelete mailserver"
+    $w.mm add command -label $t(delete)... -command "VFolderDeleteServer"
     set b($w.mm,[$w.mm index end]) vd_delete
     set vf(mailserver_menu) $w.mm
 
@@ -210,19 +206,26 @@ R0lGODlhEAAMAKEAAAD//wAAAPD/gP///yH5BAEAAAAALAAAAAAQAAwAAAIihA+hi50CRXAo
 SDupsTG3jGHaxEHegobS+HQUmGryTNdAAQA7}]
     }
 
-    bind $w.mbar <Destroy> VFolderCheckChanges
+    bind $w.mbar <Destroy> VFolderWinCleanup
     bind $w <Return> {
 	if {"normal" == [[winfo toplevel %W].d.r.buttons.apply cget -state]} {
 	    VFolderApply
 	}
     }
     bind $vf(but_restore) <Return> {%W invoke; break}
-    wm protocol $w WM_DELETE_WINDOW "VFolderWinClose $id"
 
     $vf(tree) autoredraw 0
+    # Add IMAP-servers
     set vf(imapitem) [$vf(top) add folder -image $vf(folder) \
 	    -label $t(imap_servers) -state closed]
-    VFolderAddMailServers $vf(imapitem)
+    VFolderAddMailServers
+    # Add special folders
+    set item [$vf(top) add folder -image $vf(folder) -label $t(specials) \
+	    -state closed -zone specials]
+    foreach sid [lindex $vFolderDef($vFolderSpecials) 3] {
+	VFDInsert $item end $sid specials
+    }
+    # Add normal folders
     set item [$vf(top) add folder -image $vf(folder) -label $t(folders) \
 	    -state open -zone folders]
     foreach sid [lindex $vFolderDef(0) 3] {
@@ -231,7 +234,7 @@ SDupsTG3jGHaxEHegobS+HQUmGryTNdAAQA7}]
     set vf(folderitem) $item
     $vf(tree) autoredraw 1
     $vf(tree) redraw
-    Place $w vFolderDef
+    ::tkrat::winctl::SetGeometry vFolderDef $w $w.d
 }
 
 # VFolderWinClose --
@@ -239,24 +242,47 @@ SDupsTG3jGHaxEHegobS+HQUmGryTNdAAQA7}]
 # Close a vfolderdef window
 #
 # Arguments:
-# handler - The handler identifying the window
+# force - True if we can not abort
 
-proc VFolderWinClose {handler} {
-    upvar #0 $handler hd
-    global b
+proc VFolderWinClose {force} {
+    global b vf t
 
-    # Check if it is ok
-    if {0 == [VFolderChangeOk]} {
-	return
+    if {!$force} {
+        # Check if it is ok
+        if {0 == [VFolderChangeOk]} {
+            return
+        }
+
+        # Do we have a wizard up?
+        set wizards 0
+        foreach w [winfo children .] {
+            if {[string match ".vfolderwizard*" $w]} {
+                wm deiconify $w
+                incr wizards
+            }
+        }
+        if { 0 != $wizards} {
+            Popup $t(cant_close_while_wizards)
+            return
+        }
     }
+    destroy $vf(w)
+}
 
-    RecordPane $hd(pane) vFolderPane
-    RecordSize $hd(w).d vFolderDef
-    RecordPos $hd(w) vFolderDef
-    catch {focus $hd(oldfocus)}
-    destroy $hd(w)
-    foreach bn [array names b $hd(w).*] {unset b($bn)}
-    unset hd
+# VFolderWinCleanup --
+#
+# Cleanup when closing VFolderWindow
+#
+# Arguments:
+
+proc VFolderWinCleanup {} {
+    global vf b
+
+    VFolderCheckChanges
+    ::tkrat::winctl::RecordGeometry vFolderDef $vf(w) $vf(w).d $vf(pane)
+    catch {focus $vf(oldfocus)}
+    foreach bn [array names b $vf(w).*] {unset b($bn)}
+    unset vf
 }
 
 # VFolderPane --
@@ -264,16 +290,17 @@ proc VFolderWinClose {handler} {
 # Pane the vfolderdef window
 #
 # Arguments:
-# handler - The handler which identifies the vfolder window
 # x       - X position of dividing line
 
-proc VFolderPane {handler x} {
-    upvar #0 $handler hd
-    set w $hd(w)
-    set hd(pane) $x
+proc VFolderPane {x} {
+    global vf
 
-    if {$x < 0.1 || 0.9 < $x}  return
+    if {$x < 0.01 || 0.99 < $x}  return
         # Prevents placing into inaccessibility (off the window).
+
+    set w $vf(w)
+    set vf(pane) $x
+
     place $w.d.t -relwidth $x
     place $w.d.r -relwidth [expr {1.0 - $x}]
     place $w.d.handle -relx $x
@@ -287,16 +314,16 @@ proc VFolderPane {handler x} {
 # Arguments:
 # im - Imap top item
 
-proc VFolderAddMailServers {im} {
+proc VFolderAddMailServers {} {
     global mailServer vf
 
-    $im clear
+    $vf(imapitem) clear
     foreach m [lsort -dictionary [array names mailServer]] {
 	if {-1 != [lsearch -exact [lindex $mailServer($m) 2] pop3]} {
 	    continue
 	}
 	set iid [list imap $m]
-	$im add item -image $vf(imap) -label $m -id $iid
+	$vf(imapitem) add item -image $vf(imap) -label $m -id $iid
 	$vf(tree) bind $iid <3> \
 		[list VFolderPostMenu %X %Y $iid $vf(mailserver_menu)]
     }
@@ -381,7 +408,10 @@ proc VFDInsert {item pos id zone} {
 	$item add entry -image $image -label $text -id $iid -position $pos \
 		-dropin $zone
     }
-    $vf(tree) bind $iid <3> [list VFolderPostMenu %X %Y $iid $vf(folder_menu)]
+    if {"folders" == $zone} {
+	$vf(tree) bind $iid <3> \
+	    [list VFolderPostMenu %X %Y $iid $vf(folder_menu)]
+    }
 }
 
 # VFolderChangeOk --
@@ -433,7 +463,27 @@ proc VFolderSelect {ident} {
 	    }
 	}
     }
+    rat_scrollframe::recalc $vf(detframe)
     return ok
+}
+
+# VFolderClearWindow --
+#
+# Clears the window
+#
+# Arguments:
+
+proc VFolderClearWindow {} {
+    global vf vfd vfd_old
+
+    foreach c [winfo children $vf(details)] {
+	destroy $c
+    }
+    # Work around bug in tk (reported & fixed Oct 2002)
+    grid size $vf(details)
+    unset vfd_old
+    set vfd_old(marker) {}
+    trace vdelete vfd w VFolderDefChange
 }
 
 # VFolderSetupDetails --
@@ -447,14 +497,9 @@ proc VFolderSelect {ident} {
 
 proc VFolderSetupDetails {id new pos} {
     global vf vfd vfd_old vFolderDef vFolderInbox t b mailServer \
-	    option env
+	    option env vFolderHold vFolderOutgoing
 
-    # Clear window
-    foreach c [winfo children $vf(details)] {
-	destroy $c
-    }
-    unset vfd_old
-    trace vdelete vfd w VFolderDefChange
+    VFolderClearWindow
 
     set w $vf(details)
     set vfd(olddef) $vFolderDef($id)
@@ -467,6 +512,13 @@ proc VFolderSetupDetails {id new pos} {
     set vfd(import_on_create) 0
 
     # Top information
+    if {$id == $vFolderHold} {
+	label $w.is_hold -text $t(is_hold_folder) -pady 10 -anchor n
+	grid $w.is_hold - -sticky ew
+    } elseif {$id == $vFolderOutgoing} {
+	label $w.is_outgoing -text $t(is_outgoing_folder) -pady 10 -anchor n
+	grid $w.is_outgoing - -sticky ew
+    }
     label $w.name_lab -text $t(name): -width $vf(mw) -anchor e
     entry $w.name -width 40 -textvariable vfd(name)
     grid $w.name_lab $w.name -sticky ew
@@ -521,10 +573,10 @@ proc VFolderSetupDetails {id new pos} {
 	if {"pop3" == $vfd(type) && "" == [lindex $vfd(olddef) 3]} {
 	    # Find unique name
 	    set i 1
-	    while {[info exists mailServer(pop3-$i)]} {
+	    while {[info exists mailServer($i)]} {
 		incr i
 	    }
-	    set n pop3-$i
+	    set n $i
 
 	    set mailServer($n) [list {} {} {} $env(USER)]
 	    set d [lreplace $vfd(olddef) 3 3 $n]
@@ -622,7 +674,7 @@ proc VFolderSetupDetails {id new pos} {
 	    entry $w.mp_entry -textvariable vfd(mailbox_path) -width 20
 	    set b($w.mp_entry) vd_mbox
 	    grid $w.mp_lab $w.mp_entry -sticky we
-	    checkbutton $w.disconnected -text $t(use_as_disconnected) \
+	    checkbutton $w.disconnected -text $t(enable_offline) \
 		    -variable vfd(disconnected)
 	    set b($w.disconnected) use_as_disconnected
 	    grid x $w.disconnected -sticky w
@@ -910,14 +962,9 @@ proc VFolderSetupMailServerDetails {w id} {
 # new  - Boolean indicating if this is a new object or not
 
 proc VFolderSetupMailServer {type id new} {
-    global vf vfd vfd_old vFolderDef vFolderInbox t b mailServer
+    global vf vfd vfd_old vFolderDef vFolderInbox t b
 
-    # Clear window
-    foreach c [winfo children $vf(details)] {
-	destroy $c
-    }
-    unset vfd_old
-    trace vdelete vfd w VFolderDefChange
+    VFolderClearWindow
 
     set w $vf(details)
     set vfd(new) $new
@@ -1048,7 +1095,7 @@ proc VFolderDefChange {name1 name2 op} {
 
 proc VFolderWrite {} {
     global option vFolderDef vFolderVersion vFolderInbox \
-	    mailServer
+	    mailServer vFolderOutgoing vFolderHold vFolderSpecials
 
     # Do nothing on errors
     if {[catch {open $option(ratatosk_dir)/vfolderlist w} fh]} {
@@ -1059,6 +1106,9 @@ proc VFolderWrite {} {
     if {"" != $vFolderInbox} {
 	puts $fh "set vFolderInbox $vFolderInbox"
     }
+    puts $fh "set vFolderHold $vFolderHold"
+    puts $fh "set vFolderOutgoing $vFolderOutgoing"
+    puts $fh "set vFolderSpecials $vFolderSpecials"
     foreach s [array names mailServer] {
 	puts $fh [list set mailServer($s) $mailServer($s)]
     }
@@ -1076,13 +1126,14 @@ proc VFolderWrite {} {
 # Arguments:
 
 proc VFolderCheckChanges {} {
-    global vf vFolderDef
-    
+    global vf vFolderDef vFolderSpecials
+
     # Has the tree-structure changed
     if {0 != [$vf(tree) getnumchanges]} {
 	incr vf(changed)
 	foreach i [array names vFolderDef] {
-	    if {"struct" == [lindex $vFolderDef($i) 1]} {
+	    if {"struct" == [lindex $vFolderDef($i) 1]
+	        && $vFolderSpecials != $i} {
 		unset vFolderDef($i)
 	    }
 	}
@@ -1228,7 +1279,8 @@ proc VFolderGetID {} {
 # Arguments:
 
 proc VFolderApply {} {
-    global vf vfd vfd_old vFolderDef mailServer t vFolderInbox env option
+    global vf vfd vfd_old vFolderDef mailServer t vFolderInbox env option \
+	folderWindowList
 
     if {0 == [string length $vfd(name)]} {
 	Popup $t(need_name) $vf(w)
@@ -1276,15 +1328,19 @@ proc VFolderApply {} {
 	set flags {}
 	switch $vfd(method) {
 	    tcp_default {
-		if {"imap" == $vfd(type) && !$vfd(ssl)} {
-		    set port 143
-		} elseif {"imap" == $vfd(type) && $vfd(ssl)} {
-		    set port 993
-		} elseif {"pop3" == $vfd(type) && !$vfd(ssl)} {
-		    set port 110
-		} elseif {"pop3" == $vfd(type) && $vfd(ssl)} {
-		    set port 995
-		}
+                if {"pop" == $vfd(type)} {
+                    if {$vfd(ssl)} {
+                        set port 995
+                    } else {
+                        set port 110
+                    }
+                } else {
+                    if {$vfd(ssl)} {
+                        set port 993
+                    } else {
+                        set port 143
+                    }
+                }
 	    }
 	    tcp_custom {
 		set port $vfd(port)
@@ -1309,7 +1365,7 @@ proc VFolderApply {} {
 	}
 	set mailServer($n) [list $vfd(host) $port $flags $vfd(user)]
 	if {"mail_server" == $vfd(mode)} {
-	    VFolderAddMailServers $vf(imapitem)
+	    VFolderAddMailServers
 	    set redraw 1
 	    $vf(tree) select [list $vfd(type) $vfd(name)]
 	}
@@ -1322,6 +1378,17 @@ proc VFolderApply {} {
 	if {"" == $def} {
 	    $vf(tree) autoredraw 1
 	    return
+	}
+	# If we have changed any significant parts of the folder definition
+	# and we have any open instances then close all open instances.
+	if {![VFolderSameBase $vFolderDef($vfd(id)) $def]
+	    && "" != [set oh [RatGetOpenHandler $vFolderDef($vfd(id))]]} {
+	    $oh close 1
+	    foreach fhd [array names folderWindowList] {
+		if {"$oh" == $folderWindowList($fhd)} {
+		    FolderWindowClear $fhd
+		}
+	    }
 	}
 	if {$vfd(monitor) != $vfd_old(monitor)} {
 	    global vFolderMonitorFH vFolderMonitorID folderExists
@@ -1352,6 +1419,9 @@ proc VFolderApply {} {
 		set vFolderInbox {}
 	    }
 	}
+        if {$vfd(type) == "imap" && $vfd_old(type) == "dis"} {
+	    RatDeleteDisconnected $vfd(olddef)
+        }
 	set vFolderDef($vfd(id)) $def
 	if {$redraw} {
 	    set text [VFolderGetItemName $vfd(id)]
@@ -1367,28 +1437,27 @@ proc VFolderApply {} {
 		$vf(tree) itemchange $iid -label $text -image $image
 	    }
 	}
-	# XXX
 	if {$vfd(manage)} {
-	    if {$vfd(new)} {
-		if {[catch {RatCreateFolder $def} err]} {
-		    if {1 == [RatDialog $vf(w) ! \
-			    "$t(mailbox_create_failed) $err" \
-			    {} 0 $t(continue) $t(abort)]} {
-			trace vdelete vfd w VFolderDefChange
-			$vf(but_apply) configure -state disabled
-			$vf(but_restore) configure -state disabled
-			set vf(unapplied_changes) 0
-			$vf(tree) delete [list folder $vfd(id)]
-			$vf(tree) redraw
-			unset vFolderDef($vfd(id))
-			foreach c [winfo children $vf(details)] {
-			    destroy $c
+	    RatBusy {
+		if {$vfd(new)} {
+		    if {[catch {RatCreateFolder $def} err]} {
+			if {1 == [RatDialog $vf(w) ! \
+				      "$t(mailbox_create_failed) $err" \
+				      {} 0 $t(continue) $t(abort)]} {
+			    trace vdelete vfd w VFolderDefChange
+			    $vf(but_apply) configure -state disabled
+			    $vf(but_restore) configure -state disabled
+			    set vf(unapplied_changes) 0
+			    $vf(tree) delete [list folder $vfd(id)]
+			    $vf(tree) redraw
+			    unset vFolderDef($vfd(id))
+			    foreach c [winfo children $vf(details)] {
+				destroy $c
+			    }
+			    return
 			}
-			return
 		    }
 		}
-	    } else {
-		# XXX Rename?
 	    }
 	}
 
@@ -1430,6 +1499,25 @@ proc VFolderApply {} {
     return
 }
 
+# VFolderSameBase --
+#
+# Check if the two given folder definitions points to the same base folder
+#
+# Arguments:
+# def1, def2 - Two folder definitions
+
+proc VFolderSameBase {def1 def2} {
+    if {[lindex $def1 1] != [lindex $def2 1]} {
+	return 0
+    }
+    for {set i 3} {$i <= [llength $def1]} {incr i} {
+	if {[lindex $def1 $i] != [lindex $def2 $i]} {
+	    return 0
+	}
+    }
+    return 1
+}
+
 # VFolderRemoveNew --
 #
 # Invoked when canceling creating a folder
@@ -1440,8 +1528,8 @@ proc VFolderRemoveNew {} {
     global vfd vf mailServer vFolderDef
 
     if {"mail_server" == $vfd(mode)} {
-	$vf(tree) delete [list $vfd_old(type) $vfd(id)]
-	unset mailServer($vfd_old(name))
+	$vf(tree) delete [list $vfd(type) $vfd(id)]
+	unset mailServer($vfd(name))
     } else {
 	$vf(tree) delete [list folder $vfd(id)]
 	unset vFolderDef($vfd(id))
@@ -1451,6 +1539,7 @@ proc VFolderRemoveNew {} {
     }
     if {[info exists vfd(old)]} {
 	unset vfd_old
+	set vfd_old(marker) {}
     }
     trace vdelete vfd w VFolderDefChange
 }
@@ -1462,7 +1551,7 @@ proc VFolderRemoveNew {} {
 # Arguments:
 
 proc VFolderRestore {} {
-    global vfd vfd_old vf mailServer vFolderDef
+    global vfd vfd_old vf vFolderDef
 
     if {0 == $vfd(new)} {
 	foreach v [array names vfd_old] {
@@ -1477,15 +1566,14 @@ proc VFolderRestore {} {
     VFolderCheckChanges
 }
 
-# VFolderNew --
+# VFolderNewStruct --
 #
-# Initiate creation of a new folder object
+# Initiate creation of a new folder structure object
 #
 # Arguments:
-# type    - Type of new entry
 # context - menu or tree, describes from where we were invoked
 
-proc VFolderNew {type context} {
+proc VFolderNewStruct {context} {
     global vf vFolderDef option t
 
     # Check if it is ok
@@ -1501,43 +1589,7 @@ proc VFolderNew {type context} {
 
     # Create template
     set id [VFolderGetID]
-    if {"struct" == $type} {
-	set vFolderDef($id) [list $t(new_submenu) struct {} {}]
-    } else {
-	if {"menu" == $context} {
-	    set tm $option(template_folder)
-	} else {
-	    set tm $vFolderDef($vf(template))
-	}
-	switch -regexp [lindex $tm 1] {
-	    file|mh|dynamic {
-		set def [lreplace $tm 3 3 [file dirname [lindex $tm 3]]/]
-	    }
-	    dbase {
-		set def [lreplace $tm 5 5 [list and keywords {}]]
-	    }
-	    imap|dis {
-		if {"/" == [string index [lindex $tm 4] 0]} {
-		    set path [file dirname [lindex $tm 4]]/
-		} elseif {"." == [string index [lindex $tm 4] 0]} {
-		    regsub {\.[^.]*$} [lindex $tm 4] {} path
-		} else {
-		    set path ""
-		}
-		set def [lreplace $tm 4 4 $path]
-	    }
-	    pop3 {
-		set def $tm
-	    }
-	    struct {
-		set def $option(template_folder)
-	    }
-	    import {
-		set def $tm
-	    }
-	}
-	set vFolderDef($id) [lreplace $def 0 0 $t(new_mailbox)]
-    }
+    set vFolderDef($id) [list $t(new_submenu) struct {} {}]
     $vf(tree) autoredraw 0
     VFDInsert $vf(into_item) $vf(into_pos) $id folders
     $vf(tree) select [list folder $id]
@@ -1546,38 +1598,32 @@ proc VFolderNew {type context} {
     VFolderSetupDetails $id 1 {}
 }
 
-# VFolderNewServer --
+# VFolderAddFolder --
 #
-# Initiate creation of a new mail-server
+# Adds a folder created by the wizard
 #
 # Arguments:
+# context - Add context
+# def     - Folder definition
 
-proc VFolderNewServer {} {
-    global vf mailServer option t env
-
-    # Check if it is ok
-    if {0 == [VFolderChangeOk]} {
-	return
-    }
+proc VFolderAddFolder {context def} {
+    global vf vFolderDef
 
     # Determine where to place it
-    set vf(into_item) $vf(folderitem)
-    set vf(into_pos) end
-
-    # Find unique name
-    set n $t(new_imap_server)
-    set i 1
-    while {[info exists mailServer($n)]} {
-	set n $t(new_imap_server)-[incr i]
+    if {"menu" == $context} {
+	set vf(into_item) $vf(folderitem)
+	set vf(into_pos) end
     }
 
-    set mailServer($n) [list $option(remote_host) {} {} $option(remote_user)]
+    set id [VFolderGetID]
+    set vFolderDef($id) $def
     $vf(tree) autoredraw 0
-    VFolderAddMailServers $vf(imapitem)
-    $vf(tree) select [list imap $n]
+    VFDInsert $vf(into_item) $vf(into_pos) $id folders
+    $vf(tree) select [list folder $id]
     $vf(tree) autoredraw 1
     $vf(tree) redraw
-    VFolderSetupMailServer imap $n 1
+    VFolderSetupDetails $id 0 {}
+    return $id
 }
 
 # VFolderPostMenu:
@@ -1590,13 +1636,32 @@ proc VFolderNewServer {} {
 # m      - Menu to popup
 
 proc VFolderPostMenu {x y id m} {
-    global vf
+    global vf vFolderInbox b option
 
     set pos [$vf(tree) getpos $id]
     set vf(into_item) [lindex $pos 0]
     set vf(into_pos) [expr {[lindex $pos 1]+1}]
     set vf(template) [lindex $id 1]
     set vf(iid) $id
+    set delete_state normal
+    set delete_bal vd_delete
+    set rid [lindex $id 1]
+    if {"folder" == [lindex $id 0] 
+	&& $rid == $vFolderInbox} {
+	set delete_state disabled
+	set delete_bal cant_delete_inbox
+    } else {
+	foreach r $option(roles) {
+	    if {$rid == $option($r,save_outgoing)} {
+		set delete_state disabled
+		set delete_bal "cant_delete_used"
+		break
+	    }
+	}
+    }
+
+    $m entryconfigure $vf(folder_menu_delete) -state $delete_state
+    set b($m,$vf(folder_menu_delete)) $delete_bal
     tk_popup $m $x $y
 }
 
@@ -1616,6 +1681,19 @@ proc VFolderReimport {id} {
     }
     RatBusy {RatImport $id}
 
+    VFolderRedrawSubtree $id
+}
+
+# VFolderRedrawSubtree
+#
+# Redraws a subtree in the list. Useful after reimporting stuff etc.
+#
+# Arguments:
+# id - Id of folder to redraw the children of
+
+proc VFolderRedrawSubtree {id} {
+    global vFolderDef vf
+
     $vf(tree) autoredraw 0
     $vf(item,$id) clear
     foreach sid [lindex $vFolderDef($id) 5] {
@@ -1626,89 +1704,90 @@ proc VFolderReimport {id} {
     VFolderCheckChanges
 }
 
-# VFolderDelete --
+# VFolderDeleteServer --
 #
-# Perhaps delete the current object
+# Perhaps delete the current server object
 #
 # Arguments:
-# type - Type of item to delete (folder or mailserver)
 
-proc VFolderDelete {type} {
-    global t vf vFolderDef vFolderInbox option mailServer
+proc VFolderDeleteServer {} {
+    global t vf vfd vFolderDef mailServer
 
-    if {"mailserver" == $type} {
-	set u ""
-	foreach id [array names vFolderDef] {
-	    if {"import" == [lindex $vFolderDef($id) 1]} {
-		set f [lindex $vFolderDef($id) 3]
-	    } else {
-		set f $vFolderDef($id)
-	    }
-	    if {[regexp "imap|pop3|dis" [lindex $f 1]]
-	            && $vf(template) == [lindex $f 3]} {
-		lappend ids $id
-		set u "$u\n\t[lindex $f 0]"
-	    }
+    set u ""
+    foreach id [array names vFolderDef] {
+	if {"import" == [lindex $vFolderDef($id) 1]} {
+	    set f [lindex $vFolderDef($id) 3]
+	} else {
+	    set f $vFolderDef($id)
 	}
-	if {"" != $u} {
-	    Popup "$t(mailserver_used): $u" $vf(w)
-	    return
+	if {[regexp "imap|pop3|dis" [lindex $f 1]]
+	    && [lindex $vf(iid) 1] == [lindex $f 3]} {
+	    lappend ids $id
+	    set u "$u\n\t[lindex $f 0]"
 	}
-	$vf(tree) delete $vf(iid)
-	unset mailServer($vf(template))
+    }
+    if {"" != $u} {
+	Popup "$t(mailserver_used): $u" $vf(w)
+	return
+    }
+    $vf(tree) delete $vf(iid)
+    unset mailServer($vf(template))
+
+    if {[info exists vfd(id)] && $vfd(id) == [lindex $vf(iid) 1]} {
+	VFolderClearWindow
+    }
+
+    VFolderCheckChanges
+}
+
+# VFolderDeleteFolder --
+#
+# Perhaps delete the current folder object
+#
+# Arguments:
+
+proc VFolderDeleteFolder {} {
+    global t vf vfd vFolderDef option mailServer
+
+    set id [lindex $vf(iid) 1]
+    if {"struct" == [lindex $vFolderDef($id) 1]} {
+	set children [lindex $vFolderDef($id) 3]
+    } elseif {"import" == [lindex $vFolderDef($id) 1]} {
+	set children [lindex $vFolderDef($id) 5]
     } else {
-	set id [lindex $vf(iid) 1]
-	if {$vFolderInbox == $id} {
-	    Popup $t(cant_delete_inbox)
+	set children {}
+    }
+    if {0 < [llength $children]} {
+	if {[RatDialog $vf(w) ! $t(item_not_empty) {} 0 $t(delete) \
+		 $t(cancel)]} {
 	    return
 	}
-	set used_in_roles {}
-	foreach r $option(roles) {
-	    if {$id == $option($r,save_outgoing)} {
-		lappend used_in_roles $option($r,name)
-	    }
-	}
-	if {"" != $used_in_roles} {
-	    Popup "$t(cant_delete_used): $used_in_roles"
-	    return
+    }
+    set keep [RatDialog $vf(w) ! $t(delete_what_folder) {} 1 \
+		  $t(delete_both) $t(only_in_tkrat)]
+    $vf(tree) delete $vf(iid)
+    set idlist $id
+    for {set i 0} {$i < [llength $idlist]} {incr i} {
+	set id [lindex $idlist $i]
+	if {0 == $keep} {
+	    RatDeleteFolder $vFolderDef($id)
 	}
 	if {"struct" == [lindex $vFolderDef($id) 1]} {
-	    set children [lindex $vFolderDef($id) 3]
+	    set idlist [concat $idlist [lindex $vFolderDef($id) 3]]
 	} elseif {"import" == [lindex $vFolderDef($id) 1]} {
-	    set children [lindex $vFolderDef($id) 5]
-	} else {
-	    set children {}
+	    set idlist [concat $idlist [lindex $vFolderDef($id) 5]]
+	} elseif {"pop3" == [lindex $vFolderDef($id) 1]} {
+	    unset mailServer([lindex $vFolderDef($id) 3])
+	} elseif {"dis" == [lindex $vFolderDef($id) 1]} {
+	    RatDeleteDisconnected $vFolderDef($id)
 	}
-	if {0 < [llength $children]} {
-            if {[RatDialog $vf(w) ! $t(item_not_empty) {} 0 $t(delete) \
-                    $t(cancel)]} {
-                return
-            }
-	}
-	set keep [RatDialog $vf(w) ! $t(delete_what_folder) {} 1 \
-		$t(delete_both) $t(only_in_tkrat)]
-	$vf(tree) delete $vf(iid)
-	set idlist $id
-	for {set i 0} {$i < [llength $idlist]} {incr i} {
-	    set id [lindex $idlist $i]
-	    if {0 == $keep} {
-		RatDeleteFolder $vFolderDef($id)
-	    }
-	    if {"struct" == [lindex $vFolderDef($id) 1]} {
-		set idlist [concat $idlist [lindex $vFolderDef($id) 3]]
-	    } elseif {"import" == [lindex $vFolderDef($id) 1]} {
-		set idlist [concat $idlist [lindex $vFolderDef($id) 5]]
-	    } elseif {"pop3" == [lindex $vFolderDef($id) 1]} {
-		unset mailServer([lindex $vFolderDef($id) 3])
-	    }
-	    unset vFolderDef($id)
-	}
+	unset vFolderDef($id)
     }
 
-    # Clear window
-    foreach c [winfo children $vf(details)] {
-	destroy $c
+    if {[info exists vfd(id)] && $vfd(id) == $id} {
+	VFolderClearWindow
     }
+    
     VFolderCheckChanges
 }
 
@@ -1733,6 +1812,9 @@ proc VFolderReimportAll {} {
 
     RatBusy {
 	foreach id [array names vFolderDef] {
+            if {![info exists vFolderDef($id)]} {
+                continue
+            }
 	    if {"import" != [lindex $vFolderDef($id) 1]} {
 		continue
 	    }

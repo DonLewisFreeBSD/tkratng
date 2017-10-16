@@ -47,10 +47,12 @@
 # This copy has been modified Martin Forssen <maf@dtek.chalmers.se>
 # to better fit into the tkrat distribution.
 
-package provide rat_ispell 1.0
+package provide rat_ispell 1.1
 
 namespace eval rat_ispell {
     namespace export CheckTextWidget
+
+    package require rat_spellutil 1.0
 
     variable ignore
     # ignore is an array where each element corresponds to
@@ -67,6 +69,8 @@ namespace eval rat_ispell {
     # color of the ispell tag that is applied in the text widget
     # as the words are checked.
 
+    variable dictionaries {}
+    # A list of installed dictionaries
 }
 
 #
@@ -116,50 +120,31 @@ proc rat_ispell::IsSeparator {w p} {
 proc rat_ispell::CheckTextWidget {tw} {
     global option t
 
-    #
-    # Open a pipe to ispell to feed individual word from 
-    # the text widget to it
-    #
-    set cmd "$option(ispell_path) -a -B -S !"
-    if {[catch {open "|$cmd |& cat" r+} ispell]} {
-	set resp [tk_dialog .ispell_err Ispell $t(ispell_3.1) error \
-		      0 $t(ok) $t(details)...]
-	if {1 == $resp} {
-	    ShowError $cmd $ispell
-	}
-        return
+    if {0 == [llength $rat_ispell::dictionaries]} {
+        set rat_ispell::dictionaries [rat_spellutil::get_dicts]
     }
-    fconfigure $ispell -buffering line
-    # the first line ispell spits out is some ispell info
-    # it's not real important to me
-    flush $ispell
-    gets $ispell line
-    if {![regexp {^3.[12].*} [lindex $line 4]]} {
-	set resp [tk_dialog .ispell_err Ispell $t(ispell_3.1) error \
-		      0 $t(ok) $t(details)...]
-	if {1 == $resp} {
-	    ShowError $cmd $line
-	}
-        return
-    }
+
     #
     # Since we are at least going to say "Spell Checking Complete"
     # and we might have a mispelled word or three, let's make one
     # toplevel that handles every thing for this session. Better hide
     # it until we need it
     #
-    regsub -all "." $tw "_" safet
+    regsub -all "\\." $tw "_" safet
     set w ".ispell$safet"
     if {[winfo exists $w]} {
         return
     }
+    upvar \#0 rat_ispell::$w hd
+    set hd(wait_string) 1
+    set hd(tw) $tw
+
     toplevel $w -class TkRat
+    wm title $w $t(spell_checking)
     option add *HighlightBackground [$w cget -background]
-    wm title $w "Ispell"
-    wm protocol $w WM_DELETE_WINDOW ""
 
     set l 0
-    foreach la {unknown_word replace_with spell_complete} {
+    foreach la {unknown_word replace_with} {
 	if {[string length $t($la)] > $l} {
 	    set l [string length $t($la)]
 	}
@@ -168,10 +153,10 @@ proc rat_ispell::CheckTextWidget {tw} {
     set f $w.topframe
     frame $f
     label $f.unkwordL \
-        -text $t(unknown_word): -width $l -anchor w
+        -text $t(unknown_word): -width $l -anchor e
     label $f.unkwordE -width 20 -anchor w
     label $f.repwordL \
-        -text $t(replace_with): -width $l -anchor w
+        -text $t(replace_with): -width $l -anchor e
     entry $f.repwordE  -width 20
     grid $f.unkwordL -column 0 -row 0 -stick w
     grid $f.unkwordE -column 1 -row 0 -stick w
@@ -202,9 +187,13 @@ proc rat_ispell::CheckTextWidget {tw} {
         -text $t(ignore_all)
     button $f.learn \
         -text $t(learn)
+    menubutton $f.lang \
+        -menu $f.lang.m \
+        -justify center \
+        -relief raised -bd 2 -indicatoron 1
     button $f.quit \
         -text $t(dismiss)
-    pack $f.replace $f.replaceall $f.ignore $f.ignoreall $f.learn \
+    pack $f.replace $f.replaceall $f.ignore $f.ignoreall $f.learn $f.lang\
 	    -side top -fill x
     pack $f.quit -side bottom -fill x
 
@@ -214,16 +203,26 @@ proc rat_ispell::CheckTextWidget {tw} {
     grid columnconfigure $w 0 -weight 1
     grid rowconfigure    $w 1 -weight 1
     
-    #
-    # since we may not be using 8.3, I guess I'll set up some
-    # bindings so that the selected word in the listbox is
-    # also displayed in rat_ispell::replacement($w)
-    #
-    bind $lbx <ButtonRelease-1> "rat_ispell::SyncListBoxAndRepString $w $lbx"
-    bind $lbx <Double-1> "set rat_ispell::returnString($w) CheckWord-replace"
+    set m $f.lang.m
+    menu $m
+    set lwidth 8
+    foreach l $rat_ispell::dictionaries {
+        $m add command \
+            -label [string totitle $l] \
+            -command "rat_ispell::SetLanguage $w $l"
+        if {[string length $l] > $lwidth} {
+            set lwidth [string length $l]
+        }
+    }
+    $f.lang configure -width $lwidth
+    set hd(langbutton) $f.lang
 
-    # Place the window
-    Place $w ispell
+    bind $lbx <ButtonRelease-1> "rat_ispell::SyncListBoxAndRepString $w $lbx"
+    bind $lbx <Double-1> "set rat_ispell::${w}(returnString) CheckWord-replace"
+
+    bind $w.guess.lbx <Destroy> \
+        "::tkrat::winctl::RecordGeometry ispell $w $w.guess.lbx"
+    ::tkrat::winctl::SetGeometry ispell $w $w.guess.lbx
     
     #
     # Later on, we will configure the label, entry widgets, and buttons
@@ -243,59 +242,90 @@ proc rat_ispell::CheckTextWidget {tw} {
     # check process
     $tw tag configure ispell \
         -background $rat_ispell::tagBG \
-        -foreground $rat_ispell::tagFG
-    set end  [$tw index "end"]
-    set point 1.0
+        -foreground $rat_ispell::tagFG \
+        -bgstipple gray75
+    $tw tag raise ispell
+
+
+    # Figure out language
+    if {"auto" == $option(def_spell_dict)} {
+        set lang [rat_ispell::GuessLanguage $tw]
+    } else {
+        set lang $option(def_spell_dict)
+    }
+    rat_ispell::SetLanguage $w $lang
+
+    #
+    # Run the spell checking
+    rat_ispell::CheckText $tw $w
+
+    if {[winfo exists $w]} {
+        tkwait window $w
+    }
+    unset hd
+
+    # Rerun the marking of misspelled words...
+    catch {rat_textspell::recheck $tw} err
+}
+
+# rat_ispell::CheckText --
+#
+# Spellchecks the given text widget
+#
+# Arguments:
+
+proc rat_ispell::CheckText {tw w} {
+    upvar \#0 rat_ispell::$w hd
+    global option t
+
+    wm title $w $t(spell_checking)
+    wm protocol $w WM_DELETE_WINDOW ""
+
+    set ispell [rat_spellutil::launch_spell $hd(lang)]
+    if {"" == $ispell} {
+        return
+    }
+
+    set f $w.topframe
+    grid configure $f.unkwordL -columnspan 1
+    grid $f.unkwordE -row 0 -column 1
+    $f.repwordE configure \
+        -state normal
+    $f.unkwordL configure \
+        -text $t(unknown_word): -width [$f.repwordL cget -width] -anchor e
+    $f.repwordL configure \
+        -foreground [$w.buttons.replace cget -foreground]
+
+    foreach b {replace replaceall ignore ignoreall learn} {
+        $w.buttons.$b configure -state normal
+    }
+
+    rat_ispell::InitWordGet $tw
     set continue 1
     set doQuit 0
+    set doRerun 0
     while {$continue} {
-	if {0 == [IsSeparator $tw $point]} {
-	    set wordStart $point
-	    while {0 == [IsSeparator $tw "$wordStart -1c"]
-   	           && [$tw compare "$wordStart -1c" > 1.0]} {
-		set wordStart [$tw index "$wordStart -1c"]
-	    }
-	} else {
-	    set wordStart [$tw index "$point +1c"]
-	    while {1 == [IsSeparator $tw $wordStart]
-         	    && [$tw compare $wordStart < $end]} {
- 		set wordStart [$tw index "$wordStart +1c"]
-	    }
-	    if {[$tw compare $wordStart >= $end]} {
-		break
-	    }
-	}
-	set wordEnd [$tw index "$wordStart +1c"]
-	while {0 == [IsSeparator $tw $wordEnd]
-	       && [$tw compare $wordEnd < $end]} {
-	    set wordEnd [$tw index "$wordEnd +1c"]
-	}
-        set word [string trim [$tw get $wordStart $wordEnd]]
-        $tw tag remove ispell 1.0 end
-	if {-1 != [lsearch -exact \
-		[$tw tag names $wordStart] no_spell]} {
-	    set n [$tw tag prevrange no_spell "$wordStart+1c"]
-	    set point "[lindex $n 1] +1c"
-	    while {0 == [IsSeparator $tw $point]
-         	    && [$tw compare $point < $end]} {
- 		set point [$tw index "$point +1c"]
-	    }
-        } elseif {[regexp -nocase \[a-z\] "$word"] && \
-                ![info exists rat_ispell::ignore($word)]} {
+        set word [rat_ispell::GetWord $tw]
+        if {"" == $word} {
+            break
+        }
+        if {[regexp -nocase \[a-z\] "$word"] && \
+                ![info exists rat_ispell::ignore($hd(lang),$word)]} {
             # Well, it looks like we found a valid word that is 
             # not to ignored so now we have to check it.
             # It is possible that we have already decided to
             # replace all occurances of the word with someting
             # else... let's see
-            if {[info exists rat_ispell::replace($word)]} {
+            if {[info exists rat_ispell::replace($hd(lang),$word)]} {
                 # Hey, how about it, lets automagically replace it
                 set replaceWord 1
-                set replacement "$rat_ispell::replace($word)"
+                set replacement "$rat_ispell::replace($hd(lang),$word)"
             } else {
                 # let's ask ispell if this word is correct.
-		$tw tag add ispell $wordStart $wordEnd
-		$tw see $wordStart
+		$tw tag add ispell word_start word_end
+		$tw see word_start
                 set action [rat_ispell::CheckWord $ispell $word $w]
+                $tw tag remove ispell 1.0 end
                 switch -regexp -- "$action" {
                     CheckWord-ok {
                         set replaceWord 0
@@ -303,7 +333,7 @@ proc rat_ispell::CheckTextWidget {tw} {
                     CheckWord-replaceAll.* {
                         set replaceWord 1
                         set replacement "[lrange $action 1 end]"
-                        set rat_ispell::replace($word) "$replacement"
+                        set rat_ispell::replace($hd(lang),$word) "$replacement"
                     }
                     CheckWord-replace.* {
                         set replaceWord 1
@@ -311,7 +341,7 @@ proc rat_ispell::CheckTextWidget {tw} {
                     }
                     CheckWord-ignoreAll {
                         set replaceWord 0
-                        set rat_ispell::ignore($word) 1
+                        set rat_ispell::ignore($hd(lang),$word) 1
                     }
                     CheckWord-ignore {
                         set replaceWord 0
@@ -320,6 +350,11 @@ proc rat_ispell::CheckTextWidget {tw} {
                         set continue 0
                         set replaceWord 0
 			set doQuit 1
+                    }
+                    SetLanguage {
+			set doRerun 1
+                        set replaceWord 0
+                        set continue 0
                     }
                 }
 		if {![winfo exists $tw]} {
@@ -332,48 +367,44 @@ proc rat_ispell::CheckTextWidget {tw} {
             # or on a individual basis ?
             #
             if {$replaceWord} {
-                $tw delete $wordStart $wordEnd
-                $tw insert $wordStart "$replacement"
-		set point [$tw index \
-			"$wordStart +[string length $replacement]c"]
-            } else {
-		set point "$wordEnd"
+                $tw delete word_start word_end
+                $tw insert word_start "$replacement"
 	    }
-        } else {
-	    set point "$wordEnd"
 	}
-        if {[$tw compare "$point" >= "$end"]} {
+        if {[$tw compare ispell_pos >= end]} {
             # We reached the end of the text widget
             set continue 0
         }
     }
-    catch {$tw tag remove ispell 1.0 end}
-    close $ispell
-    #
-    # Ok, if the user pressed dismiss then we should quit immediately
-    #
-    if {1 == $doQuit} {
-	destroy $w
-	return
+
+    catch {close $ispell}
+
+    if {$doQuit} {
+        destroy $w
+        return
+    }
+
+    if {$doRerun} {
+        rat_ispell::CheckText $tw $w
+        return
     }
 
     #
-    # Ok, done with Ispell, we to let the user know
+    # Ok, checking complete, we to let the user know
     #
-    wm title $w "Ispell: $t(spell_complete)"
+    wm title $w "$t(spell_checking): $t(spell_complete)"
     wm protocol $w WM_DELETE_WINDOW "destroy $w"
 
-    set f $w.topframe
     $f.unkwordL configure \
-        -text $t(spell_complete)
+        -text $t(spell_complete) -width 0 -anchor c
     #
-    # The only way to keep the toplevel from resizing is to destroy
+    # The only way to keep the toplevel from resizing is to forget
     # $w.unkwordE. This is because "Spell Checking Complete" is
     # much longer than "Unkown Word:". We also need to let it bleed
     # into the next column over.
     #
-    destroy $f.unkwordE
-    grid configure $f.unkwordL -columnspan 2
+    grid forget $f.unkwordE
+    grid configure $f.unkwordL -columnspan 2    
     $f.repwordE configure \
         -state disabled
     #
@@ -383,31 +414,55 @@ proc rat_ispell::CheckTextWidget {tw} {
     #
     $f.repwordL configure \
         -foreground [$w.buttons.replace cget -disabledforeground]
-    
-    set lbx $w.guess.lbx
 
-    set f $w.buttons
-    $f.replace configure \
-        -command "" \
-        -state disabled
-    $f.replaceall configure \
-        -command "" \
-        -state disabled
-    $f.ignore configure \
-        -command "" \
-        -state disabled
-    $f.ignoreall configure \
-        -command "" \
-        -state disabled
-    $f.learn configure \
-        -command "" \
-        -state disabled
-    $f.quit configure \
-        -text "Dismiss" \
+    foreach b {replace replaceall ignore ignoreall learn} {
+        $w.buttons.$b configure -state disabled
+    }
+    $w.buttons.quit configure \
         -command "destroy $w"
-    tkwait window $w
 }
 
+proc rat_ispell::InitWordGet {tw} {
+    $tw mark set word_start 1.0
+    $tw mark set word_end 1.0
+    $tw mark set ispell_pos 1.0
+
+    $tw mark gravity word_start left
+    $tw mark gravity word_end right
+    $tw mark gravity ispell_pos right
+}
+
+proc rat_ispell::GetWord {tw} {
+    if {0 == [IsSeparator $tw ispell_pos]} {
+        $tw mark set word_start ispell_pos
+        while {0 == [IsSeparator $tw "word_start -1c"]
+               && [$tw compare "word_start -1c" > 1.0]} {
+            $tw mark set word_start "word_start -1c"
+        }
+    } else {
+        $tw mark set word_start "ispell_pos +1c"
+        while {1 == [IsSeparator $tw word_start]
+               && [$tw compare word_start < end]} {
+            $tw mark set word_start "word_start +1c"
+        }
+    }
+    if {[$tw compare word_start >= end]} {
+        return ""
+    }
+    if {-1 != [lsearch -exact \
+                   [$tw tag names word_start] no_spell]} {
+        set n [$tw tag prevrange no_spell "word_start+1c"]
+        $tw mark set ispell_pos "[lindex $n 1] +1c"
+        return [rat_ispell::GetWord $tw]
+    }
+    $tw mark set word_end "word_start +1c"
+    while {0 == [IsSeparator $tw word_end]
+           && [$tw compare word_end < end]} {
+        $tw mark set word_end "word_end +1c"
+    }
+    $tw mark set ispell_pos word_end
+    return [string trim [$tw get word_start word_end]]
+}
 
 # rat_ispell::CheckWord
 # Checks a word, if word is not known throws up a gui with 
@@ -522,14 +577,15 @@ proc rat_ispell::CheckWord {ispell word w} {
 #   "CheckWord-quit
 proc rat_ispell::UnknownWord {w ispell word args} {
     global t
+    upvar \#0 rat_ispell::$w hd
 
     #
     # Re-configure the ispell dialogue box to work and
     # say what we want
     #
-    wm title $w "Ispell: $t(unknown_word) - $word"
+    wm title $w "$t(spell_checking): $t(unknown_word) - $word"
     wm protocol $w WM_DELETE_WINDOW \
-	    "set rat_ispell::returnString($w) CheckWord-quit"
+	    "set rat_ispell::${w}(returnString) CheckWord-quit"
 
     set f $w.topframe
     $f.unkwordE configure \
@@ -539,24 +595,24 @@ proc rat_ispell::UnknownWord {w ispell word args} {
     # word entry box
     #
     $f.repwordE configure \
-        -textvariable "rat_ispell::replacement($w)"
+        -textvariable "rat_ispell::${w}(replacement)"
 
     set lbx $w.guess.lbx
 
     set f $w.buttons
     $f.replace configure \
-        -command "set rat_ispell::returnString($w) CheckWord-replace"
-     $f.replaceall configure \
-        -command "set rat_ispell::returnString($w) CheckWord-replaceAll"
-     $f.ignore configure \
-        -command "set rat_ispell::returnString($w) CheckWord-ignore"
-     $f.ignoreall configure \
-        -command "set rat_ispell::returnString($w) CheckWord-ignoreAll"
-     $f.learn configure \
+        -command "set rat_ispell::${w}(returnString) CheckWord-replace"
+    $f.replaceall configure \
+        -command "set rat_ispell::${w}(returnString) CheckWord-replaceAll"
+    $f.ignore configure \
+        -command "set rat_ispell::${w}(returnString) CheckWord-ignore"
+    $f.ignoreall configure \
+        -command "set rat_ispell::${w}(returnString) CheckWord-ignoreAll"
+    $f.learn configure \
         -command "rat_ispell::LearnWord $word $ispell; \
-	          set rat_ispell::returnString($w) CheckWord-ignoreAll"
-     $f.quit configure \
-        -command "set rat_ispell::returnString($w) CheckWord-quit"
+	          set rat_ispell::${w}(returnString) CheckWord-ignoreAll"
+    $f.quit configure \
+        -command "set rat_ispell::${w}(returnString) CheckWord-quit"
     
     #
     # load the list box with any suggestions
@@ -569,25 +625,27 @@ proc rat_ispell::UnknownWord {w ispell word args} {
         $lbx selection set 0
         rat_ispell::SyncListBoxAndRepString $w $lbx
     } else {
-        set rat_ispell::replacement($w) $word
+        set hd(replacement) $word
     }
     #
     # let's just wait a while here, so that nothing else gets ahead
     # of us
     #
-    vwait rat_ispell::returnString($w)
-    switch -- $rat_ispell::returnString($w) {
+    set hd(wait_string) 1
+    vwait rat_ispell::${w}(returnString)
+    set hd(wait_string) 0
+    switch -- $hd(returnString) {
         CheckWord-replace {
-            set rat_ispell::returnString($w) "$rat_ispell::returnString($w) $rat_ispell::replacement($w)"
+            set hd(returnString) "$hd(returnString) $hd(replacement)"
         }
         CheckWord-replaceAll {
-            set rat_ispell::returnString($w) "$rat_ispell::returnString($w) $rat_ispell::replacement($w)"
+            set hd(returnString) "$hd(returnString) $hd(replacement)"
         }
     }
     $lbx delete 0 end
     $w.topframe.repwordE delete 0 end
 
-    return "$rat_ispell::returnString($w)"
+    return $hd(returnString)
 }
 
 
@@ -596,9 +654,11 @@ proc rat_ispell::UnknownWord {w ispell word args} {
 # of the list box on the "what to do" toplevel
 #
 proc rat_ispell::SyncListBoxAndRepString {w lbx} {
+    upvar \#0 rat_ispell::$w hd
+
     set index [$lbx curselection]
     if {$index != ""} {
-        set rat_ispell::replacement($w) [$lbx get $index]
+        set hd(replacement) [$lbx get $index]
     }
 }
 
@@ -606,39 +666,49 @@ proc rat_ispell::SyncListBoxAndRepString {w lbx} {
 # This proc adds "word" to your personal ispell word list
 proc rat_ispell::LearnWord {word ispell} {
     puts $ispell "*$word"
+    puts $ispell "\#"
     flush $ispell
 }
 
-# ShowError --
+# rat_ispell::SetLanguage --
 #
-# Display the error to the user
+# Set the language.
 #
 # Arguments:
-# cmd - Command we tried to execute
-# out - Output from command
+# w    - Name of global state variable
+# lang - The new language
 
-proc rat_ispell::ShowError {cmd out} {
-    global t fixedBoldFont
-    
-    # Create identifier
-    set w .ispell_error
+proc rat_ispell::SetLanguage {w lang} {
+    upvar \#0 rat_ispell::$w hd
 
-    # Create toplevel
-    toplevel $w -class TkRat
-    wm title $w Ispell
+    $hd(langbutton) configure -text [string totitle $lang]
+    set hd(lang) $lang
 
-    # Message part
-    button $w.button -text $t(close) -command "destroy $w"
-    text $w.text -yscroll "$w.scroll set" -relief sunken -bd 1
-    scrollbar $w.scroll -relief sunken -bd 1 \
-	    -command "$w.text yview"
-    pack $w.button -side bottom -padx 5 -pady 5
-    pack $w.scroll -side right -fill y
-    pack $w.text -expand 1 -fill both
-    $w.text tag configure bold -font $fixedBoldFont
-    $w.text insert end "Command: " bold
-    $w.text insert end "$cmd\n\n"
-    $w.text insert end "Output:\n" bold
-    $w.text insert end "$out"
-    $w.text configure -state disabled
+    if {$hd(wait_string)} {
+        set hd(returnString) "SetLanguage"
+    } else {
+        rat_ispell::CheckText $hd(tw) $w
+    }
+}
+
+# rat_ispell::GuessLanguage --
+#
+# Guess the language in the text widget
+#
+# Arguments:
+# tw - Text wisget
+
+proc rat_ispell::GuessLanguage {tw} {
+    global option
+
+    set words {}
+    rat_ispell::InitWordGet $tw
+    while {[llength $words] < 15} {
+        set word [rat_ispell::GetWord $tw]
+        if {"" == $word} {
+            break
+        }
+        lappend words $word
+    }
+    return [rat_spellutil::find_best_dict $words]
 }

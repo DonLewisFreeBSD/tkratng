@@ -4,7 +4,7 @@
  *	Provides dummy routines so blt_busy can be linked into tclsh
  *
  *
- * TkRat software and its included text is Copyright 1996-2002 by
+ * TkRat software and its included text is Copyright 1996-2004 by
  * Martin Forssén
  *
  * The full text of the legal notice is contained in the file called
@@ -12,6 +12,7 @@
  */
 
 #include <tk.h>
+#include "blt.h"
 
 #ifndef CONST84
 #   define CONST84
@@ -22,8 +23,7 @@ Tk_UnmapWindow(Tk_Window tkwin) {}
 
 int
 Tk_ConfigureValue(Tcl_Interp * interp, Tk_Window tkwin,
-		  Tk_ConfigSpec * specs, char * widgRec,
-		  CONST84 char * argvName, int flags)
+	Tk_ConfigSpec * specs, char * widgRec, CONST84 char * argvName, int flags)
 {
     return 0;
 }
@@ -164,3 +164,7 @@ Rat_dummy_Init(Tcl_Interp *interp)
 {
     return TCL_OK;
 }
+
+void
+Tk_SetClassProcs(Tk_Window tkwin, Tk_ClassProcs *procs,
+		ClientData instanceData) {}

@@ -4,7 +4,7 @@
 # different types of folder operations
 #
 #
-#  TkRat software and its included text is Copyright 1996-2002 by
+#  TkRat software and its included text is Copyright 1996-2004 by
 #  Martin Forssén
 #
 #  The full text of the legal notice is contained in the file called
@@ -17,6 +17,26 @@ set vFolderDefIdent 0
 # The ident of the next defined vFolderStruct
 set vFolderStructIdent 0
 
+set vFolderLastUsedList {}
+
+proc AddToLastUsedList {id} {
+    global vFolderLastUsedList
+    set res [list $id]
+    set l [llength $vFolderLastUsedList]
+    set i 0
+    set n 1
+    while {$i < $l} {
+	if { $id != [lindex $vFolderLastUsedList $i] } {
+	    lappend res [lindex $vFolderLastUsedList $i]
+	    incr n 1
+	    if { $n >= 8 } break
+	}
+	incr i 1
+    }
+    set vFolderLastUsedList $res
+}
+
+
 # VFolderRead --
 #
 # Reads the list of vfolders from disk. If needed it calls FixVFolderList
@@ -26,7 +46,8 @@ set vFolderStructIdent 0
 
 proc VFolderRead {} {
     global vFolderDef vFolderVersion option vfolder_list vFolderInbox \
-	    vFolderStruct mailServer vFolderSave
+	vFolderStruct mailServer vFolderSave t vFolderSpecials \
+	vFolderOutgoing vFolderHold
 
     if {[file readable $option(ratatosk_dir)/vfolderlist]} {
 	source $option(ratatosk_dir)/vfolderlist
@@ -84,7 +105,32 @@ proc VFolderRead {} {
 	SaveOptions
 	VFolderWrite
     }
+    if {![info exists vFolderHold]} {
+	set id [VFolderGetID]
+	set vFolderDef($id) [list $t(drafts) file {monitor 1} \
+				 "$option(ratatosk_dir)/drafts.mbx"]
+	set vFolderHold $id
+    } else {
+    	set vFolderDef($vFolderHold) [lreplace $vFolderDef($vFolderHold) 0 0 $t(drafts)]
+    }
+    if {![info exists vFolderOutgoing]} {
+	set id [VFolderGetID]
+	set vFolderDef($id) [list $t(outgoing) file {monitor 1} \
+				 "$option(ratatosk_dir)/outgoing.mbx"]
+	set vFolderOutgoing $id
+    } else {
+    	set vFolderDef($vFolderOutgoing) [lreplace $vFolderDef($vFolderOutgoing) 0 0 $t(outgoing)]
+    }
+    if {![info exists vFolderSpecials]} {
+	set id [VFolderGetID]
+	set vFolderDef($id) [list $t(specials) struct {} \
+				 [list $vFolderOutgoing $vFolderHold]]
+	set vFolderSpecials $id
+    }
     CheckVFolderList
+
+    RatCreateFolder -mbx $vFolderDef($vFolderHold)
+    RatCreateFolder -mbx $vFolderDef($vFolderOutgoing)
 }
 
 # CheckVFolderList --
@@ -95,7 +141,7 @@ proc VFolderRead {} {
 # Arguments:
 
 proc CheckVFolderList {} {
-    global vFolderDef
+    global vFolderDef vFolderSpecials vFolderOutgoing vFolderHold
     set errors {}
 
     foreach v [array names vFolderDef] {
@@ -109,6 +155,18 @@ proc CheckVFolderList {} {
     } else {
 	lappend errors "Missing struct entry 0"
 	set vFolderDef(0) [list "Repaired" struct {} {}]
+    }
+
+    # Check that the specials entry exists and is a struct
+    if {[info exists vFolderDef($vFolderSpecials)]
+	&& "struct" == [lindex $vFolderDef($vFolderSpecials) 1]} {
+	incr ref($vFolderSpecials)
+	CheckVFDWalk $vFolderSpecials
+    } else {
+	puts "No specials"
+	lappend errors "Missing struct entry for specials"
+	set vFolderDef($vFolderSpecials) \
+	    [list "Repaired" struct {} [list $vFolderOutgoing $vFolderHold]]
     }
 
     # Check that all entries are references exactly once
@@ -174,13 +232,21 @@ proc CheckVFDWalk {id} {
 # parent - parent window
 
 proc SelectFileFolder {parent} {
-    global t
+    global t option
 
-    set fh [rat_fbox::run -title $t(open_file) -mode any -ok $t(open) \
-	    -parent $parent]
+    set fh [rat_fbox::run \
+                -title $t(open_file) \
+                -mode any \
+                -initialdir $option(initialdir) \
+                -ok $t(open) \
+                -parent $parent]
 
     # Do open
-    if { $fh != ""} {
+    if {$fh != ""} {
+        if {$option(initialdir) != [file dirname $fh]} {
+            set option(initialdir) [file dirname $fh]
+            SaveOptions
+        }
 	return [list RatOpenFolder [list $fh file {} $fh]]
     } else {
 	return ""
@@ -205,46 +271,109 @@ proc SelectDbaseFolder {parent} {
     set hd(op) and
 
     # Create toplevel
-    toplevel $w -class TkRat
+    toplevel $w -class TkRat -bd 5
     wm title $w $t(open_dbase)
     wm transient $w $parent
 
-    # Populate window
-    frame $w.op
-    radiobutton $w.op.and -text $t(and) -variable ${id}(op) -value and
-    radiobutton $w.op.or -text $t(or) -variable ${id}(op) -value or
-    set b($w.op.and) dbs_and
-    set b($w.op.or) dbs_or
-    pack $w.op.and \
-	 $w.op.or -side left -padx 5
-    pack $w.op -side top
+    # Fill in times
+    set dinfo [RatDbaseInfo]
+    set hd(int_from) [clock format [lindex $dinfo 1] -format "%Y-%m-%d 00:00"]
+    set hd(int_to) [clock format [lindex $dinfo 2] -format "%Y-%m-%d 23:59"]
 
-    foreach e {keywords subject all to from cc} {
-	frame $w.$e
-	label $w.$e.label -text $t($e):
-	entry $w.$e.entry -textvariable ${id}($e) -relief sunken -width 20
-	pack $w.$e.entry \
-	     $w.$e.label -side right
-	pack $w.$e -side top -fill both
-	set b($w.$e.entry) dbs_$e
+    # Populate window
+    label $w.interval -text $t(time_interval): -anchor e
+    frame $w.int
+    entry $w.int.from -width 18 -textvariable ${id}(int_from)
+    label $w.int.divider -text "-"
+    entry $w.int.to -width 18 -textvariable ${id}(int_to)
+    grid $w.int.from $w.int.divider $w.int.to -sticky ew
+    grid columnconfigure $w.int 0 -weight 1
+    grid columnconfigure $w.int 2 -weight 1
+    set b($w.int.from) dbs_time_from
+    set b($w.int.to) dbs_time_to
+    grid $w.interval $w.int - -sticky ew -pady 5
+
+    label $w.operation -text $t(operation): -anchor e
+    radiobutton $w.and -text $t(op_and) -variable ${id}(op) -value and \
+        -anchor w
+    radiobutton $w.or -text $t(op_or) -variable ${id}(op) -value or -anchor w
+    set b($w.and) dbs_and
+    set b($w.or) dbs_or
+    grid $w.operation $w.and -sticky ew
+    grid x $w.or -sticky ew
+
+    label $w.line_expl -text $t(line_expl)
+    grid x $w.line_expl -sticky ew -pady 5
+
+    foreach el {subject {all_addresses all_addr_detail} to from cc} {
+        if {[llength $el] > 1} {
+            label $w.${e}_rlabel -text "($t([lindex $el 1]))" -anchor w
+            set l $w.${e}_rlabel
+            set e [lindex $el 0]
+        } else {
+            set l "-"
+            set e $el
+        }
+	label $w.${e}_label -text $t($e): -anchor e
+	entry $w.${e}_entry -textvariable ${id}($e) -relief sunken
+        grid $w.${e}_label $w.${e}_entry $l -sticky ew
+	set b($w.${e}_entry) dbs_$e
+    }
+
+    frame $w.separator -height 4
+    grid x $w.separator
+
+    foreach el {keywords {complete_msg_text slow}} {
+        if {[llength $el] > 1} {
+            label $w.${e}_rlabel -text "($t([lindex $el 1]))" -anchor w
+            set l $w.${e}_rlabel
+            set e [lindex $el 0]
+        } else {
+            set l "-"
+            set e $el
+        }
+	label $w.${e}_label -text $t($e): -anchor e
+	entry $w.${e}_entry -textvariable ${id}($e) -relief sunken
+        grid $w.${e}_label $w.${e}_entry $l -sticky ew
+	set b($w.${e}_entry) dbs_$e
     }
 
     OkButtons $w $t(search) $t(cancel) "set ${id}(done)"
-    pack $w.buttons -fill both
+    grid $w.buttons - - -sticky we
 
-    Place $w selectDbaseFolder
-    ModalGrab $w $w.keywords.entry
-    tkwait variable ${id}(done)
+    ::tkrat::winctl::SetGeometry selectDbaseFolder $w
+    ::tkrat::winctl::ModalGrab $w $w.subject_entry
+
+    set cont 1
+    while {$cont} {
+        tkwait variable ${id}(done)
+        set cont 0
+        if {1 == $hd(done)} {
+            if {[catch {clock scan $hd(int_from)} hd(int_from_parsed)]} {
+                Popup $t(illegal_from_date) $w
+                set cont 1
+                continue
+            }
+            if {[catch {clock scan $hd(int_to)} hd(int_to_parsed)]} {
+                Popup $t(illegal_to_date) $w
+                set cont 1
+                continue
+            }
+        }
+    }
 
     # Do search
     set ret ""
-    if { 1 == $hd(done) } {
-	set exp $hd(op)
-	foreach e {keywords subject all to from cc} {
+    if {1 == $hd(done)} {
+	set exp [list "int" $hd(int_from_parsed) $hd(int_to_parsed) $hd(op)]
+	foreach e {keywords subject all_addresses to from cc} {
 	    if {[string length $hd($e)]} {
-		set exp "$exp $e [list $hd($e)]"
+                lappend exp $e $hd($e)
 	    }
 	}
+        if {[string length $hd(complete_msg_text)]} {
+            lappend exp "all" $hd(complete_msg_text)
+        }
 	if {[string compare $hd(op) $exp]} {
 	    set ret [list RatOpenFolder \
 		    [list "Dbase search" dbase {} {} {} $exp]]
@@ -254,7 +383,7 @@ proc SelectDbaseFolder {parent} {
     }
 
     foreach bn [array names b $w.*] {unset b($bn)}
-    RecordPos $w selectDbaseFolder
+    ::tkrat::winctl::RecordGeometry selectDbaseFolder $w
     destroy $w
     unset hd
     return $ret
@@ -273,8 +402,14 @@ proc SelectDbaseFolder {parent} {
 #	  inserting messages.
 
 proc VFolderAddItem {m id elem cmd write} {
-    global openFolders option vFolderMonitorFH folderExists folderUnseen
+    global openFolders option vFolderMonitorFH folderExists folderUnseen \
+        currentColor
 
+    if {[llength $currentColor] > 3} {
+        set unreadBg [option get $m troughColor Color]
+    } else {
+        set unreadBg [$m cget -activebackground]
+    }
     if {1 == [llength $elem]} {
 	global vFolderDef
 	set elem $vFolderDef($id)
@@ -292,7 +427,13 @@ proc VFolderAddItem {m id elem cmd write} {
 	$m add command -label [lindex $elem 0] -command "$cmd [list $id]"
 	if {[info exists vFolderMonitorFH($id)]} {
 	    if {[info exists folderUnseen($vFolderMonitorFH($id))]} {
-		$m entryconfigure last -accelerator ($folderUnseen($vFolderMonitorFH($id))/$folderExists($vFolderMonitorFH($id)))
+                set unseen $folderUnseen($vFolderMonitorFH($id))
+                set exists $folderExists($vFolderMonitorFH($id))
+                $m entryconfigure last -accelerator "($unseen/$exists)"
+		if { $folderUnseen($vFolderMonitorFH($id)) > 0 } {
+		    $m entryconfigure last \
+                        -background $unreadBg
+		}
 	    } else {
 		unset vFolderMonitorFH($id)
 	    }
@@ -347,46 +488,32 @@ proc VFolderBuildDynamic {m elem cmd write} {
 #		inserting messages.
 
 proc VFolderBuildMenu {m id cmd write} {
-    global vFolderDef idCnt t idmap
+    global vFolderDef idCnt t idmap$m
 
+    $m configure -tearoffcommand VFolderTearoffMenu
     if {![info exists vFolderDef($id)]} {
 	return
     }
-
-    if {[info exists idmap]} {
-	unset idmap
-    }
-    set cutoff [expr {[winfo screenheight $m]-50}]
-    $m delete 0 end
-    $m configure -tearoffcommand VFolderTearoffMenu
+    
     switch [lindex $vFolderDef($id) 1] {
 	struct {set i 3}
 	import {set i 5}
     }
     foreach sid [lindex $vFolderDef($id) $i] {
-	if {[$m yposition last] >= $cutoff} {
-	    $m insert end cascade -label $t(more) -menu $m.m
-	    set m $m.m
-
-	    if {[winfo exists $m]} {
-		$m delete 0 end
-		$m configure -tearoffcommand VFolderTearoffMenu
-	    } else {
-		menu $m -tearoffcommand VFolderTearoffMenu
-	    }
-	}
 	set name [lindex $vFolderDef($sid) 0]
 	if {"struct" == [lindex $vFolderDef($sid) 1]
-	|| "import" == [lindex $vFolderDef($sid) 1]} {
+	    || "import" == [lindex $vFolderDef($sid) 1]} {
 	    set nm $m.m$sid
 	    $m add cascade -label $name -menu $nm
 	    if {![winfo exists $nm]} {
-		menu $nm -postcommand [list VFolderBuildMenu \
-			$nm $sid $cmd $write]
+		menu $nm -postcommand "$nm delete 0 end; \
+					   VFolderBuildMenu \
+					       $nm $sid [list $cmd] $write; \
+					   FixMenu $nm"
 	    }
 	} else {
 	    VFolderAddItem $m $sid $sid $cmd $write
-	    set idmap($sid) [$m index last]
+	    set idmap${m}($sid) [$m index last]
 	}
     }
 }
@@ -400,19 +527,21 @@ proc VFolderBuildMenu {m id cmd write} {
 # menu	  - New menu
 
 proc VFolderTearoffMenu {oldmenu menu} {
-    global folderExists folderUnseen idmap idCnt
+    global folderExists folderUnseen idmap$oldmenu idCnt
 
     set var idmap[incr idCnt]
-    upvar #0 $var v
+    upvar \#0 $var v
+    upvar \#0 idmap$oldmenu idmap
     foreach i [array names idmap] {
 	set v($i) $idmap($i)
     }
 
-    trace variable folderExists wu "VFolderTrace $var $menu"
-    trace variable folderUnseen wu "VFolderTrace $var $menu"
+    set cmd "after 100 VFolderTrace $var $menu"
+    trace variable folderExists wu $cmd
+    trace variable folderUnseen wu $cmd
     bind $menu <Destroy> "+
-	trace vdelete folderExists wu {VFolderTrace $var $menu}
-	trace vdelete folderUnseen wu {VFolderTrace $var $menu}
+	trace vdelete folderExists wu \"$cmd\"
+	trace vdelete folderUnseen wu \"$cmd\"
         unset $var
     "
 }
@@ -428,13 +557,18 @@ proc VFolderTearoffMenu {oldmenu menu} {
 
 proc VFolderTrace {var menu name1 name2 op} {
     global vFolderDef vFolderMonitorID folderUnseen folderExists
-    upvar #0 $var v
+    upvar \#0 $var v
 
-    set l [lindex $vFolderDef($vFolderMonitorID($name2)) 0]
+    if {![info exists vFolderMonitorID($name2)]
+        || ![info exists v($vFolderMonitorID($name2))]} {
+        # Ignore this folder
+        return
+    }
+
     if {"w" == $op} {
-	set a ($folderUnseen($name2)/$folderExists($name2))
+        set a ($folderUnseen($name2)/$folderExists($name2))
     } else {
-	set a ""
+        set a ""
     }
     $menu entryconfigure $v($vFolderMonitorID($name2)) -accelerator $a
 }
@@ -448,19 +582,23 @@ proc VFolderTrace {var menu name1 name2 op} {
 # vfolder -	The definition of the vfolder to be opened
 
 proc VFolderDoOpen {id vfolder} {
-    global vFolderWatch vFolderName
+    global vFolderWatch vFolderName vFolderDef vFolderHold option
 
     set f [RatOpenFolder $vfolder]
     array set flag [lindex $vfolder 2]
     set vFolderWatch($f) 0
     if {"" != $id} {
-	global vFolderMonitorFH vFolderMonitorID
+	global vFolderMonitorFH vFolderMonitorID folderUnseen
 	set vFolderMonitorFH($id) $f
 	set vFolderMonitorID($f) $id
     }
     if {[info exists flag(watch)] && $flag(watch)} {
 	set vFolderWatch($f) 1
 	set vFolderName($f) [lindex $vfolder 0]
+    }
+
+    if {$vfolder == $vFolderDef($vFolderHold)} {
+        after [expr $option(compose_last_chance)*1000] VFolderPurgeBackups $f
     }
     return $f
 }
@@ -475,14 +613,20 @@ proc VFolderDoOpen {id vfolder} {
 #		one word then it is expected to the ID of a folder to open
 
 proc VFolderOpen {handler vfolder} {
-    global t inbox vFolderDef vFolderInbox option folderWindowList
+    global t inbox vFolderDef vFolderInbox option folderWindowList vFolderLastUsedList
     upvar #0 $handler fh
 
+    set fh(special_folder) none
     if {1 == [llength $vfolder]} {
-	global vFolderDef
+	global vFolderDef vFolderOutgoing vFolderHold
 
 	set id $vfolder
 	set vfolder $vFolderDef($id)
+	if {$id == $vFolderOutgoing || $id == $vFolderHold} {
+	    set fh(special_folder) drafts
+	} else {
+	    AddToLastUsedList $id
+	}
     } else {
 	set id ""
     }
@@ -518,18 +662,20 @@ proc VFolderOpen {handler vfolder} {
 # Arguments:
 # handler  -	The handler to the folder window which requested the operation
 # advance  -	1 if we should move to the next message on success
+# delete   -    1 if we shoudl delete moved messages
 # messages -	The messages to move
-# vfolder -	The definition of the vfolder to be opened. If it is only
+# vfolder  -	The definition of the vfolder to be opened. If it is only
 #		one word then it is expected to the ID of a folder to open
 
-proc VFolderInsert {handler advance messages vfolder} {
+proc VFolderInsert {handler advance delete messages vfolder} {
     if {1 == [llength $vfolder]} {
 	global vFolderDef
+	AddToLastUsedList $vfolder
 	set vfolder $vFolderDef($vfolder)
     }
-    RatBusy [list VFolderInsertDo $handler $advance $messages $vfolder]
+    RatBusy [list VFolderInsertDo $handler $advance $messages $vfolder $delete]
 }
-proc VFolderInsertDo {handler advance messages vfolder} {
+proc VFolderInsertDo {handler advance messages vfolder delete} {
     upvar #0 $handler fh
     global option t
 
@@ -538,29 +684,36 @@ proc VFolderInsertDo {handler advance messages vfolder} {
     }
     if {1 == [llength $vfolder]} {
 	global vFolderDef
-	
-	set id $vfolder
-	set vfolder $vFolderDef($id)
-    } else {
-	set id ""
-    }
-    if {1 < [llength $messages] && "dbase" != [lindex $vfolder 1]} {
-	set vf [VFolderDoOpen $id $vfolder]
+	set vfolder $vFolderDef($vfolder)
     }
 
+    # There is no need to open dbase folders before inserting
+    # messages. But other types of folders benefit from opening
+    # because that means that each copied message does not need to
+    # open it again.
+    if {"dbase" != [lindex $vfolder 1]} {
+        set f [RatOpenFolder $vfolder]
+    }
+    set toDelete {}
     foreach msg $messages {
 	if {[catch {$msg copy $vfolder} result]} {
 	    RatLog 4 "$t(insert_failed): $result"
 	    break
 	} else {
-	    SetFlag $handler deleted 1 [$fh(folder_handler) find $msg]
-	    if { 1 == $advance } {
-		FolderNext $handler
-	    }
+            if {$delete} {
+                lappend toDelete [$fh(folder_handler) find $msg]
+            }
 	}
     }
-    if {1 < [llength $messages] && "dbase" != [lindex $vfolder 1]} {
-	$vf close
+    if {[llength $toDelete] > 0} {
+        # Do all the flag updates at once for performance reasons
+        SetFlag $handler deleted 1 $toDelete
+    }
+    if { 1 == $advance } {
+        FolderNext $handler
+    }
+    if {[info exists f]} {
+        $f close
     }
 }
 
@@ -572,12 +725,20 @@ proc VFolderInsertDo {handler advance messages vfolder} {
 # parent - Parent window
 
 proc InsertIntoFile {parent} {
-    global t
+    global t option
 
-    set f [rat_fbox::run -ok $t(ok) -title $t(save_to_file) -mode any \
-			 -parent $parent]
+    set f [rat_fbox::run \
+               -ok $t(ok) \
+               -title $t(save_to_file) \
+               -initialdir $option(initialdir) \
+               -mode any \
+               -parent $parent]
 
     if { $f != "" } {
+        if {$option(initialdir) != [file dirname $f]} {
+            set option(initialdir) [file dirname $f]
+            SaveOptions
+        }
 	set result [list $f file {} $f]
     } else {
 	set result {}
@@ -658,8 +819,8 @@ proc InsertIntoDBase {parent} {
     set hd(exdate) $option(def_exdate)
     bind $w <Return> "set ${id}(done) 1"
     wm protocol $w WM_DELETE_WINDOW "set ${id}(done) 0"
-    Place $w insertIntoDbase
-    ModalGrab $w $w.keywords.entry
+    ::tkrat::winctl::SetGeometry insertIntoDbase $w
+    ::tkrat::winctl::ModalGrab $w $w.keywords.entry
     tkwait variable ${id}(done)
 
     # Do insert
@@ -669,7 +830,7 @@ proc InsertIntoDBase {parent} {
     } else {
 	set result {}
     }
-    RecordPos $w insertIntoDbase
+    ::tkrat::winctl::RecordGeometry insertIntoDbase $w
     foreach bn [array names b $w.*] {unset b($bn)}
     destroy $w
     unset hd
@@ -696,4 +857,36 @@ proc VFoldersUsesRole {role} {
 	}
     }
     return $results
+}
+
+# VFolderPurgeBackups
+#
+# Removes old stale backups from a folder
+#
+# Arguments:
+# fh - Folder handler
+
+proc VFolderPurgeBackups {fh} {
+    global option
+
+    set cutoff [expr [clock seconds] - $option(compose_last_chance)]
+    set deleted {}
+
+    set num_msgs [lindex [$fh info] 1]
+    for {set i 0} {$i <$num_msgs} {incr i} {
+        set msg [$fh get $i]
+        foreach h [$msg headers] {
+            if {"X-TkRat-Internal-AutoBackup" == [lindex $h 0]} {
+                if {[lindex $h 1] < $cutoff} {
+                    lappend deleted $i
+                }
+                break
+            }
+        }
+    }
+
+    if {[llength $deleted]} {
+        $fh setFlag $deleted deleted 1
+        $fh update sync
+    }
 }

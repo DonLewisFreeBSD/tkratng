@@ -3,7 +3,7 @@
  *
  *      This file contains code which implements disconnected folders.
  *
- * TkRat software and its included text is Copyright 1996-2002 by
+ * TkRat software and its included text is Copyright 1996-2004 by
  * Martin Forssén
  *
  * The full text of the legal notice is contained in the file called
@@ -53,6 +53,7 @@ typedef struct DisFolderInfo {
     int mapChanged;		/* non null if mappings needs to be rewritten*/
     MAILSTREAM *master;		/* Mailstream, used only in online mode */
     int error;	                /* Error indicator variable */
+    int diskfull;               /* Disk full indicator */
     MAILSTREAM *local;		/* Mailstream of local folder */
     char *spec;	    	        /* Name of master folder */
     FolderHandlers handlers;	/* Event handlers */
@@ -72,6 +73,15 @@ typedef struct DisFolderInfo {
     RatSetInfoProc *setInfoProc;
     RatCreateProc *createProc;
 } DisFolderInfo;
+
+/*
+ * Used to collect changes
+ */
+typedef struct {
+    unsigned long uid;
+    int flag;
+    int value;
+} changes_t;
 
 /*
  * Hashtable containing open disfolders
@@ -94,14 +104,16 @@ static RatCreateProc Dis_CreateProc;
 static RatSetInfoProc Dis_SetInfoProc;
 static RatSyncProc Dis_SyncProc;
 static int CreateDir(char *dir);
-static Tcl_ObjCmdProc RatSyncDisconnected;
+static Tcl_ObjCmdProc RatSyncDisconnectedCmd;
+static Tcl_ObjCmdProc RatDeleteDisconnectedCmd;
 static void Dis_FindAndSyncFolders(Tcl_Interp *interp, CONST84 char *dir);
 static int Dis_SyncFolder(Tcl_Interp *interp, CONST84 char *dir, off_t size,
 			  int force, MAILSTREAM **master);
 static unsigned long DisDownloadMsgs(Tcl_Interp *interp,
 				     MAILSTREAM *masterStream,
 				     MAILSTREAM *localStream,
-				     int *masterErrorPtr, CONST84 char *dir,
+				     int *masterErrorPtr, int *diskFullPtr,
+                                     CONST84 char *dir,
 				     Tcl_HashTable *mapPtr,
 				     FILE *mapFp, unsigned long startAfterUid,
 				     unsigned long stopBeforeUid);
@@ -128,6 +140,7 @@ static unsigned long DisUploadMsg(MAILSTREAM *masterStream,
 static HandleExists Dis_HandleExists;
 static HandleExpunged Dis_HandleExpunged;
 static void WriteMappings(DisFolderInfo *disPtr);
+static void WriteState(DisFolderInfo *disPtr);
 
 
 /*
@@ -153,8 +166,10 @@ int
 RatDisFolderInit(Tcl_Interp *interp)
 {
     Tcl_InitHashTable(&openDisFolders, TCL_STRING_KEYS);
-    Tcl_CreateObjCommand(interp, "RatSyncDisconnected", RatSyncDisconnected,
-	    NULL, NULL);
+    Tcl_CreateObjCommand(interp, "RatSyncDisconnected", RatSyncDisconnectedCmd,
+			 NULL, NULL);
+    Tcl_CreateObjCommand(interp, "RatDeleteDisconnected",
+			 RatDeleteDisconnectedCmd, NULL, NULL);
     return TCL_OK;
 }
 
@@ -210,17 +225,18 @@ RatDisFolderCreate(Tcl_Interp *interp, Tcl_Obj *defPtr)
     oPtr = Tcl_NewStringObj(disPtr->dir, -1);
     Tcl_AppendToObj(oPtr, "/folder", 7);
     Tcl_ListObjAppendElement(interp, lPtr, oPtr);
+    Tcl_IncrRefCount(lPtr);
     infoPtr = RatStdFolderCreate(interp, lPtr);
+    Tcl_DecrRefCount(lPtr);
     if (NULL == infoPtr) {
-	Tcl_DecrRefCount(lPtr);
 	goto error;
     }
-    Tcl_DecrRefCount(lPtr);
 
     /*
      * Read mappings
      */
     Tcl_InitHashTable(&disPtr->map, TCL_ONE_WORD_KEYS);
+    disPtr->mapChanged = 0;
     ReadMappings(((StdFolderInfo*)infoPtr->private)->stream, 
 	    disPtr->dir, &disPtr->map);
 
@@ -240,6 +256,8 @@ RatDisFolderCreate(Tcl_Interp *interp, Tcl_Obj *defPtr)
     disPtr->handlers.expunged = Dis_HandleExpunged;
     disPtr->interp = interp;
     disPtr->infoPtr = infoPtr;
+    disPtr->error = 0;
+    disPtr->diskfull = 0;
     disPtr->initProc = infoPtr->initProc;
     disPtr->closeProc = infoPtr->closeProc;
     disPtr->updateProc = infoPtr->updateProc;
@@ -384,6 +402,7 @@ PrepareDir(Tcl_Interp *interp, Tcl_Obj *defPtr)
     Tcl_ListObjAppendElement(interp, lPtr, Tcl_NewObj());
     Tcl_ListObjAppendElement(interp, lPtr, objv[3]);
     Tcl_ListObjAppendElement(interp, lPtr, objv[4]);
+    Tcl_IncrRefCount(lPtr);
     fprintf(fp, "%s\n%s\n", name, RatGetFolderSpec(interp, lPtr));
     Tcl_DecrRefCount(lPtr);
     fclose(fp);
@@ -391,53 +410,6 @@ PrepareDir(Tcl_Interp *interp, Tcl_Obj *defPtr)
     Tcl_DStringFree(&ds);
     return dir;
 }
-
-/*
- *----------------------------------------------------------------------
- *
- * RatDisFolderOpenStream --
- *
- *      Opens the local part of a disconnected folder. This function may
- *	NOT be called while the folder is open.
- *
- * Results:
- *      A pointer to a MAILSTREAM or NULL on failures.
- *
- * Side effects:
- *	A disconnected folder is created.
- *
- *----------------------------------------------------------------------
- */
-
-MAILSTREAM*
-RatDisFolderOpenStream(Tcl_Interp *interp, Tcl_Obj *defPtr)
-{
-    static Tcl_DString ds;
-    static int initialized = 0;
-    const char *dir;
-    MAILSTREAM *stream;
-
-    if (initialized) {
-	Tcl_DStringSetLength(&ds, 0);
-    } else {
-	Tcl_DStringInit(&ds);
-	initialized = 1;
-    }
-
-    dir = PrepareDir(interp, defPtr);
-    if (!dir) {
-	return NULL;
-    }
-
-    /*
-     * Open filefolder
-     */
-    Tcl_DStringAppend(&ds, dir, -1);
-    Tcl_DStringAppend(&ds, "/folder", 7);
-    stream = OpenStdFolder(interp, Tcl_DStringValue(&ds), NULL);
-    return stream;
-}
-
 
 /*
  *----------------------------------------------------------------------
@@ -526,8 +498,8 @@ static int
 Dis_UpdateProc(RatFolderInfoPtr infoPtr, Tcl_Interp *interp,RatUpdateType mode)
 {
     DisFolderInfo *disPtr = (DisFolderInfo*)infoPtr->private2;
-    int lastKnown;
-    
+    int lastKnown, result;
+
     if (disPtr->master && 0 == disPtr->error) {
 	disPtr->exists = lastKnown = infoPtr->number;
 	disPtr->expunged = 0;
@@ -536,8 +508,9 @@ Dis_UpdateProc(RatFolderInfoPtr infoPtr, Tcl_Interp *interp,RatUpdateType mode)
 	} else {
 	    mail_check(disPtr->master);
 	}
-	if (disPtr->exists != lastKnown-disPtr->expunged &&
-	    0 == disPtr->error) {
+	if ((disPtr->master->nmsgs != lastKnown-disPtr->expunged
+             || disPtr->diskfull)
+            && 0 == disPtr->error) {
 	    MAILSTREAM *local =
 		((StdFolderInfo*)disPtr->infoPtr->private)->stream;
 	    char buf[1024];
@@ -553,9 +526,11 @@ Dis_UpdateProc(RatFolderInfoPtr infoPtr, Tcl_Interp *interp,RatUpdateType mode)
 	    }
 	    disPtr->lastUid = DisDownloadMsgs(disPtr->interp, disPtr->master,
 					      local, &disPtr->error,
+                                              &disPtr->diskfull,
 					      disPtr->dir, &disPtr->map, fp,
 					      disPtr->lastUid, 0);
 	    fclose(fp);
+	    WriteState(disPtr);
 	}
 
 	if (0 != disPtr->error) {
@@ -565,11 +540,22 @@ Dis_UpdateProc(RatFolderInfoPtr infoPtr, Tcl_Interp *interp,RatUpdateType mode)
 	}
     }
     if (RAT_SYNC == mode && 0 == disPtr->error) {
-	CheckDeletion(infoPtr, interp);
+        CheckDeletion(infoPtr, interp);
 	WriteMappings(disPtr);
     }
 
-    return (*disPtr->updateProc)(infoPtr, interp, mode);
+    result = (*disPtr->updateProc)(infoPtr, interp, mode);
+
+    /* Sanity check */
+    if (RAT_SYNC == mode && disPtr->master && 0 == disPtr->diskfull
+	&& disPtr->master->nmsgs !=  disPtr->local->nmsgs) {
+	char buf[1024];
+	snprintf(buf, sizeof(buf), "Message count bad, %ld != %ld, in %s",
+		 disPtr->local->nmsgs, disPtr->master->nmsgs,
+		 disPtr->master->original_mailbox);
+	RatLog(interp, RAT_ERROR, buf, RATLOG_EXPLICIT);
+    }
+    return result;
 }
 
 /*
@@ -635,11 +621,12 @@ Dis_InsertProc(RatFolderInfoPtr infoPtr, Tcl_Interp *interp, int argc,
 	Tcl_DStringFree(&ds);
 	if (disPtr->lastUid+1 < us) {
             DisDownloadMsgs(interp, disPtr->master, local,
-			    &disPtr->error, disPtr->dir,
+			    &disPtr->error, NULL, disPtr->dir,
 			    &disPtr->map, fp, disPtr->lastUid+1, us);
         }
 	fclose(fp);
 	disPtr->lastUid = ue;
+	WriteState(disPtr);
     }
     return ret;
 }
@@ -662,34 +649,37 @@ Dis_InsertProc(RatFolderInfoPtr infoPtr, Tcl_Interp *interp, int argc,
  *----------------------------------------------------------------------
  */
 static int
-Dis_SetFlagProc(RatFolderInfoPtr infoPtr, Tcl_Interp *interp, int index,
-	RatFlag flag, int value)
+Dis_SetFlagProc(RatFolderInfoPtr infoPtr, Tcl_Interp *interp, int *ilist,
+		int count, RatFlag flag, int value)
 {
     DisFolderInfo *disPtr = (DisFolderInfo*)infoPtr->private2;
     FILE *fp = NULL;
     char buf[1024];
     unsigned long uid;
+    int i;
 
-    uid = GetMasterUID(((StdFolderInfo*)infoPtr->private)->stream,
-		       &disPtr->map, index);
-    if (uid && disPtr->master) {
-	snprintf(buf, sizeof(buf), "%ld", uid);
-	if (value) {
-	    mail_setflag_full(disPtr->master, buf, flag_name[flag].imap_name,
-			      ST_UID);
-	} else {
-	    mail_clearflag_full(disPtr->master, buf, flag_name[flag].imap_name,
-				ST_UID);
-	}
-    } else if (uid) {
-	snprintf(buf, sizeof(buf), "%s/changes", disPtr->dir);
-	if (NULL != (fp = fopen(buf, "a"))) {
-	    fprintf(fp, "flag %ld %d %d\n", uid, flag, value);
-	    fclose(fp);
+    for (i=0; i<count; i++) {
+	uid = GetMasterUID(((StdFolderInfo*)infoPtr->private)->stream,
+			   &disPtr->map, ilist[i]);
+	if (uid && disPtr->master) {
+	    snprintf(buf, sizeof(buf), "%ld", uid);
+	    if (value) {
+		mail_setflag_full(disPtr->master, buf,
+				  flag_name[flag].imap_name, ST_UID);
+	    } else {
+		mail_clearflag_full(disPtr->master, buf,
+				    flag_name[flag].imap_name, ST_UID);
+	    }
+	} else if (uid) {
+	    snprintf(buf, sizeof(buf), "%s/changes", disPtr->dir);
+	    if (NULL != (fp = fopen(buf, "a"))) {
+		fprintf(fp, "flag %ld %d %d\n", uid, flag, value);
+		fclose(fp);
+	    }
 	}
     }
 
-    return (*disPtr->setFlagProc)(infoPtr, interp, index, flag, value);
+    return (*disPtr->setFlagProc)(infoPtr, interp, ilist, count, flag, value);
 }
 
 
@@ -853,7 +843,7 @@ CreateDir(char *dir)
 /*
  *----------------------------------------------------------------------
  *
- * RatSyncDisconnected --
+ * RatSyncDisconnectedCmd --
  *
  *	Synchronizes all disconnected folders
  *
@@ -867,8 +857,8 @@ CreateDir(char *dir)
  *----------------------------------------------------------------------
  */
 static int
-RatSyncDisconnected(ClientData op, Tcl_Interp *interp, int objc,
-		    Tcl_Obj *const objv[])
+RatSyncDisconnectedCmd(ClientData op, Tcl_Interp *interp, int objc,
+		       Tcl_Obj *const objv[])
 {
     CONST84 char *dirname;
 
@@ -876,6 +866,48 @@ RatSyncDisconnected(ClientData op, Tcl_Interp *interp, int objc,
 	return TCL_ERROR;
     }
     Dis_FindAndSyncFolders(interp, dirname);
+    return TCL_OK;
+}
+
+/*
+ *----------------------------------------------------------------------
+ *
+ * RatDeleteDisconnectedCmd --
+ *
+ *	Deletes the local copy of a disconnected folder
+ *
+ * Results:
+ *	None
+ *
+ * Side effects:
+ *	All disconnected folders are updated
+ *
+ *
+ *----------------------------------------------------------------------
+ */
+static int
+RatDeleteDisconnectedCmd(ClientData op, Tcl_Interp *interp, int objc,
+		       Tcl_Obj *const objv[])
+{
+    Tcl_Obj *cmdv[4];
+    char *dir;
+    int i;
+
+    if (2 != objc) {
+	Tcl_AppendResult(interp, "Usage: ", Tcl_GetString(objv[0]), \
+		" def", (char*) NULL);
+	return TCL_ERROR;
+    }
+    if (!(dir = RatDisFolderDir(interp, objv[1]))) {
+	return TCL_OK;
+    }
+    cmdv[0] = Tcl_NewStringObj("file", -1);
+    cmdv[1] = Tcl_NewStringObj("delete", -1);
+    cmdv[2] = Tcl_NewStringObj("-force", -1);
+    cmdv[3] = Tcl_NewStringObj(dir, -1);
+    for (i=0; i<4; i++) Tcl_IncrRefCount(cmdv[i]);
+    Tcl_EvalObjv(interp, 4, cmdv, 0);
+    for (i=0; i<4; i++) Tcl_DecrRefCount(cmdv[i]);
     return TCL_OK;
 }
 
@@ -982,7 +1014,7 @@ Dis_SyncFolder(Tcl_Interp *interp, CONST84 char *dir, off_t size, int force,
 	    || NULL == (data = (char*)ckalloc(size+1))
 	    || size != read(fd, data, size)
 	    || 0 != close(fd)) {
-	RatLogF(interp, RAT_ERROR, "Failed to read masterfile", RATLOG_TIME);
+	RatLog(interp, RAT_ERROR, "Failed to read masterfile", RATLOG_TIME);
 	if (master) {
 	    *master = NULL;
 	}
@@ -1104,21 +1136,20 @@ Dis_SyncFolder(Tcl_Interp *interp, CONST84 char *dir, off_t size, int force,
     RatLogF(interp, RAT_INFO, "uploading", RATLOG_EXPLICIT);
     snprintf(buf, sizeof(buf), "%s/changes", dir);
     if (NULL != (fp = fopen(buf, "r"))) {
+        rat_sequence_t seq = RatSequenceInit();
+        
 	buf[sizeof(buf)-1] = '\0';
 	while (fgets(buf, sizeof(buf)-1, fp), !feof(fp)) {
 	    if (!strncmp(buf, "delete", 6)) {
-		if (Tcl_DStringLength(&ds)) {
-		    Tcl_DStringAppend(&ds, ",", 1);
-		}
-		sprintf(buf, "%ld", atol(buf+7));
-		Tcl_DStringAppend(&ds, buf, -1);
+                RatSequenceAdd(seq, atol(buf+7));
 	    }
 	}
-	if (Tcl_DStringLength(&ds)) {
-	    mail_setflag_full(masterStream, Tcl_DStringValue(&ds),
+        if (RatSequenceNotempty(seq)) {
+	    mail_setflag_full(masterStream, RatSequenceGet(seq),
 		    flag_name[RAT_DELETED].imap_name, ST_UID);
 	    mail_expunge(masterStream);
 	}
+        RatSequenceFree(seq);
 	if (*masterErrorPtr) goto error;
     }
 
@@ -1130,51 +1161,76 @@ Dis_SyncFolder(Tcl_Interp *interp, CONST84 char *dir, off_t size, int force,
 
     /*
      * Apply flag commands (and remove changes file)
+     * First we read the changes file and store all the changes in
+     * a list. While doing this we eliminate extra changes to a flag
+     * (we only keep the latest value). Then we build the sequences of
+     * uids which needs flag changes and lastly we perform the
+     * changes.
+     * The goal is to minimize the amout of data which needs to be
+     * sent over the wire.
      */
     if (NULL != fp) {
 	RatFlag flag;
-	int value;
+	int f, value;
+        rat_sequence_t seq[RAT_FLAG_END][2];
+        changes_t *changes = NULL;
+        int changes_allocated = 0, changes_used = 0;
+
 
 	fseek(fp, 0, SEEK_SET);
 	while (fgets(buf, sizeof(buf)-1, fp), !feof(fp)) {
 	    if (!strncmp(buf, "flag", 4)) {
-		sscanf(buf+5, "%ld %d %d", &uid, (int*)&flag, &value);
+		sscanf(buf+5, "%ld %d %d", &uid, &f, &value);
+		flag = f;
 		sprintf(buf, "%ld", uid);
 		if (0 == (msgno = MsgNo(uidMap, uid))) {
-		    continue;
+		    continue; /* Message was deleted */
 		}
-		mail_fetchenvelope(masterStream, msgno);
-		elt = mail_elt(masterStream, msgno);
-		switch(flag) {
-		case RAT_SEEN:
-		    elt->seen = value;
-		    break;
-		case RAT_FLAGGED:
-		    elt->flagged = value;
-		    break;
-		case RAT_DELETED:
-		    elt->deleted = value;
-		    break;
-		case RAT_ANSWERED:
-		    elt->answered = value;
-		    break;
-		case RAT_DRAFT:
-		    elt->draft = value;
-		    break;
-		case RAT_RECENT:
-		    break;
-		}
-		if (value) {
-		    mail_setflag_full(masterStream, buf,
-				      flag_name[flag].imap_name, ST_UID);
-		} else {
-		    mail_clearflag_full(masterStream, buf,
-					flag_name[flag].imap_name, ST_UID);
-		}
+                for (i=0; i<changes_used; i++) {
+                    if (changes[i].uid == uid && changes[i].flag == flag) {
+                        changes[i].value = value;
+                        break;
+                    }
+                }
+                if (i < changes_used) {
+                    continue;
+                }
+                if (changes_allocated == changes_used) {
+                    changes_allocated += 256;
+                    changes = (changes_t*)ckrealloc(
+                        changes, sizeof(changes_t)*changes_allocated);
+                }
+                changes[changes_used].uid = uid;
+                changes[changes_used].flag = flag;
+                changes[changes_used++].value = value;
 	    }
 	}
 	fclose(fp);
-	if (*masterErrorPtr) goto error;
+
+        for (i=0; i<RAT_FLAG_END; i++) {
+            seq[i][0] = RatSequenceInit();
+            seq[i][1] = RatSequenceInit();
+        }
+        for (i=0; i < changes_used; i++) {
+            RatSequenceAdd(seq[changes[i].flag][(changes[i].value ? 1 : 0)],
+                           changes[i].uid);
+        }
+
+        ckfree(changes);
+        
+        for (i=0; i<RAT_FLAG_END; i++) {
+            if (RatSequenceNotempty(seq[i][0])) {
+                mail_clearflag_full(masterStream, RatSequenceGet(seq[i][0]),
+                                    flag_name[i].imap_name, ST_UID);
+            }
+            if (RatSequenceNotempty(seq[i][1])) {
+                mail_setflag_full(masterStream, RatSequenceGet(seq[i][1]),
+                                  flag_name[i].imap_name, ST_UID);
+            }
+            RatSequenceFree(seq[i][0]);
+            RatSequenceFree(seq[i][1]);
+        }
+        if (*masterErrorPtr) goto error;
 	snprintf(buf, sizeof(buf), "%s/changes", dir);
 	unlink(buf);
     }
@@ -1186,7 +1242,9 @@ Dis_SyncFolder(Tcl_Interp *interp, CONST84 char *dir, off_t size, int force,
     snprintf(buf, sizeof(buf), "%s/mappings", dir);
     fp = fopen(buf, "a");
     lastUid = DisDownloadMsgs(interp, masterStream, localStream,
-			      masterErrorPtr, dir, mapPtr, fp, lastUid, 0);
+			      masterErrorPtr,
+                              (disPtr ? &disPtr->diskfull : NULL),
+                              dir, mapPtr, fp, lastUid, 0);
 
     /*
      * Loop over messages and update
@@ -1282,7 +1340,8 @@ Dis_SyncFolder(Tcl_Interp *interp, CONST84 char *dir, off_t size, int force,
 	    envPtr = mail_fetch_structure(localStream, i, NULL, 0);
 	    lastUid = DisUploadMsg(masterStream, localStream, envPtr->subject,
 				   envPtr->in_reply_to, envPtr->message_id,
-				   envPtr->date, mail_uid(localStream, i), &ds,
+				   (char*)envPtr->date,
+                                   mail_uid(localStream, i), &ds,
 				   datebuf, MsgFlags(elt), fp, mapPtr);
 	    if (disPtr) {
 		disPtr->mapChanged = 1;
@@ -1390,7 +1449,7 @@ error:
 
 static unsigned long
 DisDownloadMsgs(Tcl_Interp *interp, MAILSTREAM *masterStream,
-		MAILSTREAM *localStream, int *masterErrorPtr,
+		MAILSTREAM *localStream, int *masterErrorPtr, int *diskFullPtr,
 		CONST84 char *dir, Tcl_HashTable *mapPtr, FILE *mapFp,
 		unsigned long startAfterUid, unsigned long stopBeforeUid)
 {
@@ -1398,12 +1457,13 @@ DisDownloadMsgs(Tcl_Interp *interp, MAILSTREAM *masterStream,
     ENVELOPE *envPtr;
     MESSAGECACHE *elt;
     unsigned long len, uid;
-    char *body, *header, datebuf[128], statebuf[1024];
+    char *body, *header, datebuf[128], statebuf[1024], statetmp[1024];
     Tcl_DString ds;
     STRING string;
     SEARCHPGM *pgm;
     int i;
     FILE *stateFp;
+    long mapPos;
 
     if (0 == masterStream->nmsgs) {
 	return masterStream->uid_last;
@@ -1432,21 +1492,53 @@ DisDownloadMsgs(Tcl_Interp *interp, MAILSTREAM *masterStream,
 	header = mail_fetchheader(masterStream, searchResultPtr[i]);
 	if (*masterErrorPtr) goto done;
 	if (!body || !header) continue;
+
+        /*
+         * We must be careful here so we can undo what we do if any of
+         * the later steps fails.
+         */
+	uid = mail_uid(masterStream, searchResultPtr[i]);
+        mapPos = ftell(mapFp);
+	if (0 > fprintf(mapFp, "%ld %ld\n", uid, ++localStream->uid_last)
+            || 0 != fflush(mapFp)) {
+            goto disk_full;
+        }
+        snprintf(statetmp, sizeof(statetmp), "%s.tmp", statebuf);
+	stateFp = fopen(statetmp, "w");
+	if (0>fprintf(stateFp, "%ld\n%ld\n", masterStream->uid_validity,uid)){
+            fclose(stateFp);
+            ftruncate(fileno(mapFp), mapPos);
+            goto disk_full;
+        }
+	if (0 != fclose(stateFp)) {
+            ftruncate(fileno(mapFp), mapPos);
+            unlink(statetmp);
+            goto disk_full;
+        }
+        
 	Tcl_DStringInit(&ds);
 	Tcl_DStringAppend(&ds, header, -1);
 	Tcl_DStringAppend(&ds, body, len);
 	INIT(&string, mail_string, Tcl_DStringValue(&ds),
 	     Tcl_DStringLength(&ds));
 	mail_date(datebuf, elt);
-	mail_append_full(localStream, localStream->mailbox,
-			 RatPurgeFlags(MsgFlags(elt), 0), datebuf, &string);
+	if (T != mail_append_full(localStream, localStream->mailbox,
+                                  RatPurgeFlags(MsgFlags(elt), 0),
+                                  datebuf, &string)) {
+            Tcl_DStringFree(&ds);
+            ftruncate(fileno(mapFp), mapPos);
+            unlink(statetmp);
+            goto disk_full;
+        }
 	Tcl_DStringFree(&ds);
-	uid = mail_uid(masterStream, searchResultPtr[i]);
-	fprintf(mapFp, "%ld %ld\n", uid, ++localStream->uid_last);
+
 	masterStream->uid_last = uid;
-	stateFp = fopen(statebuf, "w");
-	fprintf(stateFp, "%ld\n%ld\n", masterStream->uid_validity, uid);
-	fclose(stateFp);
+        rename(statetmp, statebuf);
+        if (diskFullPtr) {
+            *diskFullPtr = 0;
+        }
+        
+        /* Move upwards */
 	if (mapPtr) {
 	    unsigned long *lPtr = (unsigned long*)ckalloc(sizeof(*lPtr));
 	    Tcl_HashEntry *entryPtr;
@@ -1462,6 +1554,14 @@ DisDownloadMsgs(Tcl_Interp *interp, MAILSTREAM *masterStream,
  done:
     RatLog(interp, RAT_INFO, "", RATLOG_EXPLICIT);    
     return masterStream->uid_last;
+
+ disk_full:
+    if (diskFullPtr && !*diskFullPtr) {
+        *diskFullPtr = 1;
+        RatLogF(interp, RAT_ERROR, "sync_failed_disk_full", RATLOG_TIME);
+    }
+    RatLog(interp, RAT_INFO, "", RATLOG_EXPLICIT);
+    return startAfterUid;
 }
 
 
@@ -1514,13 +1614,14 @@ static void
 UpdateFolderFlag(Tcl_Interp *interp, DisFolderInfo *disPtr,
 	int index, RatFlag flag, int value)
 {
-    int local;
+    int local, no;
     
     local = (*disPtr->getFlagProc)(disPtr->infoPtr, interp, index-1, flag);
     if (value == local) {
 	return;
     }
-    (*disPtr->setFlagProc)(disPtr->infoPtr, interp, index-1, flag, value);
+    no = index-1;
+    (*disPtr->setFlagProc)(disPtr->infoPtr, interp, &no, 1, flag, value);
 }
 
 
@@ -1835,6 +1936,7 @@ MsgNo(RatUidMap *uidMap, unsigned long uid)
 static void
 CheckDeletion(RatFolderInfoPtr infoPtr, Tcl_Interp *interp)
 {
+    MAILSTREAM *stream = ((StdFolderInfo*)infoPtr->private)->stream;
     DisFolderInfo *disPtr = (DisFolderInfo*)infoPtr->private2;
     Tcl_HashEntry *entryPtr;
     FILE *fp = NULL;
@@ -1848,8 +1950,7 @@ CheckDeletion(RatFolderInfoPtr infoPtr, Tcl_Interp *interp)
 		snprintf(buf, sizeof(buf), "%s/changes", disPtr->dir);
 		fp = fopen(buf, "a");
 	    }
-	    uid = GetMasterUID(((StdFolderInfo*)infoPtr->private)->stream,
-		    &disPtr->map, i);
+	    uid = GetMasterUID(stream, &disPtr->map, i);
 	    if (uid && NULL != fp) {
 		fprintf(fp, "delete %ld\n", uid);
 	    }
@@ -2015,6 +2116,34 @@ WriteMappings(DisFolderInfo *disPtr)
     }
     fclose(fp);
     disPtr->mapChanged = 0;
+}
+
+/*
+ *----------------------------------------------------------------------
+ *
+ * WriteState --
+ *
+ *      Writes the state-file
+ *
+ * Results:
+ *	None
+ *
+ * Side effects:
+ *	None
+ *
+ *
+ *----------------------------------------------------------------------
+ */
+static void
+WriteState(DisFolderInfo *disPtr)
+{
+    char buf[1024];
+    FILE *fp;
+    
+    snprintf(buf, sizeof(buf), "%s/state", disPtr->dir);
+    fp = fopen(buf, "w");
+    fprintf(fp, "%ld\n%ld\n", disPtr->master->uid_validity, disPtr->lastUid);
+    fclose(fp);
 }
 
 /*

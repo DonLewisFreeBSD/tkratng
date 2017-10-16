@@ -3,13 +3,8 @@ puts "$HEAD Test message sorting"
 namespace eval test_sorting {
 }
 
-proc test_sorting::check_order {fh msglist} {
-    global errors LEAD
-
-}
-
 proc test_sorting::test_sorting {} {
-    global LEAD option dir hdr errors mailServer verbose \
+    global option dir hdr mailServer \
 	    msg1 msg2 msg3 msg4 msg5 msg6 msg7 msg8 msg9 msg10 \
 	    msg11 msg12 msg13 msg14 msg15 msg16 msg17 msg18 msg19
     variable tsmsg
@@ -37,7 +32,7 @@ proc test_sorting::test_sorting {} {
 	        {subject {1 2 3 4 5 6 7 8 9 10}}
 	        {subjectonly {1 2 3 4 5 6 7 8 9 10}}
                } {
-        puts "Testing sort order '[lindex $tc 0]'..."
+        StartTest "Sort order '[lindex $tc 0]'..."
 	$f1 setSortOrder [lindex $tc 0]
         $f1 update update
         set expected {}
@@ -46,23 +41,20 @@ proc test_sorting::test_sorting {} {
 	}
 	set current [$f1 list %s]
 	if {$expected != $current} {
-	    puts "$LEAD: failed"
-	    if {$verbose} {
-		puts "$LEAD: Expected:"
-		foreach m $expected {puts $m}
-		puts "$LEAD: Got:"
-		foreach m $current {puts $m}
-	    }
-	    incr errors
+	    ReportError "Sort failed"
+	    puts "Expected:"
+	    foreach m $expected {puts $m}
+	    puts "Got:"
+	    foreach m $current {puts $m}
 	}
     }
     $f1 close
     file delete $fn
 
     foreach func {get_simple_thread get_back_thread
-	get_real_thread get_strange_msgid} {
+	          get_real_thread get_strange_msgid get_mlist_subject} {
 	set gts [eval $func]
-	puts "Testing sort order 'threaded' [lindex $gts 0] ..."
+	StartTest "Sort order 'threaded' [lindex $gts 0] ..."
 
 	set fn $dir/folder.[pid]
 	set def [list Test file {} $fn]
@@ -78,32 +70,25 @@ proc test_sorting::test_sorting {} {
 	set expected [lindex $gts 2]
 	set real [$f1 list "%t%M"]
 	if {[llength $expected] != [llength $real]} {
-	    puts "Fail lengthdiff"
-	    set fail 1
+	    set fail "Fail lengthdiff"
 	} else {
-	    set fail 0
-	    for {set i 0} {$fail == 0 && $i < [llength $expected]} {incr i} {
+	    set fail ""
+	    for {set i 0} {$fail == "" && $i < [llength $expected]} {incr i} {
+#                puts "Exp: <[lindex $expected $i]>  Real <[lindex $real $i]>"
 		if {[lindex $expected $i] != [lindex $real $i]} {
-		    puts "Fail <[lindex $expected $i]> != <[lindex $real $i]>"
-		    set fail 1
+		    set fail "Fail <[lindex $expected $i]> != <[lindex $real $i]>"
 		}
 	    }
 	}
 	$f1 close
 	file delete $fn
-	if {$fail} {
-	    incr errors
-	    puts "$LEAD: threads sorting failed"
-	    if {$verbose} {
-		puts "Expected:"
-		foreach l $expected {
-		    puts "$l"
-		}
-		puts "Real:"
-		foreach l $real {
-		    puts "$l"
-		}
-	    }
+	if {"" != $fail} {
+	    ReportError "Threads sorting failed: $fail"
+            for {set i 0} {$i < [llength $expected] || $i < [llength $real]} \
+                {incr i} {
+                puts [format "Exp: %-20s  Real: %-20s" \
+                          [lindex $expected $i] [lindex $real $i]]
+            }
 	}
     }
 }
@@ -367,6 +352,62 @@ THIS: msg3
 	{+m2@foo.bar}
     }
     return [list "Contorted msgid" $ml $expected]
+}
+
+
+proc test_sorting::get_mlist_subject {} {
+    lappend ml {
+From maf@kilauea Thu Sep  6 14:25:09 2001 -0400
+Message-Id: <m1@foo.bar>
+Date: Thu, 06 Sep 2001 14:25:00
+Subject: [listname] foo
+
+THIS: msg1
+}
+    lappend ml {
+From maf@kilauea Thu Sep  6 14:25:09 2001 -0400
+Message-Id: <m2@foo.bar>
+Date: Thu, 06 Sep 2001 14:25:01
+Subject: Re: [listname] foo
+References: <some_other_message2@somewhere>
+In-ReplyTo: <some_other_message2@somewhere>
+
+THIS: msg2
+}
+    lappend ml {
+From maf@kilauea Thu Sep  6 14:25:09 2001 -0400
+Message-Id: <m3@foo.bar>
+Date: Thu, 06 Sep 2001 14:25:02
+Subject: something different
+
+THIS: msg3
+}
+    lappend ml {
+From maf@kilauea Thu Sep  6 14:25:09 2001 -0400
+Message-Id: <m4@foo.bar>
+Date: Thu, 06 Sep 2001 14:25:03
+Subject: [listname] Re: foo
+
+THIS: msg4
+}
+    lappend ml {
+From maf@kilauea Thu Sep  6 14:25:09 2001 -0400
+Message-Id: <m5@foo.bar>
+Date: Thu, 06 Sep 2001 14:25:04
+Subject: [listname] Re: foo
+References: <some_other_message@somewhere>
+In-ReplyTo: <some_other_message@somewhere>
+
+THIS: msg5
+}
+    set expected {
+	{m1@foo.bar}
+	{+m2@foo.bar}
+	{+m4@foo.bar}
+	{+m5@foo.bar}
+	{m3@foo.bar}
+    }
+    return [list "mlist_subject" $ml $expected]
 }
 
 test_sorting::test_sorting

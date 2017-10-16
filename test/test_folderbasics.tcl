@@ -4,7 +4,7 @@ namespace eval test_folderbasics {
 }
 
 proc test_folderbasics::check_folder {type fn fh msglist} {
-    global errors LEAD hdr imap_serv cyrus_dir
+    global hdr imap_serv cyrus_dir
 
     set num [llength $msglist]
     foreach m $msglist {
@@ -19,20 +19,17 @@ proc test_folderbasics::check_folder {type fn fh msglist} {
 
     # Apply checks to folder handle
     if {$num != [lindex [$fh info] 1]} {
-	puts "$LEAD: number of messages in tkrat folder is wrong [lindex [$fh info] 1] != $num"
-	incr errors
+	ReportError "Number of messages in tkrat folder is wrong [lindex [$fh info] 1] != $num"
     }
     foreach s [$fh list %s] {
 	if {![info exists s1($s)]} {
-	    puts "$LEAD: subject '$s' not found in tkrat folder"
-	    incr errors
+	    ReportError "Subject '$s' not found in tkrat folder"
 	} else {
 	    unset s1($s)
 	}
     }
     if {[array size s1]} {
-	puts "$LEAD: subjects [array names s1] not found in tkrat folder"
-	incr errors
+	ReportError "Subjects [array names s1] not found in tkrat folder"
     }
 
     # Apply checks to underlying file
@@ -47,8 +44,7 @@ proc test_folderbasics::check_folder {type fn fh msglist} {
 	if {[regexp -nocase {subject:[ ]*(.+)$} $line unused s]} {
 	    incr found
 	    if {![info exists s2($s)]} {
-		puts "$LEAD: subject '$s' not found in underlying file"
-		incr errors
+		ReportError "Subject '$s' not found in underlying file"
 	    } else {
 		unset s2($s)
 	    }
@@ -56,23 +52,21 @@ proc test_folderbasics::check_folder {type fn fh msglist} {
     }
     close $f
     if {$num != $found} {
-	puts "$LEAD: number of messages in underlying folder is wrong $found != $num"
-	incr errors
+	ReportError "Number of messages in underlying folder is wrong $found != $num"
     }
     if {[array size s2]} {
-	puts "$LEAD: subjects [array names s2] not found in underlying file"
-	incr errors
+	ReportError "Subjects [array names s2] not found in underlying file"
     }
 }
 
 proc test_folderbasics::type_tests {type fn1 def1 fn2 def2} {
-    global option dir hdr errors imap_serv \
+    global option dir hdr imap_serv \
 	    msg1 msg2 msg3 msg4 msg5 msg6 msg7 msg8 msg9 msg10 \
 	    msg11 msg12 msg13 msg14 msg15 msg16 msg17 msg18 msg19
 
     InitTestmsgs
 
-    puts "$type: test opening folder with two messages"
+    StartTest "$type: Opening folder with two messages"
     if {"imap" == [lindex $def1 1]} {
 	init_imap_folder $def1
 	insert_imap $def1 $msg1 $msg2
@@ -86,7 +80,7 @@ proc test_folderbasics::type_tests {type fn1 def1 fn2 def2} {
     set f1 [RatOpenFolder $def1]
     check_folder [lindex $def1 1] $fn1 $f1 [list $msg1 $msg2]
 
-    puts "$type: test new message arrival"
+    StartTest "$type: New message arrival"
     if {"imap" == [lindex $def1 1]} {
 	insert_imap $def1 $msg3
     } else {
@@ -97,18 +91,18 @@ proc test_folderbasics::type_tests {type fn1 def1 fn2 def2} {
     $f1 update sync
     check_folder [lindex $def1 1] $fn1 $f1 [list $msg1 $msg2 $msg3]
 
-    puts "$type: test message deletion"
+    StartTest "$type: Message deletion"
     $f1 setFlag 1 deleted 1
     $f1 update sync
     check_folder [lindex $def1 1] $fn1 $f1 [list $msg1 $msg3]
 
-    puts "$type: test deleting multiple messages"
+    StartTest "$type: Deleting multiple messages"
     $f1 setFlag 0 deleted 1
     $f1 setFlag 1 deleted 1
     $f1 update sync
     check_folder [lindex $def1 1] $fn1 $f1 {}
 
-    puts "$type: test multiple new message arrival"
+    StartTest "$type: Multiple new message arrival"
     if {"imap" == [lindex $def1 1]} {
 	insert_imap $def1 $msg4 $msg5
     } else {
@@ -120,7 +114,7 @@ proc test_folderbasics::type_tests {type fn1 def1 fn2 def2} {
     $f1 update sync
     check_folder [lindex $def1 1] $fn1 $f1 [list $msg4 $msg5]
 
-    puts "$type: test new message deletion and simultaneously new message"
+    StartTest "$type: New message deletion and simultaneously new message"
     if {"imap" == [lindex $def1 1]} {
 	insert_imap $def1 $msg6
     } else {
@@ -132,7 +126,7 @@ proc test_folderbasics::type_tests {type fn1 def1 fn2 def2} {
     $f1 update sync
     check_folder [lindex $def1 1] $fn1 $f1 [list $msg4 $msg6]
 
-    puts "$type: test inserting message"
+    StartTest "$type: Inserting message"
     if {"imap" == [lindex $def2 1]} {
 	init_imap_folder $def2
 	insert_imap $def2 $msg7
@@ -149,7 +143,7 @@ proc test_folderbasics::type_tests {type fn1 def1 fn2 def2} {
     $f2 close
     check_folder [lindex $def1 1] $fn1 $f1 [list $msg4 $msg6 $msg7]
 
-    puts "$type: test inserting multiple messages"
+    StartTest "$type: Inserting multiple messages"
     if {"imap" == [lindex $def2 1]} {
 	insert_imap $def2 $msg8
 	insert_imap $def2 $msg9
@@ -167,14 +161,14 @@ proc test_folderbasics::type_tests {type fn1 def1 fn2 def2} {
     $f2 close
     check_folder [lindex $def1 1] $fn1 $f1 [list $msg4 $msg6 $msg7 $msg8 $msg9]
 
-    puts "$type: test copying to another (not open) folder"
+    StartTest "$type: Copying to another (not open) folder"
     $f1 list "%s"
     set m [$f1 get 0]
     $m copy $def2
     set f2 [RatOpenFolder $def2]
     check_folder [lindex $def2 1] $fn2 $f2 [list $msg7 $msg8 $msg9 $msg4]
 
-    puts "$type: test copying to another open folder"
+    StartTest "$type: Copying to another open folder"
     set m [$f1 get 1]
     $m copy $def2
     $f2 update update
@@ -193,7 +187,7 @@ proc test_folderbasics::type_tests {type fn1 def1 fn2 def2} {
 }
 
 proc test_folderbasics::test_folderbasics {} {
-    global option dir hdr errors mailServer imap_def1 imap_def2 \
+    global option dir hdr mailServer imap_def1 imap_def2 \
 	    imap_fn1 imap_fn2 \
 	    msg1 msg2 msg3 msg4 msg5 msg6 msg7 msg8 msg9 msg10 \
 	    msg11 msg12 msg13 msg14 msg15 msg16 msg17 msg18 msg19
@@ -226,14 +220,14 @@ proc test_folderbasics::test_folderbasics {} {
     init_imap_folder $imap_def2
     insert_imap $imap_def2 $msg3
 
-    puts "Test copying between a file and an (not open) imap folder"
+    StartTest "Copying between a file and an (not open) imap folder"
     set f1 [RatOpenFolder $def1]
     set m [$f1 get 0]
     $m copy $imap_def2
     set f2 [RatOpenFolder $imap_def2]
     check_folder imap $imap_fn2 $f2 [list $msg3 $msg1]
 
-    puts "Test copying between a file and an open imap folder"
+    StartTest "Copying between a file and an open imap folder"
     set m [$f1 get 1]
     $m copy $imap_def2
     check_folder imap $imap_fn2 $f2 [list $msg3 $msg1 $msg2]

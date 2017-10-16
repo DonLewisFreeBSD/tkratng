@@ -3,7 +3,7 @@
 # See README for information about what this program does.
 #
 #
-#  TkRat software and its included text is Copyright 1996-2002 by
+#  TkRat software and its included text is Copyright 1996-2004 by
 #  Martin Forssén
 #
 #  The full text of the legal notice is contained in the file called
@@ -33,13 +33,15 @@ if {[info tclversion] < 8.1} {
 }
 
 # Directory where we should store the output files:
-set outdir ..
+set outdir ../.messages
 
 source defs.tcl
 
 # First we should create the language procedures
 foreach l $languages {
-    proc [lindex $l 0] m "global lab text; set text([lindex $l 0],\$lab) \$m"
+    set lang [lindex $l 0]
+    proc $lang m "addmsg $lang \$m"
+    set lang_name($lang) [lindex $l 1]
 }
 
 # variable --
@@ -72,6 +74,21 @@ proc label {l} {
     set lab $l
 }
 
+# addmsg --
+#
+# Add a text string
+#
+# Arguments:
+# lang - The language
+# m    - The message
+
+proc addmsg {lang m} {
+    global lab text lang_name
+    if {[info exists text($lang,$lab)]} {
+        puts "Multiple definitions of $lab in $lang_name($lang)"
+    }
+    set text($lang,$lab) $m
+}
 
 # Now we should build the languages.tcl file, we start by definig the
 # procedures.
@@ -86,7 +103,7 @@ set initMessages {
 # var  -	The variable the messages are in
 
 proc InitMessages {lang var} {
-    upvar #0 currentLanguage_$var currentLanguage
+    upvar \#0 currentLanguage_$var currentLanguage
     global ratCurrent
 
     set currentLanguage $lang

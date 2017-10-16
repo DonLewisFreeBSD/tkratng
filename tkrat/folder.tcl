@@ -3,7 +3,7 @@
 # This file contains code which handles a folder window.
 #
 #
-#  TkRat software and its included text is Copyright 1996-2002 by
+#  TkRat software and its included text is Copyright 1996-2004 by
 #  Martin Forssén
 #
 #  The full text of the legal notice is contained in the file called
@@ -31,6 +31,24 @@ q7Oxqrezqry5sr67tcTCvcXDvcbCusjFv87Kw9HQzN9CHuHf2+Lh3ePh3ejn5Oro4+vq5uzr
 AAAgABAAAAaIwJ9wSCwaj8ikcslsOokqlTD6PFoaU+mP+jNhnY4Q6fXdRrU/8kU0WTZYtA55
 eEbPGp9bqUx8+V81MA8xfFxCMg0YNi4tf0QNDQoKIyALKwpQaD8pDRQnG5CQRwoSGgkomFmG
 HA0MGQ4HSwURCB6xqmgVDQMGAk8WBFnCPxB8VcOGx8rLzM1LQQA7}]
+set icon_img [image create photo -data {
+R0lGODlhQABAAIQeAAAAAD8DZksEek0EfVQEgFYFjHUGgHsGgIAIgIAJgIAKgK1vIsqBKM+F
+KdSIKs+/keDPnezapfHfqf/3Tf3qsf//Wf//aP//e///gv//hP//kf//ov//sv//u///////
+/yH5BAEKAB8ALAAAAABAAEAAAAX+4CeOZGmeaKqubOu+cCzPdG3feE4DIq//H4BQqBkGgTch
+R8PcXCYaixBZA3A2GYd262hMGD7qS9jJcs+ORVjcApTR6Iaa3X7D0fPemt7jmO9neVZSJHtA
+ABppCw2AW3NWGQ1gPRuGOgATC2oMjI2PiV2PG3lIAGo8mI1pqKCaqBekhz5CFp13jwyapwCV
+sT97ABWes0MXGk4NU3xBfsN9x39ehHwAtYCuzH9nkpaHwrezG4qatqHdOW7agajNu5xcvr/N
+16xau8Hw5zZC4s68WtzS5StlBYunU/O6TDA48FDCW7tAwdGF7ZBEiAAugLkI756+Gf+uqcmQ
+Qc2Fcvb+1BAwIGDAgY8wIIkEQLJLsgYoVSYoMIQnDlT9Jo40o8sUOXsAFAwQEAAAgqY/BQql
+SdSjUVcJAmgF4PPnw45UU2ZkwuTCEFMAmqaF6QKR0KFia27h5sHDWWXogjo6JXfVBXVdHAB4
+QEEC2zFS92ZkiJTjXMGDD7dJHBewGsdzwdw1suOrq775TgLyQrb0NBluwYLmghMATlXjKOId
+w9EkYNY3UXa0OrvtRVd677SmSNwVsCMxUiP9+5b45rsmwkgOErIxHuNn1dTdHuGc9JgJge8W
+YoysWQASHkigQOGBoedn2/zO+Mf4BcYKMQiRsD79GiWlaTDBBeexoNwq82XugB9rE+jHX3v/
+hedKBfFEN59E4qkiBwAeFObeLInIRkSFJRx4mSP0wbaKB+t92EOIaC1QAS8kFnIhipjBsWGH
+7s0YBIxnkVTjCCZm1MmJKq4IoWBB1KLGEtBUpMKBG05gXZLaLYnKVcX1dkI15SCJpIraPeCe
+IPB5iUIqKIo2JmxlomURa2pY+eZBHJ45nYHWtLmhaKq44oGeVBjVSZVVBqrdoAAwWSgA7yDo
+l26K1WWma3vGlIsrm9aJkaVnDvkTb2DGVhQE7oWaaXLdXJWmZs8t86UQC5yRgTCaIIWPqGzA
+Z5Ueq9KhpqzEFltsCAA7}]
 
 # FolderWindowInit --
 #
@@ -45,29 +63,26 @@ HA0MGQ4HSwURCB6xqmgVDQMGAk8WBFnCPxB8VcOGx8rLzM1LQQA7}]
 
 proc FolderWindowInit {w toopen} {
     global b t idCnt statusText option folderWindowList defaultFontWidth\
-	    propLightFont fixedNormFont tkrat_menus tkrat_online_index \
-	    online_img tkrat_online_imgs numDeferred
-
+	    fixedNormFont tkrat_menus tkrat_online_index \
+	    online_img tkrat_online_imgs numDeferred icon_img accelerator
 
     # Create the handler
     set handler f[incr idCnt]
-    upvar #0 $handler fh
-
+    upvar \#0 $handler fh
 
     # Initialize variables
     set fh(toplevel) [winfo toplevel $w]
     set fh(w) $w
     set fh(folder_name) {}
-    set fh(folder_size) {}
-    set fh(folder_messages) {}
-    set fh(folder_new) {}
+    set fh(folder_status) {}
     set fh(num_messages) 0
     set fh(groupMessageLists) {}
+    set fh(uids) {}
     set fh(message_scroll) $w.t.messlist.scroll
     set fh(message_list) $w.t.messlist.list
     set fh(group) {}
     set fh(text) $w.b.text.text
-    set fh(find_ignore_case) 1
+    set fh(find_match_case) 0
     set fh(find_match) exact
     set fh(find_loc) body
     set fh(browse) 0
@@ -75,222 +90,56 @@ proc FolderWindowInit {w toopen} {
     set fh(syncing) 0
     set fh(menu_nokeep) {}
     set fh(role) $option(default_role)
-    upvar #0 $fh(text) texth
+    set fh(special_folder) none
+    set fh(context_menu) $w.t.messlist.list.contextmenu
+    set fh(struct_menu) $w.t.mbar.message.m.structmenu
+    set fh(wrap_mode) $option(wrap_mode)
+    set fh(last_filter) ""
+    upvar \#0 $fh(text) texth
     set texth(show_header) $option(show_header)
-    set texth(struct_menu) $w.t.mbar.message.m.structmenu
+    set texth(struct_menu) $fh(struct_menu)
+    set texth(width_adjust) {}
 
-    Size $w folderWindow
+    ::tkrat::winctl::Size folderWindow $w
     frame $w.t
     frame $w.b
 
+    # Icon
+    set i .icon[incr idCnt]
+    toplevel $i -class TkRat
+    pack [label $i.l -image $icon_img]
+    wm iconwindow $fh(toplevel) $i
+
     # The menu and information line
     frame $w.t.mbar -relief raised -bd 1
-    FindAccelerators a {tkrat folders message group show admin help}
+    FindAccelerators a {tkrat folders message group show admin help filter}
 
     # Tkrat menu
     menubutton $w.t.mbar.tkrat -menu $w.t.mbar.tkrat.m -text $t(tkrat) \
 	    -underline $a(tkrat)
     set m $w.t.mbar.tkrat.m
     menu $m -tearoff 1 -tearoffcommand "lappend tkrat_menus" \
-	    -postcommand "PostTkRat $handler"
+	    -postcommand "PostTkRatMenu $handler"
+    $m add cascade -label $t(role) -menu $m.role
+    set b($m,[$m index end]) folder_select_role
+    menu $m.role -postcommand \
+	    [list PostRoles $handler $m.role [list UpdateFolderTitle $handler]]
+    $m add cascade -label $t(new_folder) -menu $m.new_folder
+    set b($m,[$m index end]) new_folder
+    menu $m.new_folder -postcommand "NewFolderMenu $handler $m.new_folder"
+    $m add separator
+    $m add command -label $t(find)... -command "FolderFind $handler"
+    set b($m,[$m index end]) find
+    set fh(find_menu) [list $m [$m index end]]
+    $m add command -label $t(compose)... \
+        -command "Compose \$${handler}(role)"
+    set fh(compose_menu) [list $m [$m index end]]
+    set b($m,[$m index end]) compose
+    $m add separator
     $m add checkbutton -label $t(watcher) \
 	    -variable option(watcher_enable) -onvalue 1 -offvalue 0 \
 	    -command SaveOptions
     set b($m,[$m index end]) watcher_enable
-    $m add command -label $t(setup_netsync)... -command SetupNetworkSync
-    set b($m,[$m index end]) setup_netsync
-    $m add command -label $t(netsync) -command "RatBusy NetworkSync"
-    set b($m,[$m index end]) netsync
-    set fh(netsync_all_menu) [list $m [$m index end]]
-    $m add command
-    lappend tkrat_menus $m
-    set fh(online_menu) [list $m [$m index end]]
-    set tkrat_online_index [$m index end]
-    $m add separator
-    $m add cascade -label $t(new_folder) -menu $m.new_folder
-    set b($m,[$m index end]) new_folder
-    menu $m.new_folder -postcommand "NewFolderMenu $m.new_folder"
-    $m add separator
-    $m add command -label $t(reread_aliases) -command AliasRead
-    set b($m,[$m index end]) reread_aliases
-    $m add command -label $t(reread_userproc) -command ReadUserproc
-    set b($m,[$m index end]) reread_userproc
-    $m add command -label $t(import_aliases) -command ScanAliases
-    set b($m,[$m index end]) import_aliases
-    $m add command -label $t(reread_mailcap) -command RatMailcapReload
-    set b($m,[$m index end]) reread_mailcap
-    $m add command -label $t(take_mail)... -command "MailSteal $handler 0"
-    set b($m,[$m index end]) take_mail
-    $m add separator
-    $m add command -label $t(notifications)... -command ShowDSNList
-    set b($m,[$m index end]) show_notifications
-    $m add command -label $t(check_dbase)... \
-	    -command "RatBusy \"DbaseCheck 0\""
-    set b($m,[$m index end]) check_dbase
-    $m add command -label $t(check_fix_dbase)... \
-	    -command "RatBusy \"DbaseCheck 1\""
-    set b($m,[$m index end]) check_fix_dbase
-    $m add command -label $t(see_log)... -command SeeLog
-    set b($m,[$m index end]) see_log
-    $m add separator
-    $m add command -label $t(close) -command "DestroyFolderWin $handler"
-    set fh(close_menu) [list $m [$m index end]]
-    set b($m,[$m index end]) close_folder
-    $m add command -label $t(quit) -command "Quit $handler"
-    set fh(quit_menu) [list $m [$m index end]]
-    set b($m,[$m index end]) quit
-    
-    # Folder menu
-    menubutton $w.t.mbar.folder -menu $w.t.mbar.folder.m -text $t(folders) \
-			      -underline $a(folders)
-    menu $w.t.mbar.folder.m \
-	    -postcommand "PostFolder $handler $w.t.mbar.folder.m" -tearoff 1
-    set b($w.t.mbar.folder) folder_menu
-
-    # Message menu
-    menubutton $w.t.mbar.message -menu $w.t.mbar.message.m -text $t(message) \
-			       -underline $a(message)
-    set b($w.t.mbar.message) message_menu
-    set m $w.t.mbar.message.m
-    menu $m -tearoff 1
-    $m add command -label $t(find)... -command "FolderFind $handler"
-    set b($m,[$m index end]) find
-    lappend fh(menu_nokeep) [list $m [$m index end]]
-    set fh(find_menu) [list $m [$m index end]]
-    $m add separator
-    $m add command -label $t(compose)... -command "Compose \$${handler}(role)"
-    set fh(compose_menu) [list $m [$m index end]]
-    set b($m,[$m index end]) compose
-    $m add command -label $t(reply_sender)... \
-	    -command "FolderReply $handler sender"
-    lappend fh(menu_nokeep) [list $m [$m index end]]
-    set b($m,[$m index end]) reply_sender
-    set fh(replys_menu) [list $m [$m index end]]
-    $m add command -label $t(reply_all)... -command "FolderReply $handler all"
-    lappend fh(menu_nokeep) [list $m [$m index end]]
-    set b($m,[$m index end]) reply_all
-    set fh(replya_menu) [list $m [$m index end]]
-    $m add command -label $t(forward_inline)... \
-	    -command "FolderSomeCompose $handler ComposeForwardInline"
-    lappend fh(menu_nokeep) [list $m [$m index end]]
-    set b($m,[$m index end]) forward_inline
-    set fh(forward_i_menu) [list $m [$m index end]]
-    $m add command -label $t(forward_as_attachment)... \
-	    -command "FolderSomeCompose $handler ComposeForwardAttachment"
-    lappend fh(menu_nokeep) [list $m [$m index end]]
-    set b($m,[$m index end]) forward_attached
-    set fh(forward_a_menu) [list $m [$m index end]]
-    $m add command -label $t(bounce)... \
-	    -command "FolderSomeCompose $handler ComposeBounce"
-    lappend fh(menu_nokeep) [list $m [$m index end]]
-    set b($m,[$m index end]) bounce
-    set fh(bounce_menu) [list $m [$m index end]]
-    $m add command -label $t(getheld)... -command ComposeHeld
-    set b($m,[$m index end]) compose_held
-    $m add command -label $t(extract_adr)... -command "AliasExtract $handler"
-    lappend fh(menu_nokeep) [list $m [$m index end]]
-    set b($m,[$m index end]) extract_adr
-    $m add separator
-    $m add cascade -label $t(move) -menu $m.move
-    lappend fh(menu_nokeep) [list $m [$m index end]]
-    set b($m,[$m index end]) move
-    menu $m.move -postcommand "PostMove $handler current $m.move"
-    $m add command -label $t(delete) \
-	    -command "SetFlag $handler deleted 1; FolderNext $handler"
-    set fh(delete_menu) [list $m [$m index end]]
-    lappend fh(menu_nokeep) [list $m [$m index end]]
-    set b($m,[$m index end]) delete
-    $m add command -label $t(undelete) \
-	    -command "SetFlag $handler deleted 0; FolderNext $handler"
-    set fh(undelete_menu) [list $m [$m index end]]
-    lappend fh(menu_nokeep) [list $m [$m index end]]
-    set b($m,[$m index end]) undelete
-    $m add command -label $t(mark_as_unread) \
-	    -command "SetFlag $handler seen 0; FolderNext $handler"
-    set fh(markunread_menu) [list $m [$m index end]]
-    lappend fh(menu_nokeep) [list $m [$m index end]]
-    set b($m,[$m index end]) mark_as_unread
-    $m add command -label $t(print)... -command "Print $handler current"
-    lappend fh(menu_nokeep) [list $m [$m index end]]
-    set fh(print_menu) [list $m [$m index end]]
-    set b($m,[$m index end]) print
-    $m add cascade -label $t(structure) -menu $m.structmenu
-    lappend fh(menu_nokeep) [list $m [$m index end]]
-    set b($m,[$m index end]) structure
-
-    # Show menu
-    menubutton $w.t.mbar.show -menu $w.t.mbar.show.m -text $t(show) \
-			      -underline $a(show)
-    set b($w.t.mbar.show) show_menu
-    set m $w.t.mbar.show.m
-    menu $m -tearoff 1
-    $m add radiobutton -label $t(no_wrap) \
-	    -variable option(wrap_mode) -value none \
-	    -command "$fh(text) configure -wrap \$option(wrap_mode);SaveOptions"
-    set b($m,[$m index end]) show_no_wrap
-    $m add radiobutton -label $t(wrap_char) \
-	    -variable option(wrap_mode) -value char \
-	    -command "$fh(text) configure -wrap \$option(wrap_mode);SaveOptions"
-    set b($m,[$m index end]) show_wrap_char
-    $m add radiobutton -label $t(wrap_word) \
-	    -variable option(wrap_mode) -value word \
-	    -command "$fh(text) configure -wrap \$option(wrap_mode);SaveOptions"
-    set b($m,[$m index end]) show_wrap_word
-    $m add separator
-    $m add radiobutton -label $t(show_all_headers) \
-	    -variable $fh(text)(show_header) -value all \
-	    -command "FolderSelect $fh(message_list) $handler \
-		      \$${handler}(active) 0; SaveOptions"
-    set b($m,[$m index end]) show_all_headers
-    $m add radiobutton -label $t(show_selected_headers) \
-	    -variable $fh(text)(show_header) -value selected \
-	    -command "FolderSelect $fh(message_list) $handler \
-		      \$${handler}(active) 0; SaveOptions"
-    set b($m,[$m index end]) show_selected_headers
-    $m add radiobutton -label $t(show_no_headers) \
-	    -variable $fh(text)(show_header) -value no \
-	    -command "FolderSelect $fh(message_list) $handler \
-		      \$${handler}(active) 0; SaveOptions"
-    set b($m,[$m index end]) show_no_headers
-
-    # Group menu
-    menubutton $w.t.mbar.group -menu $w.t.mbar.group.m -text $t(group) \
-			      -underline $a(group)
-    set b($w.t.mbar.group) group_menu
-    set m $w.t.mbar.group.m
-    menu $m -postcommand "SetupGroupMenu $m $handler" -tearoff 1
-    $m add command -label $t(create_in_win)... \
-	    -command "GroupMessageList $handler"
-    set b($m,[$m index end]) create_in_win
-    lappend fh(menu_nokeep) [list $m [$m index end]]
-    $m add command -label $t(create_by_expr)... -command "ExpCreate $handler"
-    set b($m,[$m index end]) create_by_expr
-    lappend fh(menu_nokeep) [list $m [$m index end]]
-    $m add cascade -label $t(use_saved_expr) -menu $m.saved
-    set b($m,[$m index end]) use_saved_expr
-    lappend fh(menu_nokeep) [list $m [$m index end]]
-    menu $m.saved -postcommand "ExpBuildMenu $m.saved $handler"
-    $m add command -label $t(clear_group) -command "GroupClear $handler"
-    set b($m,[$m index end]) clear_group
-    $m add separator
-    $m add command -label $t(delete) -command "SetFlag \
-	    $handler deleted 1 \[\$${handler}(folder_handler) flagged flagged\]"
-    set b($m,[$m index end]) delete_group
-    $m add command -label $t(undelete) -command "SetFlag \
-	    $handler deleted 0 \[\$${handler}(folder_handler) flagged flagged\]"
-    set b($m,[$m index end]) undelete_group
-    $m add command -label $t(print) -command "Print $handler group"
-    set b($m,[$m index end]) print_group
-    $m add cascade -label $t(move) -menu $m.move
-    set b($m,[$m index end]) move_group
-    menu $m.move -postcommand "PostMove $handler group $m.move"
-
-    # Admin menu
-    menubutton $w.t.mbar.admin -menu $w.t.mbar.admin.m -text $t(admin) \
-			     -underline $a(admin)
-    set b($w.t.mbar.admin) admin_menu
-    set m $w.t.mbar.admin.m
-    menu $m -tearoff 1
     $m add checkbutton -label $t(browse_mode) -variable ${handler}(browse)
     set b($m,[$m index end]) browse_mode
     $m add command -label $t(update_folder) \
@@ -306,26 +155,69 @@ proc FolderWindowInit {w toopen} {
 	              Sync $handler update}"
     set b($m,[$m index end]) netsync_folder
     set fh(netsync_folder_menu) [list $m [$m index end]]
+    $m add command -label $t(netsync) -command "RatBusy NetworkSync"
+    set b($m,[$m index end]) netsync
+    set fh(netsync_all_menu) [list $m [$m index end]]
+    $m add command
+    lappend tkrat_menus $m
+    set fh(online_menu) [list $m [$m index end]]
+    set tkrat_online_index [$m index end]
     $m add separator
-    $m add command -label $t(newedit_folder)... -command VFolderDef
-    set b($m,[$m index end]) newedit_folder
-    $m add command -label $t(aliases)... -command Aliases
-    set b($m,[$m index end]) aliases
-    $m add command -label $t(preferences)... -command Preferences
-    set b($m,[$m index end]) preferences
-    $m add command -label $t(define_keys)... -command "KeyDef folder"
-    set b($m,[$m index end]) define_keys
-    $m add command -label $t(saved_expr)... -command "ExpHandleSaved $handler"
-    set b($m,[$m index end]) saved_expr
-    $m add command -label $t(purge_pwcache) -command RatPurgePwChache
-    set b($m,[$m index end]) purge_pwcache
-    $m add command -label $t(reimport_all) -command VFolderReimportAll
-    set b($m,[$m index end]) reimport_all
+    $m add command -label $t(see_log)... -command SeeLog
+    set b($m,[$m index end]) see_log
+    $m add command -label $t(close) -command "DestroyFolderWin $handler 0"
+    set fh(close_menu) [list $m [$m index end]]
+    set b($m,[$m index end]) close_folder
+    $m add command -label $t(quit) -command "Quit $handler"
+    set fh(quit_menu) [list $m [$m index end]]
+    set b($m,[$m index end]) quit
+    
+    # Folder menu
+    menubutton $w.t.mbar.folder -menu $w.t.mbar.folder.m -text $t(folders) \
+			      -underline $a(folders)
+    menu $w.t.mbar.folder.m \
+	    -postcommand "PostFolder $handler $w.t.mbar.folder.m" -tearoff 1
+    set b($w.t.mbar.folder) folder_menu
+
+    # Message menu
+    menubutton $w.t.mbar.message -menu $w.t.mbar.message.m -text $t(message) \
+	-underline $a(message)
+    set b($w.t.mbar.message) message_menu
+    set m $w.t.mbar.message.m
+    menu $m -tearoff 0 -postcommand "PostMessageMenu $handler $m"
+
+    # Show menu
+    menubutton $w.t.mbar.show -menu $w.t.mbar.show.m -text $t(show) \
+			      -underline $a(show)
+    set b($w.t.mbar.show) show_menu
+    set m $w.t.mbar.show.m
+    menu $m -tearoff 1
+    $m add radiobutton -label $t(no_wrap) \
+        -variable ${handler}(wrap_mode) -value none \
+        -command [list SetWrapMode $handler]
+    set b($m,[$m index end]) show_no_wrap
+    $m add radiobutton -label $t(wrap_char) \
+        -variable ${handler}(wrap_mode) -value char \
+        -command [list SetWrapMode $handler]
+    set b($m,[$m index end]) show_wrap_char
+    $m add radiobutton -label $t(wrap_word) \
+        -variable ${handler}(wrap_mode) -value word \
+        -command [list SetWrapMode $handler]
+    set b($m,[$m index end]) show_wrap_word
     $m add separator
-    $m add cascade -label $t(role) -menu $m.role
-    set b($m,[$m index end]) folder_select_role
-    menu $m.role -postcommand \
-	    [list PostRoles $handler $m.role [list UpdateFolderTitle $handler]]
+    $m add radiobutton -label $t(show_all_headers) \
+        -variable $fh(text)(show_header) -value all \
+        -command [list SetShowHeaders $handler]
+    set b($m,[$m index end]) show_all_headers
+    $m add radiobutton -label $t(show_selected_headers) \
+        -variable $fh(text)(show_header) -value selected \
+        -command [list SetShowHeaders $handler]
+    set b($m,[$m index end]) show_selected_headers
+    $m add radiobutton -label $t(show_no_headers) \
+        -variable $fh(text)(show_header) -value no \
+        -command [list SetShowHeaders $handler]
+    set b($m,[$m index end]) show_no_headers
+    $m add separator
     $m add cascade -label $t(sort_order) -menu $m.sort
     set b($m,[$m index end]) sort_order_folder
     lappend fh(menu_nokeep) [list $m [$m index end]]
@@ -333,11 +225,121 @@ proc FolderWindowInit {w toopen} {
     foreach o {threaded subject subjectonly senderonly sender folder
 	       reverseFolder date reverseDate size reverseSize} {
 	$m.sort add radiobutton -label $t(sort_$o) \
-		-variable ${handler}(sort) -value $o \
-		-command "\$${handler}(folder_handler) setSortOrder $o; \
-		RatBusy {Sync $handler update}"
+            -variable ${handler}(folder_sort) -value $o \
+            -command [list SetSortOrder $handler]
 	set b($m.sort,[$m.sort index end]) sort_$o
     }
+
+    # Group menu
+    menubutton $w.t.mbar.group -menu $w.t.mbar.group.m -text $t(group) \
+			      -underline $a(group)
+    set b($w.t.mbar.group) group_menu
+    set m $w.t.mbar.group.m
+    menu $m -postcommand "SetupGroupMenu $m $handler" -tearoff 1
+    $m add command -label $t(create_in_win)... \
+	    -command "GroupMessageList $handler"
+    set b($m,[$m index end]) create_in_win
+    $m add command -label $t(create_by_expr)... -command "ExpCreate $handler"
+    set b($m,[$m index end]) create_by_expr
+    $m add cascade -label $t(use_saved_expr) -menu $m.saved
+    set b($m,[$m index end]) use_saved_expr
+    menu $m.saved -postcommand "ExpBuildMenu $m.saved $handler"
+    $m add command -label $t(clear_group) -command "GroupClear $handler"
+    set b($m,[$m index end]) clear_group
+    $m add separator
+    $m add command -label $t(forward_separately) \
+        -command "ForwardGroupSeparately \[GetMsgSet $handler group\] \
+                  \$${handler}(role)"
+    set b($m,[$m index end]) forward_separately
+    $m add command -label $t(forward_in_one) \
+        -command "ForwardGroupInOne \[GetMsgSet $handler group\] \
+                  \$${handler}(role)"
+    set b($m,[$m index end]) forward_in_one
+    $m add command -label $t(bounce_messages) \
+        -command "BounceMessages \[GetMsgSet $handler group\] \
+                  \$${handler}(role)"
+    set b($m,[$m index end]) bounce_messages
+    $m add command -label $t(extract_adr)... \
+        -command "AliasExtract $handler \[GetMsgSet $handler group\]"
+    set b($m,[$m index end]) extract_adr
+    $m add separator
+    $m add command -label $t(print) -command "Print $handler group"
+    set b($m,[$m index end]) print_group
+    $m add cascade -label $t(move) -menu $m.move
+    set b($m,[$m index end]) move_group
+    menu $m.move -postcommand "PostMove $handler 1 group $m.move"
+    $m add cascade -label $t(copy) -menu $m.copy
+    set b($m,[$m index end]) copy_group
+    menu $m.copy -postcommand "PostMove $handler 0 group $m.copy"
+    $m add separator
+    $m add command -label $t(delete) -command \
+        "SetFlag $handler deleted 1 \
+                         \[\$${handler}(folder_handler) flagged flagged 1\]"
+    set b($m,[$m index end]) delete_group
+    $m add command -label $t(undelete) -command \
+        "SetFlag $handler deleted 0 \
+                         \[\$${handler}(folder_handler) flagged flagged 1\]"
+    set b($m,[$m index end]) undelete_group
+    # Disable in drafts...
+    $m add command -label $t(mark_as_unread) -command \
+        "SetFlag $handler seem 0 \
+                         \[\$${handler}(folder_handler) flagged flagged 1\]"
+    set b($m,[$m index end]) mark_as_unread
+
+    $m add command -label $t(mark_as_read) -command \
+        "SetFlag $handler seen 1 \
+                         \[\$${handler}(folder_handler) flagged flagged 1\]"
+    set b($m,[$m index end]) mark_as_read
+
+    $m add command -label $t(mark_as_answered) -command \
+        "SetFlag $handler answered 0 \
+                         \[\$${handler}(folder_handler) flagged flagged 1\]"
+    set b($m,[$m index end]) mark_as_answered
+
+    $m add command -label $t(mark_as_unanswered) -command \
+        "SetFlag $handler answered 1 \
+                         \[\$${handler}(folder_handler) flagged flagged 1\]"
+    set b($m,[$m index end]) mark_as_unanswered
+
+    # Admin menu
+    menubutton $w.t.mbar.admin -menu $w.t.mbar.admin.m -text $t(admin) \
+			     -underline $a(admin)
+    set b($w.t.mbar.admin) admin_menu
+    set m $w.t.mbar.admin.m
+    menu $m -tearoff 1
+    $m add command -label $t(newedit_folder)... -command VFolderDef
+    set b($m,[$m index end]) newedit_folder
+    $m add command -label $t(addressbook)... -command Aliases
+    set b($m,[$m index end]) addressbook
+    $m add command -label $t(preferences)... -command Preferences
+    set b($m,[$m index end]) preferences
+    $m add command -label $t(define_keys)... -command "KeyDef folder"
+    set b($m,[$m index end]) define_keys
+    $m add command -label $t(saved_expr)... -command "ExpHandleSaved $handler"
+    set b($m,[$m index end]) saved_expr
+    $m add command -label $t(setup_netsync)... -command SetupNetworkSync
+    set b($m,[$m index end]) setup_netsync
+    $m add command -label $t(purge_pwcache) -command RatPurgePwChache
+    set b($m,[$m index end]) purge_pwcache
+    $m add cascade -label $t(reread) -menu $m.reread
+    $m add cascade -label $t(dbase) -menu $m.dbase
+
+    set rm $m.reread
+    menu $rm
+    $rm add command -label $t(reimport_all) -command VFolderReimportAll
+    set b($rm,[$rm index end]) reimport_all
+    $rm add command -label $t(reread_userproc) -command ReadUserproc
+    set b($rm,[$rm index end]) reread_userproc
+    $rm add command -label $t(reread_mailcap) -command RatMailcapReload
+    set b($rm,[$rm index end]) reread_mailcap
+
+    menu $m.dbase
+    $m.dbase add command -label $t(check_dbase)... \
+	    -command "RatBusy \"DbaseCheck 0\""
+    set b($m.dbase,[$m.dbase index end]) check_dbase
+    $m.dbase add command -label $t(check_fix_dbase)... \
+	    -command "RatBusy \"DbaseCheck 1\""
+    set b($m.dbase,[$m.dbase index end]) check_fix_dbase
 
     # Help menu
     menubutton $w.t.mbar.help -menu $w.t.mbar.help.m -text $t(help) \
@@ -359,24 +361,14 @@ proc FolderWindowInit {w toopen} {
     $m add command -label $t(send_bug)... -command SendBugReport
     set b($m,[$m index end]) send_bug
 
-    # The structure menu (constructed by the Show routine)
+    # The structure menu (populated by the Show routine)
     menu $texth(struct_menu) -tearoff 0
 
     # Information
     button $w.t.mbar.netstatus -image $online_img -bd 0 -width 32
     lappend tkrat_online_imgs $w.t.mbar.netstatus
-    label $w.t.mbar.lpar -text "(" -padx 0 -bd 0
-    label $w.t.mbar.ndef -textvariable numDeferred -font $fixedNormFont \
-	    -padx 0 -bd 0
-    label $w.t.mbar.ndefl -text "$t(d) " -padx 0
-    label $w.t.mbar.nhld -textvariable numHeld -font $fixedNormFont -padx 0 \
-	    -bd 0
-    label $w.t.mbar.nhldl -text $t(h) -padx 0
-    label $w.t.mbar.rpar -text ")  " -padx 0 -bd 0
-    set b($w.t.mbar.ndef) num_deferred
-    set b($w.t.mbar.ndefl) num_deferred
-    set b($w.t.mbar.nhld) num_held
-    set b($w.t.mbar.nhldl) num_held
+    label $w.t.mbar.status -textvariable ${handler}(folder_status)
+    set b($w.t.mbar.status) folder_status
 
     # Pack the menus into the menu bar
     pack $w.t.mbar.tkrat \
@@ -386,39 +378,39 @@ proc FolderWindowInit {w toopen} {
 	 $w.t.mbar.group \
 	 $w.t.mbar.admin -side left -padx 5
     pack $w.t.mbar.help -side right -padx 5
-    pack $w.t.mbar.rpar \
-         $w.t.mbar.nhldl \
-         $w.t.mbar.nhld \
-         $w.t.mbar.ndefl \
-         $w.t.mbar.ndef \
-         $w.t.mbar.lpar \
-	 $w.t.mbar.netstatus -side right
+    pack $w.t.mbar.netstatus $w.t.mbar.status -side right
 
     # The information part
     frame $w.t.info -relief raised -bd 1
     label $w.t.info.flabel -text $t(name):
     label $w.t.info.fname -textvariable ${handler}(folder_name) \
-        -font $fixedNormFont -anchor w
-    label $w.t.info.slabel -text $t(size):
-    label $w.t.info.size -textvariable ${handler}(folder_size) -width 5 \
 	-anchor w -font $fixedNormFont
-    label $w.t.info.mlabel -text $t(messages):
-    label $w.t.info.messages -textvariable ${handler}(folder_messages) \
-	-width 4 -anchor w -font $fixedNormFont
-    label $w.t.info.nlabel -text $t(new):
-    label $w.t.info.new -textvariable ${handler}(folder_new) \
-	-width 4 -anchor w -font $fixedNormFont
-    pack $w.t.info.new \
-         $w.t.info.nlabel \
-         $w.t.info.messages \
-         $w.t.info.mlabel \
-         $w.t.info.size \
-         $w.t.info.slabel -side right
+    set fh(filter_clear) $w.t.info.clear
+    set fh(filter_apply) $w.t.info.apply
+    button $fh(filter_clear) -text $t(clear) -bd 1 -highlightthickness 0 \
+        -command [list FilterClear $handler] -state disabled
+    button $fh(filter_apply) -text $t(apply) -bd 1 -highlightthickness 0 \
+        -command [list FilterApply $handler] -state disabled
+    entry $w.t.info.filter -width 25 -bd 1 -textvariable ${handler}(filter)
+    set fh(filter_entry) $w.t.info.filter
+    label $w.t.info.filterl -text $t(filter):
+    ::tkrat::winctl::InstallMnemonic $w.t.info.filterl $a(filter) \
+        $fh(filter_entry)
+
+    # Override keyboard bindings...
+    bind KbdBlock <KeyPress> {break}
+    bind KbdBlock <KeyRelease> {break}
+    bindtags $fh(filter_entry) [list $fh(filter_entry) Entry KbdBlock $w all]
+
     pack $w.t.info.flabel -side left
     pack $w.t.info.fname -side left -fill x -expand 1
+    pack $fh(filter_clear) \
+        $fh(filter_apply) \
+        $fh(filter_entry) \
+        $w.t.info.filterl -side right
     set b($w.t.info.fname) current_folder_name
-    set b($w.t.info.size) current_folder_size
-    set b($w.t.info.messages) current_folder_nummsg
+
+    bind $fh(filter_entry) <Return> "$fh(filter_apply) invoke; break"
 
     # The message list
     frame $w.t.messlist
@@ -441,7 +433,7 @@ proc FolderWindowInit {w toopen} {
 	    -background [$fh(message_list) cget -selectbackground]
     if { 4 < [winfo cells $fh(message_list)]} {
 	$fh(message_list) tag configure sel -background #ffff80
-	$fh(message_list) tag configure Found -background #ffff80
+	$fh(message_list) tag configure Found -background #ffff00
     } else {
 	$fh(message_list) tag configure sel -underline 1
 	$fh(message_list) tag configure Found -borderwidth 2 -relief raised
@@ -449,11 +441,13 @@ proc FolderWindowInit {w toopen} {
     $fh(message_list) tag raise sel
     pack $fh(message_scroll) -side right -fill y
     pack $fh(message_list) -side left -expand 1 -fill both
-    set b($fh(message_list)) list_of_messages
+
+    # The context menu (populated by FolderContextMenu)
+    menu $fh(context_menu) -tearoff 0
 
     # The status line
     label $w.statustext -textvariable statusText -relief raised \
-	    -bd 1 -font $propLightFont -width 80
+	    -bd 1 -width 80
     set b($w.statustext) status_text
     
     # The command buttons
@@ -461,7 +455,7 @@ proc FolderWindowInit {w toopen} {
     menubutton $w.b.buttons.move -text $t(move) -bd 1 -relief raised \
 	    -menu $w.b.buttons.move.m -indicatoron 1
     menu $w.b.buttons.move.m \
-	    -postcommand "PostMove $handler current $w.b.buttons.move.m"
+	    -postcommand "PostMove $handler 1 current $w.b.buttons.move.m"
     button $w.b.buttons.delete -text $t(delete) -bd 1 -highlightthickness 0 \
 	    -command "SetFlag $handler deleted 1; FolderNext $handler"
     button $w.b.buttons.compose -text $t(compose)... -highlightthickness 0 \
@@ -485,8 +479,8 @@ proc FolderWindowInit {w toopen} {
     set b($w.b.buttons.move) move_msg
     set b($w.b.buttons.delete) delete_msg
     set b($w.b.buttons.compose) compose_msg
-    set b($w.b.buttons.reply_sender) reply_to_sender
-    set b($w.b.buttons.reply_all) reply_to_all
+    set b($w.b.buttons.reply_sender) reply_sender
+    set b($w.b.buttons.reply_all) reply_all
 
     # The actual text
     frame $w.b.text -relief raised -bd 1
@@ -497,14 +491,13 @@ proc FolderWindowInit {w toopen} {
     text $fh(text) \
 	-yscroll "RatScrollShow $w.b.text.text $w.b.text.scroll" \
         -relief raised \
-        -wrap $option(wrap_mode) \
+        -wrap $fh(wrap_mode) \
 	-bd 0 \
 	-highlightthickness 0 \
-        -setgrid true
+	-setgrid 1
     $fh(text) mark set searched 1.0
     pack $w.b.text.scroll -side right -fill y
     pack $w.b.text.text -side left -expand yes -fill both
-    set b($fh(text)) body_of_message
 
     # Pack all the parts into the window
     pack $w.t.mbar -side top -fill x
@@ -525,7 +518,7 @@ proc FolderWindowInit {w toopen} {
 	     place configure $w.handle -x \$${handler}(Y1)"
     bind $w.handle <B1-Motion> \
 	"FolderPane $handler \[expr (%Y-\$${handler}(Y0))/\$${handler}(H).0\]"
-    FolderPane $handler [GetPane folderPane]
+    FolderPane $handler [::tkrat::winctl::GetPane folderWindow]
 
     place $w.t -relwidth 1
     place $w.b -relwidth 1 -rely 1 -anchor sw
@@ -537,38 +530,46 @@ proc FolderWindowInit {w toopen} {
 
     # Do bindings
     focus $w
+    bind $w <1> "if {\"%W\" != \"$fh(filter_entry)\"} {focus $w}"
     bind $fh(message_list) <1> \
-	    "FolderSelect $w.t.messlist.list $handler \
-		    \[expr int(\[%W index @%x,%y\])-1\] 0"
-    bind $fh(message_list) <Double-1> \
-	    "FolderSelect $w.t.messlist.list $handler \
-		    \[expr int(\[%W index @%x,%y\])-1\] 1; break"
+	    "FolderSelect $handler \[expr int(\[%W index @%x,%y\])-1\]"
+    bind $fh(message_list) <Double-1> "FolderDouble $handler; break"
     bind $fh(message_list) <Triple-1> break
-    bind $fh(message_list) <B1-Motion> break
-    bind $fh(message_list) <Shift-1> break
     bind $fh(message_list) <Double-Shift-1> break
     bind $fh(message_list) <Triple-Shift-1> break
     bind $fh(message_list) <B1-Leave> break
-    bind $fh(message_list) <3> "FolderB3Event $handler \[%W index @%x,%y\]"
-    bind $fh(message_list) <B3-Motion> \
-	    "FolderB3Motion $handler \[%W index @%x,%y\]"
-    bind $fh(message_list) <Shift-3> \
-	    "FolderSB3Event $handler \[%W index @%x,%y\]"
+    bind $fh(message_list) <B1-Motion> break
+    bind $fh(message_list) <Shift-1> \
+	"FolderFlagEvent $handler \[%W index @%x,%y\]; break"
+    bind $fh(message_list) <Shift-B1-Motion> \
+	"FolderFlagMotion $handler \[%W index @%x,%y\]; break"
+    bind $fh(message_list) <Control-1> \
+	"FolderFlagEvent $handler \[%W index @%x,%y\]; break"
+    bind $fh(message_list) <Control-B1-Motion> \
+	"FolderFlagMotion $handler \[%W index @%x,%y\]; break"
+    bind $fh(message_list) <2> "FolderFlagEvent $handler \[%W index @%x,%y\]"
+    bind $fh(message_list) <Shift-2> \
+	"FolderFlagRange $handler \[%W index @%x,%y\]"
+    bind $fh(message_list) <B2-Motion> \
+	"FolderFlagMotion $handler \[%W index @%x,%y\]"
+    bind $fh(message_list) <3> "FolderContextMenu $handler %x %y %X %Y"
     bind $fh(text) <Map> "FolderMap $handler"
     bind $fh(text) <Unmap> "FolderUnmap $handler"
-    bind $fh(text) <Destroy> "DestroyFolderWin $handler"
+    bind $fh(text) <Destroy> "DestroyFolderWin $handler 1"
+    bind $fh(text) <Configure> {ResizeBodyText %W %w}
     FolderBind $handler
-    wm protocol $fh(toplevel) WM_DELETE_WINDOW "DestroyFolderWin $handler"
+    wm protocol $fh(toplevel) WM_DELETE_WINDOW "DestroyFolderWin $handler 1"
 
     # Calculate font width
     if {![info exists defaultFontWidth]} {
 	CalculateFontWidth $fh(text)
     }
 
-    SetOnlineStatus $option(online)
+    trace variable fh(filter) w [list FilterChanged $handler]
 
     # Do things which are done just when the first folder window is opened
     if {![info exists folderWindowList]} {
+        RatLibSetOnlineMode $option(online)
 	update idletasks
 
 	RatBusy {
@@ -587,18 +588,69 @@ proc FolderWindowInit {w toopen} {
 
 	    # Open monitored folders
 	    FolderStartMonitor $toopen
-
-	    # Send deferred messages (if online)
-	    if {$option(online) && 0 < $numDeferred} {
-		SendDeferred
-	    }
 	}
 
     }
 
+    SetOnlineStatus $option(online)
+
     set folderWindowList($handler) ""
 
     return $handler
+}
+
+# UpdateFolderStatus --
+#
+# Updates the show status of this folder window
+#
+# Arguments:
+# handler - The handler which identifies the folder window
+# new      - Number of new messages
+# messages - Number of messages
+# size     - Size of mailbox (-1 for unknown)
+
+proc UpdateFolderStatus {handler new messages size} {
+    upvar \#0 $handler fh
+
+    set fh(old_messages) $messages
+    set fh(old_size) $size
+
+    if {-1 == $size} {
+        set s "?"
+    } else {
+        set s [RatMangleNumber $size]
+    }
+    set fh(folder_status) "$new / $messages / $s"
+}
+
+# UpdateFolderStatusNew --
+#
+# Updates the new messages count in the show status of this folder window
+#
+# Arguments:
+# handler - The handler which identifies the folder window
+# new      - Number of new messages
+
+proc UpdateFolderStatusNew {handler new} {
+    upvar \#0 $handler fh
+
+    UpdateFolderStatus $handler $new $fh(old_messages) $fh(old_size)
+}
+
+# ResizeBodyText --
+#
+# Handle resizing of the body text widget
+#
+# Arguments:
+# w     - The handler which identifies the body text widget
+# width - The new width
+
+proc ResizeBodyText {w width} {
+    upvar \#0 $w texth
+
+    foreach c $texth(width_adjust) {
+        $c configure -width $width
+    }
 }
 
 # PostTkRat --
@@ -608,8 +660,8 @@ proc FolderWindowInit {w toopen} {
 # Arguments:
 # handler - The handler which identifies the folder window
 
-proc PostTkRat {handler} {
-    upvar #0 $handler fh
+proc PostTkRatMenu {handler} {
+    upvar \#0 $handler fh
     global folderWindowList
 
     if {1 == [array size folderWindowList]} {
@@ -619,6 +671,175 @@ proc PostTkRat {handler} {
     }
     [lindex $fh(close_menu) 0] entryconfigure [lindex $fh(close_menu) 1] \
 	    -state $state
+}
+
+# PostMessageMenu --
+#
+# Post-command for Message menu
+#
+# Arguments:
+# handler - The handler which identifies the folder window
+# m       - Menu to populat
+
+proc PostMessageMenu {handler m} {
+    upvar \#0 $handler fh
+
+    if {![info exists fh(folder_handler)]} {
+	return
+    }
+
+    if {"" == $fh(list_index)} {
+        set msg ""
+    } else {
+        set msg $fh(current_msg)
+    }
+
+    BuildMessageMenu $handler $m $msg
+}
+
+# BuildMessageMenu --
+#
+# Populate the message menu
+#
+# Arguments:
+# handler - The handler which identifies the folder window
+# m       - Menu to populate
+# msg     - The current message
+
+proc BuildMessageMenu {handler m msg} {
+    upvar \#0 $handler fh
+    global t b accelerator
+
+    set msgsel_state normal
+    set delete_state normal
+    set undelete_state disabled
+    set markunread_state disabled
+    set markread_state normal
+    set answered_state normal
+    set unanswered_state disabled
+    set dela_state disabled
+    set fi [$fh(folder_handler) find $msg]
+    if {-1 == $fi} {
+        set delete_state disabled
+	set msgsel_state disabled
+        set markread_state disabled
+        set answered_state disabled
+    } else {
+        if {1 == [$fh(folder_handler) getFlag $fi deleted]} {
+            set delete_state disabled
+            set undelete_state normal
+        }
+        if {1 == [$fh(folder_handler) getFlag $fi seen]} {
+            set markunread_state normal
+            set markread_state disabled
+        }
+        if {1 == [$fh(folder_handler) getFlag $fi answered]} {
+            set unanswered_state normal
+            set answered_state disabled
+        }
+        set body [$msg body]
+        if {"MULTIPART" == [lindex [$body type] 0]} {
+            set dela_state normal
+        }
+    }
+
+    $m delete 0 end
+
+    if {"drafts" == $fh(special_folder)} {
+	$m add command -label $t(continue_composing)... -state $msgsel_state \
+            -command "\
+	    ComposeContinue $msg; \
+            SetFlag $handler deleted 1 $fi"
+    } else {
+	$m add command -label $t(reply_sender)... -state $msgsel_state \
+            -accelerator $accelerator(folder_key_replys) \
+	    -command "ComposeReply $msg sender $fh(role) \
+                      \"FolderReplySent $handler $msg\""
+	set b($m,[$m index end]) reply_sender
+
+	$m add command -label $t(reply_all)... -state $msgsel_state \
+            -accelerator $accelerator(folder_key_replya) \
+	    -command "ComposeReply $msg all $fh(role) \
+                      \"FolderReplySent $handler $msg\""
+	set b($m,[$m index end]) reply_all
+    }
+
+    $m add command -label $t(forward_inline)... -state $msgsel_state \
+        -accelerator $accelerator(folder_key_forward_i) \
+        -command "ComposeForwardInline $msg $fh(role)"
+    set b($m,[$m index end]) forward_inline
+    
+    $m add command -label $t(forward_as_attachment)... \
+        -state $msgsel_state \
+        -accelerator $accelerator(folder_key_forward_a) \
+        -command "ComposeForwardAttachment $msg $fh(role)"
+    set b($m,[$m index end]) forward_attached
+
+    if {"drafts" != $fh(special_folder)} {
+	$m add command -label $t(bounce)... -state $msgsel_state \
+            -accelerator $accelerator(folder_key_bounce) \
+	    -command "ComposeBounce $msg $fh(role)"
+	set b($m,[$m index end]) bounce
+
+	$m add command -label $t(extract_adr)... -state $msgsel_state \
+	    -command "AliasExtract $handler $msg"
+	set b($m,[$m index end]) extract_adr
+    }
+
+    $m add command -label $t(delete_attachments)... -state $dela_state \
+        -command "::tkrat::delattachments::delete $msg $handler"
+
+    $m add separator
+
+    $m add command -label $t(print)... -command "Print $handler $msg" \
+        -state $msgsel_state -accelerator $accelerator(folder_key_print)
+    set b($m,[$m index end]) print
+
+    if {"drafts" != $fh(special_folder)} {
+	$m add cascade -label $t(move) -menu $m.move -state $msgsel_state
+	set b($m,[$m index end]) move
+	if {![winfo exists $m.move]} {
+	    menu $m.move
+	}
+        $m.move configure -postcommand "PostMove $handler 1 $msg $m.move"
+    }
+
+    $m add cascade -label $t(copy) -menu $m.copy -state $msgsel_state
+    set b($m,[$m index end]) copy_msg
+    if {![winfo exists $m.copy]} {
+        menu $m.copy
+    }
+    $m.copy configure -postcommand "PostMove $handler 0 $msg $m.copy"
+    $m add separator
+
+    $m add command -label $t(delete) -state $delete_state \
+	-command "SetFlag $handler deleted 1 $fi" \
+        -accelerator $accelerator(folder_key_delete)
+    set b($m,[$m index end]) delete
+
+    $m add command -label $t(undelete) -state $undelete_state \
+	-command "SetFlag $handler deleted 0 $fi" \
+        -accelerator $accelerator(folder_key_undelete)
+    set b($m,[$m index end]) undelete
+
+    if {"drafts" != $fh(special_folder)} {
+        $m add command -label $t(mark_as_unread) -state $markunread_state \
+            -command "SetFlag $handler seen 0 $fi" \
+            -accelerator $accelerator(folder_key_markunread)
+        set b($m,[$m index end]) mark_as_unread
+
+        $m add command -label $t(mark_as_read) -state $markread_state \
+            -command "SetFlag $handler seen 1 $fi"
+        set b($m,[$m index end]) mark_as_read
+
+        $m add command -label $t(mark_as_answered) -state $answered_state \
+            -command "SetFlag $handler answered 1 $fi"
+        set b($m,[$m index end]) mark_as_answered
+
+        $m add command -label $t(mark_as_unanswered) -state $unanswered_state \
+            -command "SetFlag $handler answered 0 $fi"
+        set b($m,[$m index end]) mark_as_unanswered
+    }
 }
 
 # FolderStartMonitor --
@@ -685,12 +906,14 @@ proc FolderFailedOpen {op def} {
 # y       - Y position of dividing line
 
 proc FolderPane {handler y} {
-    upvar #0 $handler fh
+    upvar \#0 $handler fh
+
+    if {$y < 0.01 || 0.99 < $y}  return
+        # Prevents placing into inaccessibility (off the window).
+
     set w $fh(w)
     set fh(pane) $y
 
-    if {$y < 0.1 || 0.9 < $y}  return
-        # Prevents placing into inaccessibility (off the window).
     place $w.t -relheight $y
     place $w.b -relheight [expr {1.0 - $y}]
     place $w.statustext -rely $y
@@ -705,35 +928,36 @@ proc FolderPane {handler y} {
 # handler - The handler which identifies the fodler window
 
 proc FolderBind {handler} {
-    upvar #0 $handler fh
+    upvar \#0 $handler fh
 
-    RatBind $fh(w) folder_key_compose   "Compose \$${handler}(role)" \
-	    $fh(compose_menu)
-    RatBind $fh(w) folder_key_close	"\
-	    if {1 == \[array size folderWindowList]} {\
-	        bell \
-	    } else { \
-	        CloseFolderWin $handler \
-	    }" $fh(close_menu)
-    RatBind $fh(w) folder_key_online \
-	    "[lindex $fh(online_menu) 0] invoke [lindex $fh(online_menu) 1]" \
-	    $fh(online_menu)
+    RatBindMenu $fh(w) folder_key_close $fh(close_menu)
+    RatBindMenu $fh(w) folder_key_online $fh(online_menu)
+    RatBindMenu $fh(w) folder_key_quit $fh(quit_menu)
+    RatBindMenu $fh(w) folder_key_sync $fh(sync_menu)
+    RatBindMenu $fh(w) folder_key_netsync $fh(netsync_all_menu)
+    RatBindMenu $fh(w) folder_key_update $fh(update_menu)
+    RatBindMenu $fh(w) folder_key_compose $fh(compose_menu)
+    RatBindMenu $fh(w) folder_key_find $fh(find_menu)
+    RatBind $fh(w) folder_key_delete \
+        "SetFlag $handler deleted 1; FolderNext $handler"
+    RatBind $fh(w) folder_key_undelete \
+        "SetFlag $handler deleted 0; FolderNext $handler"
+    RatBind $fh(w) folder_key_replya "FolderReply $handler all"
+    RatBind $fh(w) folder_key_replys "FolderReply $handler sender"
+    RatBind $fh(w) folder_key_forward_i \
+        "FolderSomeCompose $handler ComposeForwardInline"
+    RatBind $fh(w) folder_key_forward_a \
+        "FolderSomeCompose $handler ComposeForwardAttachment"
+    RatBind $fh(w) folder_key_bounce "FolderSomeCompose $handler ComposeBounce"
+    RatBind $fh(w) folder_key_markunread \
+        "SetFlag $handler seen 0; FolderNext $handler"
+    RatBind $fh(w) folder_key_print "Print $handler current"
+
     RatBind $fh(w) folder_key_openfile \
-	    "PostFolderOpen $handler \[SelectFileFolder $fh(toplevel)\]"
-    RatBind $fh(w) folder_key_quit	"Quit $handler" $fh(quit_menu)
-    RatBind $fh(w) folder_key_nextu	"FolderSelectUnread $handler; break"
-    RatBind $fh(w) folder_key_sync	"RatBusy {Sync $handler sync}" \
-	    $fh(sync_menu)
-    RatBind $fh(w) folder_key_netsync	"RatBusy NetworkSync" \
-	    $fh(netsync_all_menu)
-    RatBind $fh(w) folder_key_update    "RatBusy {Sync $handler update}" \
-	    $fh(update_menu)
-    RatBind $fh(w) folder_key_delete    "SetFlag $handler deleted 1; \
-	    FolderNext $handler" $fh(delete_menu)
-    RatBind $fh(w) folder_key_undelete  "SetFlag $handler deleted 0; \
-	    FolderNext $handler" $fh(undelete_menu)
-    RatBind $fh(w) folder_key_flag	"SetFlag $handler flagged toggle; \
-	    FolderNext $handler"
+	"PostFolderOpen $handler \[SelectFileFolder $fh(toplevel)\]"
+    RatBind $fh(w) folder_key_nextu "FolderSelectUnread $handler; break"
+    RatBind $fh(w) folder_key_flag \
+	"SetFlag $handler flagged toggle; FolderNext $handler"
     RatBind $fh(w) folder_key_next	"FolderNext $handler"
     RatBind $fh(w) folder_key_prev	"FolderPrev $handler"
     RatBind $fh(w) folder_key_home	"ShowHome $fh(text)"
@@ -742,23 +966,9 @@ proc FolderBind {handler} {
     RatBind $fh(w) folder_key_pageup    "ShowPageUp $fh(text)"
     RatBind $fh(w) folder_key_linedown  "ShowLineDown $fh(text)"
     RatBind $fh(w) folder_key_lineup    "ShowLineUp $fh(text)"
-    RatBind $fh(w) folder_key_replya    "FolderReply $handler all" \
-	    $fh(replya_menu)
-    RatBind $fh(w) folder_key_replys    "FolderReply $handler sender" \
-	    $fh(replys_menu)
-    RatBind $fh(w) folder_key_forward_i \
-	    "FolderSomeCompose $handler ComposeForwardInline" \
-	    $fh(forward_i_menu)
-    RatBind $fh(w) folder_key_forward_a \
-	    "FolderSomeCompose $handler ComposeForwardAttachment" \
-	    $fh(forward_a_menu)
-    RatBind $fh(w) folder_key_bounce \
-	    "FolderSomeCompose $handler ComposeBounce" $fh(bounce_menu)
     RatBind $fh(w) folder_key_cycle_header "CycleShowHeader $handler"
-    RatBind $fh(w) folder_key_find  "FolderFind $handler" $fh(find_menu)
-    RatBind $fh(w) folder_key_markunread "SetFlag $handler seen 0; \
-	    FolderNext $handler" $fh(markunread_menu)
-    RatBind $fh(w) folder_key_print "Print $handler current" $fh(print_menu)
+    RatBind $fh(w) folder_key_mvdb \
+	"PostFolderOpen $handler \[SelectDbaseFolder $fh(toplevel)\]"
 }
 
 
@@ -772,18 +982,17 @@ proc FolderBind {handler} {
 
 proc FolderWindowClear {handler} {
     global folderWindowList option
-    upvar #0 $handler fh
+    upvar \#0 $handler fh
 
     set fh(folder_name) ""
     UpdateFolderTitle $handler
-    set fh(folder_messages) ""
-    set fh(folder_size) ""
+    UpdateFolderStatus $handler 0 0 0
     ShowNothing $fh(text)
-    catch {unset fh(current); unset fh(folder_handler)}
+    catch {unset fh(current_msg); unset fh(folder_handler)}
     $fh(message_list) configure -state normal
     $fh(message_list) delete 1.0 end
     $fh(message_list) configure -state disabled
-    set fh(active) ""
+    set fh(list_index) ""
     FolderButtons $handler 0
     set folderWindowList($handler) ""
 }
@@ -806,7 +1015,7 @@ proc FolderRead {handler foldercmd name} {
 
 proc FolderReadDo {handler foldercmd name} {
     global option inbox t folderWindowList folderExists folderUnseen
-    upvar #0 $handler fh
+    upvar \#0 $handler fh
 
     # First we expunge the old folder
     if {[info exists fh(folder_handler)]} {
@@ -837,21 +1046,17 @@ proc FolderReadDo {handler foldercmd name} {
     # Update our information
     set fh(folder_handler) $folder_handler
     set folderWindowList($handler) $folder_handler
-    set fh(sort) [$folder_handler getSortOrder]
+    set fh(folder_sort) [$folder_handler getSortOrder]
     set i [$fh(folder_handler) info]
-    set fh(folder_name) [lindex $i 0]    
-    set fh(role) [$fh(folder_handler) role]
+    set fh(folder_name) [lindex $i 0]
+    if {"" != [$fh(folder_handler) role]} {
+        set fh(role) [$fh(folder_handler) role]
+    }
     UpdateFolderTitle $handler
-    set fh(folder_messages) [RatMangleNumber $folderExists($folder_handler)]
-    set fh(folder_new) [RatMangleNumber $folderUnseen($folder_handler)]
-    set fh(num_messages) [lindex $i 1]
     FolderDrawList $handler
     set i [$fh(folder_handler) info]
-    if { -1 == [lindex $i 2]} {
-	set fh(folder_size) 0
-    } else {
-	set fh(folder_size) [RatMangleNumber [lindex $i 2]]
-    }
+    UpdateFolderStatus $handler $folderUnseen($fh(folder_handler)) \
+        $folderExists($fh(folder_handler)) [lindex $i 2]
     switch $option(folder_sort) {
 	reverseFolder {
 	    set dir -1
@@ -867,22 +1072,23 @@ proc FolderReadDo {handler foldercmd name} {
 	}
 	default {
 	    set dir 1
-	    set start [expr {$fh(size)-1}]
+	    set start [expr {$fh(num_messages)-1}]
 	}
     }
-    if { 0 != $fh(size)} {
+    if { 0 != $fh(num_messages)} {
 	switch $option(start_selection) {
 	    last {
-		set index [expr {$fh(size)-1}]
+		set index [expr {$fh(num_messages)-1}]
 	    }
 	    first_new {
 		set index [FolderGetNextUnread $handler $start $dir]
 	    }
 	    before_new {
 		set index [FolderGetNextUnread $handler $start $dir]
-		if { 0 == [$fh(folder_handler) getFlag $index seen]} {
+                set fi $fh(mapping,$index)
+		if { 0 == [$fh(folder_handler) getFlag $fi seen]} {
 		    incr index [expr -1 * $dir]
-		    if {$index < 0 || $index >= $fh(size)} {
+		    if {$index < 0 || $index >= $fh(num_messages)} {
 			incr index $dir
 		    }
 		}
@@ -894,7 +1100,8 @@ proc FolderReadDo {handler foldercmd name} {
     } else {
 	set index ""
     }
-    FolderSelect $fh(message_list) $handler $index 0
+
+    FolderSelect $handler $index
 
     set type [$folder_handler type]
     if {"dis" == $type} {
@@ -919,15 +1126,28 @@ proc FolderReadDo {handler foldercmd name} {
 # handler -	The handler which identifies the folder window
 
 proc FolderDrawList {handler} {
-    upvar #0 $handler fh
+    upvar \#0 $handler fh
     global option
 
+    set old_num_messages $fh(num_messages)
+    set fh(num_messages) 0
+    set folder_index 0
     $fh(message_list) configure -state normal
     $fh(message_list) delete 1.0 end
-    set lines [$fh(folder_handler) list $option(list_format)]
-    set fh(size) [llength $lines]
-    foreach l $lines {
-	$fh(message_list) insert end "$l\n"
+    set entries [$fh(folder_handler) list "%u $option(list_format)"]
+    set fh(uids) {}
+    array unset fh mapping,*
+    array unset fh rmapping,*
+    foreach e $entries {
+	regexp {^([^ ]*) (.*)} $e unused uid l
+        if {"" == $fh(filter) || [string match -nocase "*$fh(filter)*" $l]} {
+            $fh(message_list) insert end "$l\n"
+            set fh(mapping,$fh(num_messages)) $folder_index
+            set fh(rmapping,$folder_index) $fh(num_messages)
+            lappend fh(uids) $uid
+            incr fh(num_messages)
+        }
+        incr folder_index
     }
     $fh(message_list) delete end-1c
     foreach w $fh(groupMessageLists) {
@@ -943,18 +1163,19 @@ proc FolderDrawList {handler} {
 #
 # Arguments:
 # handler -	The handler which identifies the folder window
-# index   -	Index of the entry to refresh
+# index   -	Index of the entry to refresh (list index)
 
 proc FolderListRefreshEntry {handler index} {
-    upvar #0 $handler fh
+    upvar \#0 $handler fh
     global option
 
+    set fi $fh(mapping,$index)
     set line [expr {$index+1}]
     $fh(message_list) configure -state normal
     set tags [$fh(message_list) tag names $line.0]
     $fh(message_list) delete $line.0 "$line.0 lineend"
     $fh(message_list) insert $line.0 [format %-256s \
-	    [[$fh(folder_handler) get $index] list $option(list_format)]] $tags
+	    [[$fh(folder_handler) get $fi] list $option(list_format)]] $tags
     $fh(message_list) configure -state disabled
 }
 
@@ -963,27 +1184,26 @@ proc FolderListRefreshEntry {handler index} {
 # Handle the selection of a message
 #
 # Arguments:
-# l       -	The listbox the message was selected from
 # handler -	The handler which identifies the folder window
 # index   -	Index to select
-# force   -	Force showing regarding of browse mode
 
-proc FolderSelect {l handler index force} {
-    upvar #0 $handler fh
+proc FolderSelect {handler index} {
+    upvar \#0 $handler fh
     global option t b folderUnseen
 
     if {![info exists fh(folder_handler)]} {
 	return
     }
-    set fh(active) $index
+    set fh(list_index) $index
     if {0 == [string length $index] || $index >= $fh(num_messages)} {
-	catch {unset fh(current)}
+	catch {unset fh(current_msg)}
 	FolderButtons $handler 0
 	ShowNothing $fh(text)
-	set fh(active) ""
+	set fh(list_index) ""
 	return
     }
-    if {![info exists fh(current)]} {
+    set fh(folder_index) $fh(mapping,$index)
+    if {![info exists fh(current_msg)]} {
 	FolderButtons $handler 1
     }
     set line [expr {$index+1}]
@@ -992,20 +1212,16 @@ proc FolderSelect {l handler index force} {
     $fh(message_list) see $line.0
     update idletasks
     if {![info exists fh(message_list)]} return
-    set fh(current) [$fh(folder_handler) get $index]
-    set seen [$fh(folder_handler) getFlag $index seen]
-    $fh(folder_handler) setFlag $index seen 1
-    if {$force} {
-	set mode 0
-    } else {
-	set mode $fh(browse)
-    }
-    set result [Show $fh(text) $fh(current) $mode]
+    set fh(current_msg) [$fh(folder_handler) get $fh(folder_index)]
+    set seen [$fh(folder_handler) getFlag $fh(folder_index) seen]
+    $fh(folder_handler) setFlag $fh(folder_index) seen 1
+    set result [Show $fh(text) $fh(current_msg) $fh(browse)]
     set sigstatus [lindex $result 0]
     set pgpOutput [lindex $result 1]
     if { 0 == $seen } {
 	FolderListRefreshEntry $handler $index
 	set fh(folder_new) [RatMangleNumber $folderUnseen($fh(folder_handler))]
+        UpdateFolderStatusNew $handler $folderUnseen($fh(folder_handler))
     }
 
     if {0 < $option(pgp_version) && [info exists fh(sigbut)]} {
@@ -1032,6 +1248,58 @@ proc FolderSelect {l handler index force} {
     }
 }
 
+# FolderDouble --
+#
+# Handle doubleclicks on messages
+#
+# Arguments:
+# handler -	The handler which identifies the folder window
+
+proc FolderDouble {handler} {
+    upvar \#0 $handler fh
+
+    if {![info exists fh(current_msg)]} {
+        return
+    }
+    if {"drafts" == $fh(special_folder)} {
+        ComposeContinue $fh(current_msg)
+        $fh(folder_handler) setFlag $fh(folder_index) deleted 1
+        FolderListRefreshEntry $handler $fh(list_index)
+    } else {
+        FolderReply $handler all
+    }
+}
+
+# FolderContextMenu --
+#
+# Popup the context menu on the indicated message
+#
+# Arguments:
+# handler -	The handler which identifies the folder window
+# x, y    -     Location in listbox
+# X, Y    -     Location on screen
+
+proc FolderContextMenu {handler x y X Y} {
+    upvar \#0 $handler fh
+    global t
+
+    if {![info exists fh(folder_handler)]} {
+	return
+    }
+    set index [expr int([$fh(message_list) index @$x,$y])-1]
+    if {![info exists fh(mapping,$index)]} {
+	return
+    }
+    set fi $fh(mapping,$index)
+    if {[catch {$fh(folder_handler) get $fi} msg]} {
+	return
+    }
+
+    BuildMessageMenu $handler $fh(context_menu) $msg
+
+    tk_popup $fh(context_menu) $X $Y
+}
+
 # FolderNext --
 #
 # Advance to the next message in the folder
@@ -1040,20 +1308,20 @@ proc FolderSelect {l handler index force} {
 # handler -	The handler which identifies the folder window
 
 proc FolderNext {handler} {
-    upvar #0 $handler fh
+    upvar \#0 $handler fh
     set ml $fh(message_list)
 
-    if {![string length $fh(active)]} { return }
+    if {![string length $fh(list_index)]} { return }
 
-    set index [expr {1+$fh(active)}]
-    if { $index >= $fh(size) } {
+    set index [expr {1+$fh(list_index)}]
+    if { $index >= $fh(num_messages) } {
 	return
     }
 
-    if {$index >= [expr {round([lindex [$ml yview] 1]*$fh(size))}]} {
+    if {$index >= [expr {round([lindex [$ml yview] 1]*$fh(num_messages))}]} {
 	$ml yview $index
     }
-    FolderSelect $ml $handler $index 0
+    FolderSelect $handler $index
 }
 
 # FolderPrev --
@@ -1064,20 +1332,20 @@ proc FolderNext {handler} {
 # handler -	The handler which identifies the folder window
 
 proc FolderPrev {handler} {
-    upvar #0 $handler fh
+    upvar \#0 $handler fh
     set ml $fh(message_list)
 
-    if {![string length $fh(active)]} { return }
+    if {![string length $fh(list_index)]} { return }
 
-    set index [expr {$fh(active)-1}]
+    set index [expr {$fh(list_index)-1}]
     if {$index < 0} {
 	return
     }
 
-    if {$index < [expr {round([lindex [$ml yview] 0]*$fh(size))}]} {
+    if {$index < [expr {round([lindex [$ml yview] 0]*$fh(num_messages))}]} {
 	$ml yview scroll -1 pages
     }
-    FolderSelect $ml $handler $index 0
+    FolderSelect $handler $index
 }
 
 # SetFlag --
@@ -1089,32 +1357,46 @@ proc FolderPrev {handler} {
 # handler  -	The handler which identifies the folder window
 # flag	   -	The flag to set
 # value    -	The new value of the deletion flag ('1' or '0')
-# messages -	Ano optional list of messages to do this to
+# messages -	An optional list of messages to do this to
+#               The list is of folder indexes.
 
 proc SetFlag {handler flag value {messages {}}} {
-    upvar #0 $handler fh
-    global option
+    upvar \#0 $handler fh
+    global option folderUnseen
 
-    if {![string length $fh(active)]} { return }
-    if {$fh(active) >= $fh(num_messages)} { return }
+    if {![string length $fh(list_index)]} { return }
+    if {$fh(list_index) >= $fh(num_messages)} { return }
 
-    set sel $fh(active)
     if {![string length $messages]} {
-	set messages $sel
+	set messages $fh(mapping,$fh(list_index))
     }
+    set onlist {}
+    set offlist {}
     foreach i $messages {
 	if {[string compare toggle $value]} {
-	    $fh(folder_handler) setFlag $i $flag $value
+	    if {$value} {
+		lappend onlist $i
+	    } else {
+		lappend offlist $i
+	    }
 	} else {
 	    if {[$fh(folder_handler) getFlag $i $flag]} {
-		set v 0 
+		lappend offlist $i
 	    } else {
-		set v 1
+		lappend onlist $i
 	    }
-	    $fh(folder_handler) setFlag $i $flag $v
 	}
-	FolderListRefreshEntry $handler $i
     }
+    if {0 < [llength $onlist]} {
+	$fh(folder_handler) setFlag $onlist $flag 1
+    }
+    if {0 < [llength $offlist]} {
+	$fh(folder_handler) setFlag $offlist $flag 0
+    }
+    foreach i $messages {
+	FolderListRefreshEntry $handler $fh(rmapping,$i)
+    }
+    UpdateFolderStatusNew $handler $folderUnseen($fh(folder_handler))
 }
 
 # Quit --
@@ -1126,7 +1408,7 @@ proc SetFlag {handler flag value {messages {}}} {
 
 proc Quit {handler} {
     global folderWindowList
-    upvar #0 $handler fh
+    upvar \#0 $handler fh
 
     if {0 == [PrepareQuit]} {
 	return
@@ -1137,7 +1419,6 @@ proc Quit {handler} {
     }
 
     RatCleanup
-    SavePos
     destroy .
 }
 
@@ -1149,7 +1430,7 @@ proc Quit {handler} {
 # handler -	The handler which identifies the folder window
 
 proc PrepareQuit {} {
-    global expAfter logAfter numDeferred ratSenderSending t composeWindowList \
+    global expAfter logAfter ratSenderSending t composeWindowList \
 	    alreadyQuitting folderWindowList
 
     if {[info exists alreadyQuitting]} {
@@ -1159,16 +1440,17 @@ proc PrepareQuit {} {
 
     if {[info exists composeWindowList]} {
 	if {0 < [llength $composeWindowList]} {
-	    if {0 == [RatDialog "" $t(really_quit) $t(compose_sessions) \
-		    {} 0 $t(dont_quit) $t(do_quit)]} {
+	    if {1 == [RatDialog "" $t(really_quit) $t(compose_sessions) \
+                          {} 1 $t(quit_anyway) $t(dont_quit)]} {
 		unset alreadyQuitting
 		return 0
 	    }
 	}
     }
     if {1 < [array size folderWindowList]} {
-	if {0 == [RatDialog "" $t(really_quit) $t(folder_windows) \
-		{} 0 $t(dont_quit) $t(do_quit)]} {
+        set msg [format $t(n_folder_windows) [array size folderWindowList]]
+	if {1 == [RatDialog "" $t(really_quit) $msg \
+                      {} 1 $t(quit_anyway) $t(dont_quit)]} {
 	    unset alreadyQuitting
 	    return 0
 	}
@@ -1181,21 +1463,7 @@ proc PrepareQuit {} {
 	    tkwait variable ratSenderSending
 	}
 	RatLog 2 "" explicit
-    } elseif {0 < $numDeferred} {
-	if {1 < $numDeferred} {
-	    set text "$t(you_have) $numDeferred $t(deferred_messages)"
-	} else {
-	    set text "$t(you_have) 1 $t(deferred_message)"
-	}
-	if {0 == [RatDialog "" $t(send_deferred) $text {} 0 \
-		$t(send_now) $t(no)]} {
-	    set win [SendDeferred]
-	    if {"" != $win} {
-		catch {tkwait window $win}
-	    }
-	}
     }
-    RatSend kill
     if {[string length $expAfter]} {
 	after cancel $expAfter
     }
@@ -1215,10 +1483,14 @@ proc PrepareQuit {} {
 # old_list  -   Old list of messages
 
 proc FindAdjacent {handler old_index old_list} {
-    upvar #0 $handler fh
+    upvar \#0 $handler fh
     global option
 
-    set listAfter [$fh(folder_handler) list $option(msgfind_format)]
+    set listAfterFull [$fh(folder_handler) list %u]
+    set listAfter {}
+    for {set i 0} {$i <$fh(num_messages)} {incr i} {
+        lappend listAfter [lindex $listAfterFull $fh(mapping,$i)]
+    }
     set list [lrange $old_list [expr {$old_index+1}] end]
     for {set i $old_index} {$i >= 0} {incr i -1} {
 	lappend list [lindex $old_list $i]
@@ -1240,7 +1512,7 @@ proc FindAdjacent {handler old_index old_list} {
 # mode   -	Mode of sync
 
 proc Sync {handler mode} {
-    upvar #0 $handler fh
+    upvar \#0 $handler fh
     global option folderExists folderUnseen
 
     if {![info exists fh(folder_handler)]} {return}
@@ -1249,25 +1521,30 @@ proc Sync {handler mode} {
         return
     }
     set fh(syncing) 1
-    set oldActive $fh(active)
-    catch {$fh(folder_handler) list $option(msgfind_format)} listBefore
+    set oldActive $fh(list_index)
+    set listBefore $fh(uids)
     if {[string length $oldActive]} {
 	set subject [lindex $listBefore $oldActive]
-	set msg $fh(current)
+	set msg $fh(current_msg)
     }
     if {[llength $listBefore]} {
 	# Get data about what is visible at the moment. We want...
 	#  ...name & index of the top message
 	#  ...to know if the active message is visible
 	#  ...to know if the last message is visible
-	set oldTopIndex [lindex [split [$fh(message_list) index @0,0] .] 0]
-	set oldTopMsg [$fh(folder_handler) get [expr {$oldTopIndex-1}]]
-	if {"" != $oldActive} {
-	    set sawActive [$fh(message_list) bbox $oldActive.0+1l]
-	} else {
-	    set sawActive 0
-	}
-	set sawEnd [$fh(message_list) bbox end-1c]
+        if {[catch {
+            set oldTopIndex [lindex [split [$fh(message_list) index @0,0] .] 0]
+            set fi $fh(mapping,[expr $oldTopIndex-1])
+            set oldTopMsg [$fh(folder_handler) get $fi]
+            if {"" != $oldActive} {
+                set sawActive [$fh(message_list) bbox $oldActive.0+1l]
+            } else {
+                set sawActive 0
+            }
+            set sawEnd [$fh(message_list) bbox end-1c]
+        } err]} {
+            unset oldTopIndex
+        }
     }
 
     if {[catch {$fh(folder_handler) update $mode}]} {
@@ -1275,52 +1552,47 @@ proc Sync {handler mode} {
 	set fh(syncing) 0
 	return
     }
+    set xview [lindex [$fh(message_list) xview] 0]
     FolderDrawList $handler
 
     # Update information
     set i [$fh(folder_handler) info]
-    set fh(folder_messages) \
-	    [RatMangleNumber $folderExists($fh(folder_handler))]
-    set fh(folder_new) [RatMangleNumber $folderUnseen($fh(folder_handler))]
-    set fh(num_messages) [lindex $i 1]
-    if { -1 == [lindex $i 2]} {
-	set fh(folder_size) ???
-    } else {
-	set fh(folder_size) [RatMangleNumber [lindex $i 2]]
-    }
+    UpdateFolderStatus $handler $folderUnseen($fh(folder_handler)) \
+        $folderExists($fh(folder_handler)) [lindex $i 2]
     if { 0 == [lindex $i 1] } {
-	FolderSelect $fh(message_list) $handler "" 0
+	FolderSelect $handler ""
 	set fh(syncing) 0
 	return
     }
 
     # Check if our element is still in there
-    set fh(active) ""
+    set fh(list_index) ""
     if {[string length $oldActive]} {
-	set index [$fh(folder_handler) find $msg]
-	if { -1 != $index } {
-	    set line [expr {$index+1}]
+	set findex [$fh(folder_handler) find $msg]
+	if { -1 != $findex && [info exists fh(rmapping,$findex)]} {
+            set fh(folder_index) $findex
+            set fh(list_index) $fh(rmapping,$findex)
+	    set line [expr {$fh(list_index)+1}]
 	    $fh(message_list) tag add Active $line.0 "$line.0 lineend+1c"
-	    set fh(active) $index
 	    $fh(message_list) see $line.0
 	} else {
 	    set index [FindAdjacent $handler $oldActive $listBefore]
-	    FolderSelect $fh(message_list) $handler $index 0
+	    FolderSelect $handler $index
 	}
-    }
-    if {![string length $fh(active)]} {
-	FolderSelect $fh(message_list) $handler 0 0
+	if {![string length $fh(list_index)]} {
+	    FolderSelect $handler 0
+	}
     }
     
     # Fix scroll position in text widget
     if {[info exists oldTopIndex]} {
-	$fh(message_list) xview moveto 0
-
 	# Set topmost visible message
-	set index [$fh(folder_handler) find $oldTopMsg]
-	if { -1 == $index } {
+	set findex [$fh(folder_handler) find $oldTopMsg]
+	if { -1 == $findex || ![info exists fh(mapping,$findex)]} {
 	    set index [FindAdjacent $handler $oldTopIndex $listBefore]
-	}
+	} else {
+            set index $fh(mapping,$findex)
+        }
 	$fh(message_list) yview $index
 
 	# If the last message used to be visible, make sure it still is
@@ -1331,9 +1603,10 @@ proc Sync {handler mode} {
 	# If the active message was visible make it visible again
 	# this will override the last-message visibility
 	if {4 == [llength $sawActive]} {
-	    $fh(message_list) see $fh(active).0+1l
+	    $fh(message_list) see [expr $fh(list_index)+1].0
 	}
     }
+    $fh(message_list) xview moveto $xview
     set fh(syncing) 0
 }
 
@@ -1347,29 +1620,25 @@ proc Sync {handler mode} {
 # recipient -	Who the reply should be sent to 'sender' or 'all'
 
 proc FolderReply {handler recipient} {
-    upvar #0 $handler fh
+    upvar \#0 $handler fh
 
-    if {![string length $fh(active)]} { return }
+    if {![string length $fh(list_index)]} { return }
 
-    set current $fh(current)
-    set hd [ComposeReply $current $recipient $fh(role)]
-    upvar #0 $hd sendHandler
-    trace variable sendHandler w "FolderReplySent $hd $handler $current"
+    set hd [ComposeReply $fh(current_msg) $recipient $fh(role) \
+		"FolderReplySent $handler $fh(current_msg)"]
 }
-proc FolderReplySent {hd handler current name1 name2 op} {
-    upvar #0 $handler fh
-    upvar #0 $hd sendHandler
-    global option
+proc FolderReplySent {handler current} {
+    upvar \#0 $handler fh
 
-    trace vdelete $name1 $op "FolderReplySent $hd $handler $current"
-
-    if {[info exists sendHandler(do)] && [info exists fh(folder_handler)]} {
-	if {![string compare send $sendHandler(do)]} {
-	    set index [$fh(folder_handler) find $current]
-	    if { -1 != $index } {
-		if {![$fh(folder_handler) getFlag $index answered]} {
-		    SetFlag $handler answered 1 $index
-		}
+    if {[info exists fh]} {
+	set findex [$fh(folder_handler) find $current]
+	if { -1 != $findex } {
+	    if {![$fh(folder_handler) getFlag $findex answered]} {
+                if {[info exists fh(mapping,$findex)]} {
+                    SetFlag $handler answered 1 $fh(mapping,$findex)
+                } else {
+                    $fh(folder_handler) setFlag $findex answered 1
+                }
 	    }
 	}
     }
@@ -1384,12 +1653,12 @@ proc FolderReplySent {hd handler current name1 name2 op} {
 # handler   -	The handler which identifies the folder window
 
 proc FolderSomeCompose {handler composeFunc} {
-    upvar #0 $handler fh
+    upvar \#0 $handler fh
     global option
 
-    if {![string length $fh(active)]} { return }
+    if {![string length $fh(list_index)]} { return }
 
-    $composeFunc $fh(current) $fh(role)
+    $composeFunc $fh(current_msg) $fh(role)
 }
 
 # PostFolder --
@@ -1401,11 +1670,23 @@ proc FolderSomeCompose {handler composeFunc} {
 # m       -	The menu which we should populate
 
 proc PostFolder {handler m} {
-    upvar #0 $handler fh
-    global t option
+    global vFolderLastUsedList vFolderDef
+    upvar \#0 $handler fh
+    global t option vFolderSpecials idmap$m
 
+    if {[info exists idmap$m]} {
+	unset idmap$m
+    }
     $m delete 1 end
     VFolderBuildMenu $m 0 "VFolderOpen $handler" 0
+    $m add separator
+    foreach id $vFolderLastUsedList {
+        if {[info exists vFolderDef($id)]} {
+	    VFolderAddItem $m $id $id "VFolderOpen $handler" 0
+	}
+    }
+    $m add separator
+    VFolderBuildMenu $m $vFolderSpecials "VFolderOpen $handler" 0
     $m add separator
     $m add command -label $t(open_file)... \
 	    -command "PostFolderOpen $handler \[SelectFileFolder $fh(toplevel)\]"
@@ -1436,28 +1717,36 @@ proc PostFolderOpen {handler cmd} {
 #
 # Arguments:
 # handler -	The handler which identifies the folder window
+# move    -     1 for move mode (original is deleted)
 # which	  -	Which set of messages we should move (current or group)
 # m       -	The menu which we should populate
 
-proc PostMove {handler which m} {
-    upvar #0 $handler fh
-    global t
+proc PostMove {handler move which m} {
+    upvar \#0 $handler fh
+    global t vFolderLastUsedList vFolderDef
 
-    if {[string compare "group" $which]} {
+    if {"current" == $which && 1 == $move} {
 	set a 1
     } else {
 	set a 0
     }
-    $m delete 1 end
+    $m delete 0 end
     VFolderBuildMenu $m 0 \
-	    "VFolderInsert $handler $a \[GetMsgSet $handler $which\]" 1
+	    "VFolderInsert $handler $a $move \[GetMsgSet $handler $which\]" 1
     $m add separator
-    $m add command -label $t(to_file)... \
-	    -command "VFolderInsert $handler $a \[GetMsgSet $handler $which\] \
-		      \[InsertIntoFile $fh(toplevel)]"
-    $m add command -label $t(to_dbase)... \
-	    -command "VFolderInsert $handler $a \[GetMsgSet $handler $which\] \
-		      \[InsertIntoDBase $fh(toplevel)\]"
+    foreach id $vFolderLastUsedList {
+        if {[info exists vFolderDef($id)]} {
+	    VFolderAddItem $m $id $id \
+                "VFolderInsert $handler $a $move \[GetMsgSet $handler $which\]" 1
+	}
+    }
+    $m add separator
+    $m add command -label $t(to_file)... -command \
+        "VFolderInsert $handler $a $move \[GetMsgSet $handler $which\] \
+	               \[InsertIntoFile $fh(toplevel)]"
+    $m add command -label $t(to_dbase)... -command \
+        "VFolderInsert $handler $a $move \[GetMsgSet $handler $which\] \
+		       \[InsertIntoDBase $fh(toplevel)\]"
     FixMenu $m
 }
 
@@ -1470,20 +1759,26 @@ proc PostMove {handler which m} {
 # which	  -	Which set of messages we should move (current or group)
 
 proc GetMsgSet {handler which} {
-    upvar #0 $handler fh
+    upvar \#0 $handler fh
 
-    if {[string compare group $which]} {
-	if {[info exists fh(current)]} {
-	    return $fh(current)
-	} else {
-	    return {}
+    switch $which {
+	current {
+	    if {[info exists fh(current_msg)]} {
+		return $fh(current_msg)
+	    } else {
+		return {}
+	    }
 	}
-    } else {
-	set msgs {}
-	foreach i [$fh(folder_handler) flagged flagged] {
-	    lappend msgs [$fh(folder_handler) get $i]
+	group {
+	    set msgs {}
+	    foreach i [$fh(folder_handler) flagged flagged 1] {
+		lappend msgs [$fh(folder_handler) get $i]
+	    }
+	    return $msgs
 	}
-	return $msgs
+	default {
+	    return $which
+	}
     }
 }
 
@@ -1497,7 +1792,7 @@ proc GetMsgSet {handler which} {
 # onoff   -	The new state of the buttons
 
 proc FolderButtons {handler onoff} {
-    upvar #0 $handler fh
+    upvar \#0 $handler fh
     global option t b
     set w $fh(w)
 
@@ -1531,21 +1826,21 @@ proc FolderButtons {handler onoff} {
 # index   -	Where in the list to start looking
 
 proc FolderGetNextUnread {handler index dir} {
-    upvar #0 $handler fh
+    upvar \#0 $handler fh
 
-    if {0 == $fh(size)} {
+    if {0 == $fh(num_messages)} {
 	return 0
     }
     for {set i [expr {$index+$dir}]} {$i != $index} {incr i $dir} {
-	if {$i >= $fh(size)} {
+	if {$i >= $fh(num_messages)} {
 	    set i 0
 	} elseif {$i < 0} {
-	    set i [expr {$fh(size)-1}]
+	    set i [expr {$fh(num_messages)-1}]
 	}
 	if {$i == $index} {
 	    return 0
 	}
-	if { 0 == [$fh(folder_handler) getFlag $i seen]} {
+	if { 0 == [$fh(folder_handler) getFlag $fh(mapping,$i) seen]} {
 	    return $i
 	}
     }
@@ -1561,14 +1856,14 @@ proc FolderGetNextUnread {handler index dir} {
 # handler -	The handler which identifies the folder window
 
 proc FolderSelectUnread {handler} {
-    upvar #0 $handler fh
+    upvar \#0 $handler fh
 
-    set index $fh(active)
+    set index $fh(list_index)
     if {0 == [llength $index]} {
 	return
     }
     set i [FolderGetNextUnread $handler $index 1]
-    FolderSelect $fh(message_list) $handler $i 0
+    FolderSelect $handler $i
 }
 
 # GroupMessageList --
@@ -1580,7 +1875,7 @@ proc FolderSelectUnread {handler} {
 
 proc GroupMessageList {handler} {
     global b idCnt t option
-    upvar #0 $handler fh
+    upvar \#0 $handler fh
 
     # Create identifier
     set id f[incr idCnt]
@@ -1601,7 +1896,6 @@ proc GroupMessageList {handler} {
 	-selectmode multiple \
 	-setgrid true
     set b($w.f.list) group_list_editor
-    Size $w.f.list gFolderL
     pack $w.f.scroll -side right -fill y
     pack $w.f.list -side left -expand 1 -fill both
     frame $w.buttons
@@ -1624,14 +1918,28 @@ proc GroupMessageList {handler} {
     pack $w.buttons -side bottom -fill x -pady 5
     pack $w.f -expand 1 -fill both
 
-    eval "$w.f.list insert 0 [$fh(folder_handler) list $option(list_format)]"
-    foreach i [$fh(folder_handler) flagged flagged] {
-	$w.f.list selection set $i
+    set fi 0
+    set li 0
+    foreach e [$fh(folder_handler) list "%u $option(list_format)"] {
+	regexp {^([^ ]*) (.*)} $e unused uid list_entry
+        if {"" == $fh(filter)
+            || [string match -nocase "*$fh(filter)*" $list_entry]} {
+            lappend fh($w.uids) $uid
+            $w.f.list insert end $list_entry
+            set rmapping($fi) $li
+            incr li
+        }
+        incr fi
+    }
+    foreach i [$fh(folder_handler) flagged flagged 1] {
+        if {[info exists rmapping($i)]} {
+            $w.f.list selection set $rmapping($i)
+        }
     }
     lappend fh(groupMessageLists) $w
-    wm protocol $w WM_DELETE_WINDOW "GroupMessageListDone $w $handler 0"
+    bind $w.f.list <Destroy> "GroupMessageListDone $w $handler 0"
 
-    Place $w groupMessageList
+    ::tkrat::winctl::SetGeometry groupMessages $w $w.f.list
 }
 
 # GroupMessageListUpdate --
@@ -1643,14 +1951,28 @@ proc GroupMessageList {handler} {
 # handler -	The handler which identifies the folder window
 
 proc GroupMessageListUpdate {w handler} {
-    upvar #0 $handler fh
+    upvar \#0 $handler fh
     global option
 
-    $w.f.list delete 0 end
-    eval "$w.f.list insert 0 [$fh(folder_handler) list $option(list_format)]"
-    foreach i [$fh(folder_handler) flagged flagged] {
-	$w.f.list selection set $i
+    foreach c [$w.f.list curselection] {
+	set selected([lindex $fh($w.uids) $c]) 1
     }
+    set top [lindex [$w.f.list yview] 0]
+    $w.f.list delete 0 end
+    set fh($w.uids) {}
+    foreach e [$fh(folder_handler) list "%u $option(list_format)"] {
+	regexp {^([^ ]*) (.*)} $e unused uid list_entry
+        if {"" != $fh(filter)
+            && ![string match -nocase "*$fh(filter)*" $list_entry]} {
+            continue
+        }
+	lappend fh($w.uids) $uid
+	$w.f.list insert end $list_entry
+	if {[info exists selected($uid)]} {
+	    $w.f.list selection set end
+	}
+    }
+    $w.f.list yview moveto $top
 }
 
 # GroupMessageListDone --
@@ -1663,25 +1985,39 @@ proc GroupMessageListUpdate {w handler} {
 # done    -	The users selection (1=ok, 0=cancel)
 
 proc GroupMessageListDone {w handler done} {
-    upvar #0 $handler fh
+    upvar \#0 $handler fh
     global b option
 
+    bind $w.f.list <Destroy> {}
     if {$done} {
-	set toset [$w.f.list curselection]
-	set isset [$fh(folder_handler) flagged flagged]
+	set candidates [$w.f.list curselection]
+	set isset [$fh(folder_handler) flagged flagged 1]
+	set toset {}
+	set toclear {}
+        set torefresh {}
 	for {set i 0} {$i < [$w.f.list size]} {incr i} {
-	    set s [expr {-1 != [lsearch $toset $i]}]
-	    if {$s != [expr {-1 != [lsearch $isset $i]}]} {
-		$fh(folder_handler) setFlag $i flagged $s
-		FolderListRefreshEntry $handler $i
-	    }
+	    set nv [expr {-1 != [lsearch $candidates $i]}]
+            set ov [expr {-1 != [lsearch $isset $i]}]
+            if {$nv != $ov} {
+                if {$nv} {
+                    lappend toset $fh(mapping,$i)
+                } else {
+                    lappend toclear $fh(mapping,$i)
+                }
+                lappend torefresh $i
+            }
+	}
+	$fh(folder_handler) setFlag $toset flagged 1
+	$fh(folder_handler) setFlag $toclear flagged 0
+	foreach i $torefresh {
+	    FolderListRefreshEntry $handler $i
 	}
     }
-    RecordPos $w groupMessageList
-    RecordSize $w.f.list gFolderL
+    ::tkrat::winctl::RecordGeometry groupMessages $w $w.f.list
     set index [lsearch $w $fh(groupMessageLists)]
     set fh(groupMessageLists) [lreplace $fh(groupMessageLists) $index $index]
     destroy $w
+    unset fh($w.uids)
     foreach a [array names b $w*] {
 	unset b($a)
     }
@@ -1695,12 +2031,12 @@ proc GroupMessageListDone {w handler done} {
 # handler -	The handler which identifies the folder window
 
 proc GroupClear {handler} {
-    upvar #0 $handler fh
+    upvar \#0 $handler fh
     global option
 
-    foreach i [$fh(folder_handler) flagged flagged] {
+    foreach i [$fh(folder_handler) flagged flagged 1] {
 	$fh(folder_handler) setFlag $i flagged 0
-	FolderListRefreshEntry $handler $i
+	FolderListRefreshEntry $handler $fh(rmapping,$i)
     }
 }
 
@@ -1713,20 +2049,44 @@ proc GroupClear {handler} {
 # handler -	The handler which identifies the folder window
 
 proc SetupGroupMenu {m handler} {
-    upvar #0 $handler fh
+    upvar \#0 $handler fh
+    global t
 
+    # Create groups
+    if {$fh(num_messages) > 0} {
+        set s normal
+    } else {
+        set s disabled
+    }
+    foreach i {1 2 3} {
+        $m entryconfigure $i -state $s
+    }
+
+    # Group operations
     if {![info exists fh(folder_handler)]} {
 	set s disabled
-    } elseif {[llength [$fh(folder_handler) flagged flagged]]} {
+    } elseif {[set num [llength [$fh(folder_handler) flagged flagged 1]]]} {
 	set s normal
     } else {
 	set s disabled
     }
-    $m entryconfigure 4 -state $s
-    $m entryconfigure 6 -state $s
-    $m entryconfigure 7 -state $s
-    $m entryconfigure 8 -state $s
-    $m entryconfigure 9 -state $s
+    foreach i {4 6 7 8 9 11 12 13 15 16 17 18 19 20} {
+        $m entryconfigure $i -state $s
+    }
+    # Number of grouped messages
+    $m entryconfigure 4 -label "$t(clear_group) ($num)"
+
+    # Dsiable some ops in drafts folder
+    if {$s == "normal"} {
+        if {"drafts" == $fh(special_folder)} {
+            set s disabled
+        } else {
+            set s normal
+        }
+        foreach i {17 18 19 20} {
+            $m entryconfigure $i -state $s
+        }
+    }
 }
 
 # CycleShowHeader --
@@ -1738,15 +2098,15 @@ proc SetupGroupMenu {m handler} {
 
 proc CycleShowHeader {handler} {
     global option
-    upvar #0 $handler fh
-    upvar #0 $fh(text) texth
+    upvar \#0 $handler fh
+    upvar \#0 $fh(text) texth
 
     switch $texth(show_header) {
     all		{ set texth(show_header) selected }
     selected	{ set texth(show_header) no }
     no		{ set texth(show_header) all }
     }
-    FolderSelect $fh(message_list) $handler $fh(active) 0
+    FolderSelect $handler $fh(list_index)
     SaveOptions
 }
 
@@ -1758,8 +2118,8 @@ proc CycleShowHeader {handler} {
 # handler -	The handler which identifies the folder window
 
 proc FolderCheckSignature {handler} {
-    upvar #0 $handler fh
-    upvar #0 msgInfo_$fh(current) msgInfo
+    upvar \#0 $handler fh
+    upvar \#0 msgInfo_$fh(current_msg) msgInfo
     global t b
 
     set tot pgp_none
@@ -1767,7 +2127,7 @@ proc FolderCheckSignature {handler} {
     set first 1
     set result {}
     foreach bodypart $msgInfo(pgp,signed_parts) {
-	regsub -all "\a" [$bodypart checksig] {} part
+	set part [string map [list "\a" ""] [$bodypart checksig]]
 	if {[string length $result]} {
 	    set result "$totresult\n\n$part"
 	} else {
@@ -1778,7 +2138,7 @@ proc FolderCheckSignature {handler} {
 	set b($fh(sigbut)) $status
 	if {![string compare pgp_good $status] && $first} {
 	    set first 0
-	    if {[string compare $bodypart [$fh(current) body]]} {
+	    if {[string compare $bodypart [$fh(current_msg) body]]} {
 		set tot pgp_part
 		set b($fh(sigbut)) part_sig
 	    }
@@ -1801,87 +2161,80 @@ proc FolderCheckSignature {handler} {
 
 proc FolderFind {handler} {
     global t b idCnt
-    upvar #0 $handler fh
+    upvar \#0 $handler fh
 
     # Create identifier
     set id f[incr idCnt]
-    upvar #0 $id hd
+    upvar \#0 $id hd
     set w .$id
 
     # Initialize variables
-    set hd(ignore_case) $fh(find_ignore_case)
+    set hd(match_case) $fh(find_match_case)
     set hd(match) $fh(find_match)
-    set hd(loc) $fh(find_loc)
+    if {"list" == $fh(find_loc)} {
+	set hd(loc) $fh(message_list)
+    } else {
+	set hd(loc) $fh(text)
+    }
     set hd(w) $w
     set hd(handler) $handler
     set hd(def_start) 0
     set hd(oldfocus) [focus]
+    set hd(text) ""
 
     # Create toplevel
-    toplevel $w -class TkRat
+    toplevel $w -class TkRat -bd 5
     wm title $w $t(find)
 
     # Create window
-    entry $w.e -textvariable ${id}(text)
-    set b($w.e) enter_search_exp_here
-
-    checkbutton $w.c -text $t(ignore_case) -variable ${id}(ignore_case)
-    set b($w.c) toggle_ignore_case
-
-    frame $w.m
-    label $w.m.label -text $t(match): -anchor e -width 10
-    radiobutton $w.m.exact -text $t(exact) -variable ${id}(match) \
-	    -value exact
-    radiobutton $w.m.regexp -text $t(regexp) -variable ${id}(match) \
-	    -value regexp
-    pack $w.m.label \
-	 $w.m.exact \
-	 $w.m.regexp -side left
-    set b($w.m.exact) find_exact
-    set b($w.m.regexp) find_regexp
-
     frame $w.l
-    label $w.l.label -text $t(find_in): -anchor e -width 10
+    label $w.l.label -text $t(find_in):
     radiobutton $w.l.list -text $t(message_list) -variable ${id}(loc) \
-	    -value list
+	    -value $fh(message_list)
     radiobutton $w.l.body -text $t(message_body) -variable ${id}(loc) \
-	    -value body
+	    -value $fh(text)
     pack $w.l.label \
 	 $w.l.list \
-	 $w.l.body -side left
+	 $w.l.body -side left -anchor w
     set b($w.l.list) find_in_mlist
     set b($w.l.body) find_in_body
 
+    entry $w.e -textvariable ${id}(text)
+    set b($w.e) enter_search_text_here
+
+    checkbutton $w.c -text $t(match_case) -variable ${id}(match_case)
+    set b($w.c) toggle_ignore_case
+
     frame $w.b
-    frame $w.b.find -relief sunken -bd 2
-    button $w.b.find.b -text $t(find) -state disabled \
-	    -command "FolderFindDo $id 0"
-    pack $w.b.find.b -padx 1 -pady 1
-    frame $w.b.find_next -relief flat -bd 2
-    button $w.b.find_next.b -text $t(find_next) -state disabled \
-	    -command "FolderFindDo $id 1"
+    frame $w.b.find_next -relief sunken -bd 2
+    button $w.b.find_next.b -text $t(find_next) -state disabled
     pack $w.b.find_next.b -padx 1 -pady 1
-    button $w.b.dismiss -text $t(dismiss) \
-	    -command "FolderFindDone $id"
-    pack $w.b.find \
-	 $w.b.find_next \
-	 $w.b.dismiss -side left -padx 5 -pady 5 -expand 1
+    frame $w.b.find_prev -relief flat -bd 2
+    button $w.b.find_prev.b -text $t(find_prev) -state disabled
+    pack $w.b.find_prev.b -padx 1 -pady 1
+    button $w.b.dismiss -text $t(dismiss) -command "destroy $w"
+    pack $w.b.find_next \
+	 $w.b.find_prev \
+	 $w.b.dismiss -side left -expand 1
     set b($w.b.find.b) find_first
     set b($w.b.find_next.b) find_next
+    set b($w.b.find_prev.b) find_prev
     set b($w.b.dismiss) dismiss
 
-    pack $w.e \
+    pack $w.l \
+	 $w.e \
 	 $w.c \
-	 $w.m \
-	 $w.l \
-	 $w.b -side top -pady 5 -padx 5 -anchor w -fill x -expand 1
+	 $w.b -side top -fill x -expand 1
 
-    Place $w find
+    ::tkrat::winctl::SetGeometry find $w
     focus $w.e
-    bind $w.e <Return> "FolderFindDo $id \$${id}(def_start); break"
-    wm protocol $w WM_DELETE_WINDOW "FolderFindDone $id"
+    bind $w.e <Return> [list $w.b.find_next invoke]
+    bind $w.e <Destroy> "FolderFindDone $id"
 
-    trace variable hd(text) w "FinderFindTrace $id"
+    set hd(find_args) \
+        [list $w.e $w.c $w.b.find_next.b $w.b.find_prev.b]
+    trace variable hd(loc) w "FinderFindTrace $id"
+    FinderFindTrace $id
 }
 
 # FinderFindTrace --
@@ -1892,71 +2245,12 @@ proc FolderFind {handler} {
 # id      -	The handler which identifies the find window
 
 proc FinderFindTrace {id args} {
-    upvar #0 $id hd
+    upvar \#0 $id hd
 
-    if {[string length $hd(text)]} {
-	set state normal
-    } else {
-	set state disabled
-	set hd(def_start) 0
+    if {[info exists hd(find)]} {
+        rat_find::uninit $hd(find)
     }
-    $hd(w).b.find.b configure -state $state
-    $hd(w).b.find_next.b configure -state $state
-    if {$hd(def_start)} {
-	$hd(w).b.find configure -relief flat
-	$hd(w).b.find_next configure -relief sunken
-    } else {
-	$hd(w).b.find configure -relief sunken
-	$hd(w).b.find_next configure -relief flat
-    }
-}
-
-# FolderFindDo --
-#
-# Actually do the finding
-#
-# Arguments:
-# id      -	The handler which identifies the find window
-# current  -	Start at current location
-
-proc FolderFindDo {id current} {
-    upvar #0 $id hd
-    upvar #0 $hd(handler) fh
-
-    if {"list" == $hd(loc)} {
-	set w $fh(message_list)
-    } else {
-	set w $fh(text)
-    }
-    if {$current} {
-	set r [$w tag nextrange Found 1.0]
-	if {[llength $r] > 0} {
-	    set start [lindex $r 1]
-	} else {
-	    set start @0,0
-	}
-    } else {
-	set start 1.0
-    }
-    if {$hd(ignore_case)} {
-	set found [$w search -$hd(match) -nocase -count len \
-		$hd(text) $start end]
-    } else {
-	set found [$w search -$hd(match) -count len $hd(text) $start end]
-    }
-    if {[string length $found]} {
-	$w tag remove Found 1.0 end
-	$w tag add Found $found $found+${len}c
-	$w see $found
-	set hd(def_start) 1
-    } else {
-	bell
-	set hd(def_start) 0
-    }
-    FinderFindTrace $id
-    set fh(find_ignore_case) $hd(ignore_case)
-    set fh(find_match) $hd(match)
-    set fh(find_loc) $hd(loc)
+    set hd(find) [eval rat_find::init $hd(loc) $hd(find_args)]
 }
 
 # FolderFindDone --
@@ -1967,10 +2261,13 @@ proc FolderFindDo {id current} {
 # id      -	The handler which identifies the find window
 
 proc FolderFindDone {id} {
-    upvar #0 $id hd
+    upvar \#0 $id hd
     global b
 
-    RecordPos $hd(w) find
+    if {[info exists hd(find)]} {
+        rat_find::uninit $hd(find)
+    }
+    ::tkrat::winctl::RecordGeometry find $hd(w)
     catch {focus $hd(oldfocus)}
     destroy $hd(w)
     foreach a [array names b $hd(w)*] {
@@ -1987,7 +2284,7 @@ proc FolderFindDone {id} {
 # handler -	The handler which identifies the folder window
 
 proc FolderMap {handler} {
-    upvar #0 $handler fh
+    upvar \#0 $handler fh
     global option
 
     if {[info exists fh(folder_handler)]} {
@@ -2009,11 +2306,12 @@ proc FolderMap {handler} {
 # handler -	The handler which identifies the folder window
 
 proc FolderUnmap {handler} {
-    upvar #0 $handler fh
+    upvar \#0 $handler fh
     global option
 
     if {$option(checkpoint_on_unmap)} {
-	RatBusy {Sync $handler checkpoint}
+	#RatBusy {Sync $handler checkpoint}
+	Sync $handler checkpoint
     }
     if {[info exists fh(checkpointaid)]} {
 	after cancel $fh(checkpointaid)
@@ -2029,7 +2327,7 @@ proc FolderUnmap {handler} {
 # handler -	The handler which identifies the folder window
 
 proc FolderCheckpoint {handler} {
-    upvar #0 $handler fh
+    upvar \#0 $handler fh
     global option
 
     RatBusy {Sync $handler checkpoint}
@@ -2045,17 +2343,60 @@ proc FolderCheckpoint {handler} {
 # Populate the new folder menu
 #
 # Arguments:
+# handler -	The handler which identifies the folder window
 # m       -	The menu which we should populate
 
-proc NewFolderMenu {m} {
-    global t
+proc NewFolderMenu {handler m} {
+    upvar \#0 $handler fh
+    global t vFolderSpecials vFolderLastUsedList vFolderDef
 
-    $m delete 1 end
+    $m delete 0 end
     VFolderBuildMenu $m 0 NewFolderWin 0
+    $m add separator
+    foreach id $vFolderLastUsedList {
+        if {[info exists vFolderDef($id)]} {
+	    VFolderAddItem $m $id $id NewFolderWin 0
+	}
+    }
+    $m add separator
+    VFolderBuildMenu $m $vFolderSpecials NewFolderWin 0
     $m add separator
     $m add command -label $t(open_file)... -command "NewFolderWin openfile"
     $m add command -label $t(open_dbase)... -command "NewFolderWin opendbase"
+
+    $m add command -label $t(dbase_same_subject)
+    set sub_idx [$m index end]
+    $m add command -label $t(dbase_to_from_sender)
+    set send_idx [$m index end]
     $m add command -label $t(empty) -command "NewFolderWin empty"
+
+    if {![info exists fh(current_msg)]} {
+        $m entryconfigure $sub_idx -state disabled
+        $m entryconfigure $send_idx -state disabled
+    } else {
+        set subject [$fh(current_msg) list "%c"]
+        set exp [list and subject \"$subject\"]
+        set vf_subject [list $t(dbase_same_subject) dbase {} {} {} $exp]
+        $m entryconfigure $sub_idx -state normal \
+            -command [list NewFolderWin $vf_subject]
+
+        set from [$fh(current_msg) get from]
+        if {"" == $from} {
+            set from [$fh(current_msg) get sender]
+        }
+        if {"" == $from} {
+            set from [$fh(current_msg) get reply_to]
+        }
+        if {"" == $from} {
+            $m entryconfigure $send_idx -state disabled
+        } else {
+            set exp [list and all_addresses [$from get mail]]
+            set vf_sender [list $t(dbase_to_from_sender) dbase {} {} {} $exp]
+            $m entryconfigure $send_idx -state normal \
+                -command [list NewFolderWin $vf_sender]
+        }
+    }
+
     FixMenu $m
 }
 
@@ -2072,12 +2413,12 @@ proc NewFolderWin {vf} {
     # Complement folder information (if needed)
     set manual 0
     if {"openfile" == $vf} {
-	upvar #0 [lindex [array names folderWindowList] 0] fh
+	upvar \#0 [lindex [array names folderWindowList] 0] fh
 	set vf [SelectFileFolder $fh(toplevel)]
 	if {"" == $vf} return
 	set manual 1
     } elseif {"opendbase" == $vf} {
-	upvar #0 [lindex [array names folderWindowList] 0] fh
+	upvar \#0 [lindex [array names folderWindowList] 0] fh
 	set vf [SelectDbaseFolder $fh(toplevel)]
 	if {"" == $vf} return
 	set manual 1
@@ -2089,7 +2430,7 @@ proc NewFolderWin {vf} {
     SetIcon $w $option(icon)
     set handler [FolderWindowInit $w ""]
     UpdateFolderTitle $handler
-    Place $w folder
+    ::tkrat::winctl::Place folderWindow $w
     if {"empty" != $vf} {
 	if {$manual} {
 	    FolderRead $handler $vf ""
@@ -2119,7 +2460,7 @@ proc CloseFolder {handler} {
 
 proc CloseFolderWin {handler} {
     global folderWindowList
-    upvar #0 $handler fh
+    upvar \#0 $handler fh
 
     if {[catch {unset folderWindowList($handler)}]} {
 	return
@@ -2128,17 +2469,8 @@ proc CloseFolderWin {handler} {
 	CloseFolder $fh(folder_handler) 
     }
     if {[winfo exists $fh(w)]} {
-	RecordPos [winfo toplevel $fh(w)] folder
-	RecordSize [winfo toplevel $fh(w)] folderWindow
-	RecordPane $fh(pane) folderPane
-	if {[info exists fh(watcher_w)]} {
-	    if {[info exists fh(watcher_geom)]} {
-		wm geom $fh(watcher_w) $fh(watcher_geom)
-		RecordPos $fh(watcher_w) watcher
-	    }
-	    RecordSize $fh(watcher_list) watcher
-	}
-	SavePos
+        ::tkrat::winctl::RecordGeometry folderWindow \
+            [winfo toplevel $fh(w)] [winfo toplevel $fh(w)] $fh(pane)
 	bind $fh(text) <Destroy> { }
 	destroy $fh(w)
     }
@@ -2152,21 +2484,21 @@ proc CloseFolderWin {handler} {
 #
 # Arguments:
 # handler -	The handler which identifies the folder window
+# force   -	True if the window really will be closed
 
-proc DestroyFolderWin {handler} {
+proc DestroyFolderWin {handler force} {
     global folderWindowList
 
-    if {1 == [array size folderWindowList] && 0 == [PrepareQuit]} {
-	return
-    }
-    CloseFolderWin $handler
-    if {0 == [array size folderWindowList]} {
-	RatCleanup
-	destroy .
+    if {1 < [array size folderWindowList] || ($force && 1 == [PrepareQuit])} {
+        CloseFolderWin $handler
+        if {0 == [array size folderWindowList]} {
+            RatCleanup
+            destroy .
+        }
     }
 }
 
-# FolderB3Event --
+# FolderFlagEvent --
 #
 # Toggle flag status of current message
 #
@@ -2174,14 +2506,16 @@ proc DestroyFolderWin {handler} {
 # handler -	The handler which identifies the folder window
 # index -	Message under pointer
 
-proc FolderB3Event {handler index} {
-    upvar #0 $handler fh
+proc FolderFlagEvent {handler index} {
+    upvar \#0 $handler fh
 
     set fh(setflag) [expr {int($index-1)}]
-    SetFlag $handler flagged toggle $fh(setflag)
+    set fi $fh(mapping,$fh(setflag))
+    SetFlag $handler flagged toggle $fi
+    set fh(lastFlagResult) [$fh(folder_handler) getFlag $fi flagged]
 }
 
-# FolderB3Motion --
+# FolderFlagMotion --
 #
 # Toggle flag status of current message
 #
@@ -2189,25 +2523,25 @@ proc FolderB3Event {handler index} {
 # handler -	The handler which identifies the folder window
 # index -	Message under pointer
 
-proc FolderB3Motion {handler index} {
-    upvar #0 $handler fh
+proc FolderFlagMotion {handler index} {
+    upvar \#0 $handler fh
 
     set i [expr {int($index-1)}]
     if {$i != $fh(setflag)} {
 	if {$i > $fh(setflag)} {
 	    for {set ui $i} {$ui > $fh(setflag)} {incr ui -1} {
-		SetFlag $handler flagged toggle $ui
+		SetFlag $handler flagged $fh(lastFlagResult) $fh(mapping,$ui)
 	    }
 	} else {
 	    for {set ui $i} {$ui < $fh(setflag)} {incr ui} {
-		SetFlag $handler flagged toggle $ui
+		SetFlag $handler flagged $fh(lastFlagResult) $fh(mapping,$ui)
 	    }
 	}
 	set fh(setflag) $i
     }
 }
 
-# FolderSB3Event --
+# FolderFlagRange --
 #
 # Toggle flag status of messages between current and last
 #
@@ -2215,13 +2549,14 @@ proc FolderB3Motion {handler index} {
 # handler -	The handler which identifies the folder window
 # index -	Message under pointer
 
-proc FolderSB3Event {handler index} {
-    upvar #0 $handler fh
+proc FolderFlagRange {handler index} {
+    upvar \#0 $handler fh
 
     if {"" != $fh(setflag)} {
-	FolderB3Motion $handler $index
+	FolderFlagMotion $handler $index
     }
 }
+
 
 # NetworkSyncs --
 #
@@ -2240,14 +2575,14 @@ proc NetworkSync {} {
 	RatLog 2 "" explicit
     }
 
-    if {[lindex $option(network_sync) 0] && $numDeferred > 0} {
-	SendDeferred
+    if {[lindex $option(network_sync) 0]} {
+	RatNudgeSender
     }
 
     if {[lindex $option(network_sync) 1]} {
 	RatSyncDisconnected
 	foreach f [array names folderWindowList] {
-	    upvar #0 $f fh
+	    upvar \#0 $f fh
 	    if {[info exists fh(folder_handler)] 
 		    && "" != $fh(folder_handler)
 		    && "dis" == [$fh(folder_handler) type]} {
@@ -2331,11 +2666,126 @@ proc PostRoles {handler m cmd} {
 
 proc UpdateFolderTitle {handler} {
     global option
-    upvar #0 $handler fh
+    upvar \#0 $handler fh
 
-    regsub -all -- %f $option(main_window_name) $fh(folder_name) title
-    regsub -all -- %r $title $option($fh(role),name) title
+    set title [string map [list %f $fh(folder_name) \
+			       %r $option($fh(role),name)] \
+		   $option(main_window_name)]
     wm title $fh(toplevel) $title
-    regsub -all -- %f $option(icon_name) $fh(folder_name) ititle
+    set ititle [string map [list %f $fh(folder_name)] $option(icon_name)]
     wm iconname $fh(toplevel) $ititle
+}
+
+# FilterClear --
+#
+# Clears the filter
+#
+# Arguments:
+# handler -	The handler which identifies the folder window
+
+proc FilterClear {handler} {
+    upvar \#0 $handler fh
+
+    set fh(filter) ""
+    set fh(last_filter) $fh(filter)
+    Sync $handler update
+    FilterChanged $handler
+
+    if {[focus] == $fh(filter_entry)} {
+        focus $fh(w)
+    }
+}
+
+# FilterApply --
+#
+# Applies the filter
+#
+# Arguments:
+# handler -	The handler which identifies the folder window
+
+proc FilterApply {handler} {
+    upvar \#0 $handler fh
+
+    set fh(last_filter) $fh(filter)
+    Sync $handler update
+    $fh(filter_apply) configure -state disabled
+
+    focus $fh(w)
+}
+
+# FilterChanged --
+#
+# Callback which is called when the filter definition changes
+#
+# Arguments:
+# handler -	The handler which identifies the folder window
+# args    -     Standard trace callback arguments
+
+proc FilterChanged {handler args} {
+    upvar \#0 $handler fh
+
+    if {"" == $fh(filter)} {
+        $fh(filter_clear) configure -state disabled
+    } else {
+        $fh(filter_clear) configure -state normal
+    }
+    if {$fh(last_filter) == $fh(filter)} {
+        $fh(filter_apply) configure -state disabled
+    } else {
+        $fh(filter_apply) configure -state normal
+    }
+}
+
+# SetSortOrder --
+#
+# Callback when the user has selected a new sort order in the menu.
+# Should update the current sort order and set the default sort order
+# to the selected one.
+#
+# Arguments:
+# handler -	The handler which identifies the folder window
+
+proc SetSortOrder {handler} {
+    upvar \#0 $handler fh
+    global option
+
+    set option(folder_sort) $fh(folder_sort)
+    $fh(folder_handler) setSortOrder $fh(folder_sort)
+    RatBusy {Sync $handler update}
+    SaveOptions
+}
+
+# SetShowHeaders --
+#
+# Updates the show_header setting. Both for this folder and the
+# default.
+#
+# Arguments:
+# handler -	The handler which identifies the folder window
+
+proc SetShowHeaders {handler} {
+    upvar \#0 $handler fh
+    upvar \#0 $fh(text) texth
+    global option
+
+    set option(show_header) $texth(show_header)
+    FolderSelect $handler $fh(list_index)
+    SaveOptions
+}
+
+# SetWrapMode --
+#
+# Updates the wrap mode settings. Both for this folder and the
+# default.
+#
+# Arguments:
+# handler -	The handler which identifies the folder window
+
+proc SetWrapMode {handler} {
+    upvar \#0 $handler fh
+    global option
+
+    set option(wrap_mode) $fh(wrap_mode)
+    $fh(text) configure -wrap $fh(wrap_mode)
+    SaveOptions
 }

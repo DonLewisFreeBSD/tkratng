@@ -3,7 +3,7 @@
 # This file contains code which handles the key definitions window
 #
 #
-#  TkRat software and its included text is Copyright 1996-2002 by
+#  TkRat software and its included text is Copyright 1996-2004 by
 #  Martin Forssén
 #
 #  The full text of the legal notice is contained in the file called
@@ -12,6 +12,7 @@
 # The order of the definitions
 set keyDefOrder(folder) {folder_key_find folder_key_compose folder_key_replya
 	folder_key_replys folder_key_forward_i folder_key_forward_a
+        folder_key_mvdb
 	folder_key_bounce folder_key_sync folder_key_netsync folder_key_update
         folder_key_delete folder_key_undelete folder_key_markunread
         folder_key_flag folder_key_nextu folder_key_next folder_key_prev
@@ -20,8 +21,9 @@ set keyDefOrder(folder) {folder_key_find folder_key_compose folder_key_replya
         folder_key_cycle_header folder_key_print folder_key_close
         folder_key_openfile folder_key_online folder_key_quit}
 set keyDefOrder(compose) {compose_key_send compose_key_abort 
-	compose_key_editor compose_key_undo compose_key_cut
-	compose_key_cut_all compose_key_copy compose_key_paste}
+	compose_key_editor compose_key_undo compose_key_redo compose_key_cut
+	compose_key_copy compose_key_paste compose_key_cut_all
+        compose_key_wrap}
 
 # KeyDef --
 #
@@ -35,7 +37,7 @@ proc KeyDef {area} {
 
     # Create identifier
     set id kd
-    upvar #0 $id hd
+    upvar \#0 $id hd
     set w .$id
     if {[winfo exists $w]} {
 	destroy $w
@@ -54,7 +56,7 @@ proc KeyDef {area} {
     button $w.but.ok -text $t(ok) -command "KeyDefApply $area $id"
     button $w.but.delete -text $t(delete) \
 	-command "set ${id}(state) delete; set ${id}(message) \"$t(do_delete)\""
-    button $w.but.cancel -text $t(cancel) -command "unset $id; destroy $w"
+    button $w.but.cancel -text $t(cancel) -command "destroy $w"
     pack $w.but.ok \
 	 $w.but.delete \
 	 $w.but.cancel -side left -expand 1
@@ -76,8 +78,10 @@ proc KeyDef {area} {
 	    -command "$w.f.canvas yview" \
 	    -highlightthickness 0
     set hd(canvas) $w.f.canvas
-    canvas $w.f.canvas -yscrollcommand "$w.f.scroll set" -highlightthickness 0
-    Size $w.f.canvas keyCanvas
+    canvas $w.f.canvas \
+        -yscrollcommand "$w.f.scroll set" \
+        -highlightthickness 0 \
+        -background [$w.msg cget -background]
     frame $w.f.canvas.f
     set hd(cid) [$w.f.canvas create window 0 0 \
 	    -anchor nw \
@@ -105,9 +109,9 @@ proc KeyDef {area} {
 	}
     }
     grid columnconfigure $w.f.canvas 1 -weight 1
-    wm protocol $w WM_DELETE_WINDOW "unset $id; destroy $w"
 
-    Place $w keydef
+    bind $w.f.canvas <Destroy> "KeyDefClose $id"
+    ::tkrat::winctl::SetGeometry keydef $w $w.f.canvas
 
     # Resize canvas
     update idletasks
@@ -126,7 +130,7 @@ proc KeyDef {area} {
 
 proc PopulateKeyDef {w name handler} {
     global idCnt b
-    upvar #0 $handler hd
+    upvar \#0 $handler hd
 
     foreach s [pack slaves $w] {
 	destroy $s
@@ -152,7 +156,7 @@ proc PopulateKeyDef {w name handler} {
 # handler - The handler for this keydef window
 
 proc AddKey {w name handler} {
-    upvar #0 $handler hd
+    upvar \#0 $handler hd
     global t
 
     set hd(mod) ""
@@ -182,7 +186,7 @@ proc AddKey {w name handler} {
 # handler - The handler for this keydef window
 
 proc KeyEvent {e key w name handler} {
-    upvar #0 $handler hd
+    upvar \#0 $handler hd
     global t
 
     if {[regexp {(Shift|Control|Alt|Mod[1-5]|Meta)(_[LR])?} $key tot mod]} {
@@ -226,7 +230,7 @@ proc KeyEvent {e key w name handler} {
 # handler - The handler for the keydef window
 
 proc DeleteKeyDef {event handler} {
-    upvar #0 $handler hd
+    upvar \#0 $handler hd
 
     if {[string compare delete $hd(state)]} {
 	return
@@ -249,7 +253,7 @@ proc DeleteKeyDef {event handler} {
 # handler - The handler for this keydef window
 
 proc KeyDefApply {area handler} {
-    upvar #0 $handler hd
+    upvar \#0 $handler hd
     global option b
 
     set changed 0
@@ -266,8 +270,6 @@ proc KeyDefApply {area handler} {
 	}
     }
     destroy $hd(w)
-    foreach bn [array names b $hd(w).*] {unset b($bn)}
-    unset hd
 
     if {$changed} {
 	switch $area {
@@ -275,7 +277,7 @@ proc KeyDefApply {area handler} {
 		global folderWindowList
 
 		foreach f [array names folderWindowList] {
-		    upvar #0 $f fh
+		    upvar \#0 $f fh
 		    foreach e $remove {
 			bind $fh(w) $e {}
 		    }
@@ -286,7 +288,7 @@ proc KeyDefApply {area handler} {
 		global composeWindowList
 
 		foreach m $composeWindowList {
-		    upvar #0 $m mh
+		    upvar \#0 $m mh
 		    foreach e $remove {
 			bind $mh(toplevel) $e {}
 		    }
@@ -296,4 +298,19 @@ proc KeyDefApply {area handler} {
 	}
 	SaveOptions
     }
+}
+
+# KeyDefClose --
+#
+# Close the key definition window
+#
+# Arguments:
+# handler - The handler for this keydef window
+
+proc KeyDefClose {handler} {
+    upvar \#0 $handler hd
+
+    ::tkrat::winctl::RecordGeometry keydef $hd(w) $hd(canvas)
+    foreach bn [array names b $hd(w).*] {unset b($bn)}
+    unset hd
 }

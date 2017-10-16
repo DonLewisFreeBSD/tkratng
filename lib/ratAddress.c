@@ -3,7 +3,7 @@
  *
  *	This file contains basic support for handling addresses.
  *
- * TkRat software and its included text is Copyright 1996-2002 by
+ * TkRat software and its included text is Copyright 1996-2004 by
  * Martin Forssén
  *
  * The full text of the legal notice is contained in the file called
@@ -21,26 +21,57 @@ typedef struct {
     Tcl_Obj *book;	/* Address book this alias comes from */
     Tcl_Obj *fullname;	/* Long name of alias (phrase part) */
     Tcl_Obj *content;	/* Content that alias expands to */
+    ADDRESS *parsed;    /* Parsed contents */
     Tcl_Obj *comment;	/* Comment to alias */
+    Tcl_Obj *pgp_key;	/* PGP key of alias expressed as {ID DESCR} */
+    char *address;      /* Address contained in alias if not a list */
     unsigned int flags;	/* Option flags */
     unsigned long mark;	/* Id of last use */
 } AliasInfo;
 
 #define ALIAS_FLAG_ISLIST	(1<<0)
 #define ALIAS_FLAG_NOFULLNAME	(1<<1)
+#define ALIAS_FLAG_PGP_SIGN	(1<<2)
+#define ALIAS_FLAG_PGP_ENCRYPT	(1<<3)
 
 /*
- * This table contains all the aliases.
+ * Alias flags
  */
-Tcl_HashTable aliasTable;
+struct {
+    const char *name;
+    int flag;
+} alias_flags[] = {
+    {"nofullname",  ALIAS_FLAG_NOFULLNAME},
+    {"pgp_sign",    ALIAS_FLAG_PGP_SIGN},
+    {"pgp_encrypt", ALIAS_FLAG_PGP_ENCRYPT},
+    { NULL, 0 }
+};
+
+/*
+ * This table contains all the aliases. Stored as pointers to the AliasInfo
+ * structs.
+ */
+static Tcl_HashTable aliasTable;
+
+/*
+ * This table contains all single email addresses contained in aliases.
+ * The table stores pointers to the respective AliasInfo structs.
+ * This is used to find the pgp settings for certain addresses.
+ */
+static Tcl_HashTable addressTable;
 
 /*
  * This struct us ised when aliases are expanded
  */
+typedef enum {
+    EXPAND_DISPLAY, EXPAND_SENDING, EXPAND_PGP, EXPAND_PGPACTIONS
+} expand_t;
 typedef struct {
     char *host;
+    char *mark;
     int lookup_in_passwd;
-    int level;
+    expand_t target;
+    int flags;
 } AliasExpand;
 
 /*
@@ -66,80 +97,82 @@ typedef enum {
 } ParseState;
 
 /*
- * Internal functions
+ * These tables contain the email addresses for each of my roles.
  */
-static int AddressClean(Tcl_Obj *aPtr);
+static Tcl_HashTable myRoles1, myRoles2, *myRolesCurrent, *myRolesPrevious;
+
+/*
+ * This table contains my default email address and all my role addresses.
+ */
+static Tcl_HashTable myAddressesTable;
+
+/*
+ *  The default email address for the !trustUser case
+ */
+static char *myDefaultEmailAddress;
+
+/*
+ * Override the address book of new entries when this is set
+ */
+static Tcl_Obj *overrideBook = NULL;
 
 #ifdef MEM_DEBUG
 static char *mem_store;
 #endif /* MEM_DEBUG */
 
-static int RatAddressIsMeRole(Tcl_Interp *interp, ADDRESS *adrPtr, char *role);
-static void RatExpandAlias(Tcl_Interp *interp, Tcl_DString *list,
-			   AliasExpand *ea);
-
+static void RatRebuildMyAddressTable(Tcl_HashTable *myaddresstable);
+static Tcl_VarTraceProc RatRoleWatcher;
+static Tcl_VarTraceProc RatRoleListWatcher;
+void RatInitMyAddessesTable(Tcl_Interp *interp);
+static void RatExpandAlias(Tcl_Interp *interp, ADDRESS *address,
+                           Tcl_DString *list, AliasExpand *ea);
+static Tcl_Obj *RatGetFlagsList(Tcl_Interp *interp, AliasInfo *aliasPtr);
+static Tcl_ObjCmdProc RatCreateAddressCmd;
+static Tcl_ObjCmdProc RatAddressCmd;
+static Tcl_CmdDeleteProc RatDeleteAddress;
+static Tcl_ObjCmdProc RatAliasCmd;
+static Tcl_ObjCmdProc RatSplitAdrCmd;
+static Tcl_ObjCmdProc RatGenerateAddressesCmd;
 
 /*
  *----------------------------------------------------------------------
  *
- * AddressClean --
+ * RatInitAddressHandling --
  *
- *      Clean an address list by removing all whitespace around addresses
+ *      Initialize the address system
  *
  * Results:
- *	The number of addresses contained in the object
+ *	None.
  *
  * Side effects:
- *	Modifies the given object
+ *	None.
  *
  *
  *----------------------------------------------------------------------
  */
-
-static int
-AddressClean(Tcl_Obj *aPtr)
+void RatInitAddressHandling(Tcl_Interp *interp)
 {
-    char *mark, *dst, *src, *new;
-    int quoted = 0;
-    int skip = 1, length, num = 1;
+    Tcl_InitHashTable(&aliasTable, TCL_STRING_KEYS);
+    Tcl_InitHashTable(&addressTable, TCL_STRING_KEYS);
 
-    src = Tcl_GetStringFromObj(aPtr, &length);
-    new = dst = mark = (char*)ckalloc(length);
-    for (; *src; src++) {
-	if ('\\' == *src) {
-	    *dst++ = *src++;
-	} else if ('"' == *src) {
-	    skip = 0;
-	    if (quoted) {
-		quoted = 0;
-	    } else {
-		quoted = 1;
-	    }
-	} else if (!quoted) {
-	    if (',' == *src) {
-		num++;
-		dst = mark;
-		skip = 1;
-	    } else if (isspace((unsigned char)*src)) {
-		if (skip) {
-		    continue;
-		}
-	    } else {
-		mark = dst+1;
-		skip = 0;
-	    }
-	}
-	*dst++ = *src;
-    }
-    if (0 == mark-new) {
-	num = 0;
-    }
-    Tcl_SetStringObj(aPtr, new, mark-new);
-    ckfree(new);
-    return num;
+    Tcl_CreateObjCommand(interp, "RatCreateAddress", RatCreateAddressCmd,
+			 NULL, NULL);
+    Tcl_CreateObjCommand(interp, "RatAlias", RatAliasCmd, NULL, NULL);
+    Tcl_CreateObjCommand(interp, "RatSplitAdr", RatSplitAdrCmd, NULL, NULL);
+    Tcl_CreateObjCommand(interp, "RatGenerateAddresses",
+			 RatGenerateAddressesCmd, NULL, NULL);
+
+    myRolesCurrent = &myRoles1;
+    myRolesPrevious = &myRoles2;
+    Tcl_InitHashTable(myRolesCurrent, TCL_STRING_KEYS);
+    Tcl_InitHashTable(&myAddressesTable, TCL_STRING_KEYS);
+    myDefaultEmailAddress = cpystr(RatGetCurrent(interp, RAT_EMAILADDRESS,""));
+    RatRoleListWatcher(&myAddressesTable, interp, "option", "roles",
+	               TCL_GLOBAL_ONLY);
+    Tcl_TraceVar2(interp, "option", "roles",
+	          TCL_GLOBAL_ONLY|TCL_TRACE_WRITES|TCL_TRACE_UNSETS,
+                  RatRoleListWatcher, &myAddressesTable);
 }
-
-
 
 /*
  *----------------------------------------------------------------------
@@ -159,24 +192,31 @@ AddressClean(Tcl_Obj *aPtr)
  *----------------------------------------------------------------------
  */
 
-int
+static int
 RatCreateAddressCmd(ClientData clientData, Tcl_Interp *interp, int objc,
-	Tcl_Obj *CONST objv[])
+		    Tcl_Obj *CONST objv[])
 {
     ADDRESS *adrPtr = NULL;
-    char *s, *ch;
+    char *s, *domain;
 
     if (objc != 3) {
 	Tcl_AppendResult(interp, "wrong # args: should be \"",
-		Tcl_GetString(objv[0]), " address role\"", (char *) NULL);
+                         Tcl_GetString(objv[0]),
+                         " ?-nodomain? address ?role?\"", (char *) NULL);
 	return TCL_ERROR;
     }
 
-    ch = RatGetCurrent(interp, RAT_HOST, Tcl_GetString(objv[2]));
-    s = cpystr(Tcl_GetString(objv[1]));
-    rfc822_parse_adrlist(&adrPtr, s, ch);
+    if (!strcmp("-nodomain", Tcl_GetString(objv[1]))) {
+        domain = NODOMAIN;
+        s = cpystr(Tcl_GetString(objv[2]));
+    } else {
+        domain = RatGetCurrent(interp, RAT_HOST, Tcl_GetString(objv[2]));
+        s = cpystr(Tcl_GetString(objv[1]));
+    }
+    rfc822_parse_adrlist(&adrPtr, s, domain);
     ckfree(s);
     RatEncodeAddresses(interp, adrPtr);
+    Tcl_ResetResult(interp);
     RatInitAddresses(interp, adrPtr);
     mail_free_address(&adrPtr);
     return TCL_OK;
@@ -223,7 +263,7 @@ RatInitAddresses(Tcl_Interp *interp, ADDRESS *addressPtr)
 	if (adrPtr->host)	newPtr->host = cpystr(adrPtr->host);
 	if (adrPtr->error)	newPtr->error = cpystr(adrPtr->error);
 	sprintf(name, "RatAddress%d", numAddresses++);
-	Tcl_CreateObjCommand(interp, name, RatAddress, (ClientData) newPtr,
+	Tcl_CreateObjCommand(interp, name, RatAddressCmd, (ClientData) newPtr,
 		RatDeleteAddress);
 	Tcl_ListObjAppendElement(interp, rPtr, Tcl_NewStringObj(name, -1));
     }
@@ -233,7 +273,7 @@ RatInitAddresses(Tcl_Interp *interp, ADDRESS *addressPtr)
 /*
  *----------------------------------------------------------------------
  *
- * RatAddress --
+ * RatAddressCmd --
  *
  *      This routine handles the address entity commands. See ../doc/interface
  *	for a documentation of them.
@@ -248,9 +288,9 @@ RatInitAddresses(Tcl_Interp *interp, ADDRESS *addressPtr)
  *----------------------------------------------------------------------
  */
 
-int
-RatAddress(ClientData clientData, Tcl_Interp *interp, int objc,
-	   Tcl_Obj *const objv[])
+static int
+RatAddressCmd(ClientData clientData, Tcl_Interp *interp, int objc,
+	      Tcl_Obj *const objv[])
 {
     ADDRESS *adrPtr = (ADDRESS*)clientData;
     Tcl_CmdInfo info;
@@ -296,6 +336,7 @@ RatAddress(ClientData clientData, Tcl_Interp *interp, int objc,
 		char *personal;
 
 		oPtr = Tcl_NewStringObj(adrPtr->personal, -1);
+		Tcl_IncrRefCount(oPtr);
 		personal = RatEncodeHeaderLine(interp, oPtr, 0);
 		Tcl_DecrRefCount(oPtr);
 		oPtr = Tcl_NewObj();
@@ -346,7 +387,7 @@ RatAddress(ClientData clientData, Tcl_Interp *interp, int objc,
  *----------------------------------------------------------------------
  */
 
-void
+static void
 RatDeleteAddress(ClientData clientData)
 {
     ADDRESS *adrPtr = (ADDRESS*)clientData;
@@ -361,38 +402,200 @@ RatDeleteAddress(ClientData clientData)
 /*
  *----------------------------------------------------------------------
  *
- * RatAddressIsMeInRole --
+ * RatRebuildMyAddressTable --
  *
- *      Checks if the address points to me in the given role
+ *      Watch for changes to role email addresses and update the current
+ *	role address table.
+ *
  *
  * Results:
- *	If it is then non zero is returned otherwise zero.
+ *	None.
  *
  * Side effects:
- *	None.
+ *	See above.
  *
  *
  *----------------------------------------------------------------------
  */
-static int
-RatAddressIsMeRole(Tcl_Interp *interp, ADDRESS *adrPtr, char *role)
+static void
+RatRebuildMyAddressTable(Tcl_HashTable *myaddresstable)
 {
-    char *from, *host;
-    ADDRESS *a = NULL;
+    Tcl_HashEntry *hPtr, *entryPtr;
+    Tcl_HashSearch search;
+    int new;
+    char *emailaddress;
 
-    host = cpystr(RatGetCurrent(interp, RAT_HOST, role));
-    from = cpystr(RatGetCurrent(interp, RAT_MAILBOX, role));
-    rfc822_parse_adrlist(&a, from, host);
-    ckfree(from);
-    ckfree(host);
-    if (a && adrPtr->mailbox && adrPtr->host
-	&& !strcasecmp(a->mailbox, adrPtr->mailbox)
-	&& !strcasecmp(a->host, adrPtr->host)) {
-	mail_free_address(&a);
-	return 1;
+    Tcl_DeleteHashTable(myaddresstable);
+    /*
+     * Walk current role address table to find all the email addresses
+     * and add entries for each to the the address table.
+     */
+    Tcl_InitHashTable(myaddresstable, TCL_STRING_KEYS);
+    for (hPtr = Tcl_FirstHashEntry(myRolesCurrent, &search);
+	 hPtr != NULL; hPtr = Tcl_NextHashEntry(&search)) {
+	emailaddress = Tcl_GetHashValue(hPtr);
+	entryPtr = Tcl_CreateHashEntry(myaddresstable, emailaddress, &new);
+	Tcl_SetHashValue(entryPtr, "role");
     }
-    mail_free_address(&a);
-    return 0;
+    entryPtr = Tcl_CreateHashEntry(myaddresstable, myDefaultEmailAddress, &new);
+    Tcl_SetHashValue(entryPtr, "me");
+}
+
+/*
+ *----------------------------------------------------------------------
+ *
+ * RatRoleWatcher --
+ *
+ *      Watch for changes to role email addresses and update the current
+ *	role address table.
+ *
+ *      MyAddressTable is rebuilt if clientData != NULL
+ *
+ *
+ * Results:
+ *	None.
+ *
+ * Side effects:
+ *	See above.
+ *
+ *
+ *----------------------------------------------------------------------
+ */
+static char *
+RatRoleWatcher(ClientData clientData, Tcl_Interp *interp,
+	       CONST84 char *name1, CONST84 char *name2, int flags)
+{
+    char role[1024], *comma;
+    char *emailaddress, *oldaddress, *cp;
+    int new;
+    Tcl_HashEntry *entryPtr;
+
+    if (flags & TCL_INTERP_DESTROYED) {
+	return NULL;
+    }
+
+    strlcpy(role, name2, sizeof(role));
+    comma = strchr(role, ',');
+    if (comma) {
+	*comma = '\0';
+    }
+    emailaddress = cpystr(RatGetCurrent(interp, RAT_EMAILADDRESS, role));
+    for (cp = emailaddress; *cp; cp++) {
+	*cp = tolower((unsigned char) *cp);
+    }
+    entryPtr = Tcl_CreateHashEntry(myRolesCurrent, role, &new);
+    if (new == 0) {
+	oldaddress = Tcl_GetHashValue(entryPtr);
+	if (oldaddress) {
+	    ckfree(oldaddress);
+	}
+    }
+    Tcl_SetHashValue(entryPtr, emailaddress);
+
+    if (clientData) {
+	RatRebuildMyAddressTable(clientData);
+    }
+
+    return NULL;
+}
+
+/*
+ *----------------------------------------------------------------------
+ *
+ * RatRoleListWatcher --
+ *
+ *      Update myAddressesTable whenever the roles option is changed.
+ *
+ * Results:
+ *	None.
+ *
+ * Side effects:
+ *	See above.
+ *
+ *
+ *----------------------------------------------------------------------
+ */
+static char*
+RatRoleListWatcher(ClientData clientData, Tcl_Interp *interp,
+		   CONST84 char *name1, CONST84 char *name2, int flags)
+{
+    Tcl_Obj **objv, *oPtr;
+    Tcl_HashTable *myRolesTmp;
+    Tcl_HashEntry *entryPtr;
+    Tcl_HashSearch search;
+    int objc, i, new;
+    char *role, *emailaddress;
+    char buf[1024];
+
+    if (flags & TCL_INTERP_DESTROYED) {
+    	return NULL;
+    }
+
+    /*
+     * The role list has changed, so swap the the role tables so that
+     * the changes can be found and the new table updated.
+     */
+    myRolesTmp = myRolesCurrent;
+    myRolesCurrent = myRolesPrevious;
+    myRolesPrevious = myRolesTmp;
+    Tcl_InitHashTable(myRolesCurrent, TCL_STRING_KEYS);
+
+    /*
+     * Copy entries common to the old and new lists of roles.
+     * Add email addresses and set up traces on any new roles.
+     */
+    oPtr = Tcl_GetVar2Ex(interp, name1, name2, flags & TCL_GLOBAL_ONLY);
+    if (oPtr != NULL) {
+	Tcl_ListObjGetElements(interp, oPtr, &objc, &objv);
+	for (i=0; i<objc; i++) {
+	    role = Tcl_GetString(objv[i]);
+	    entryPtr = Tcl_FindHashEntry(myRolesPrevious, role);
+	    if (entryPtr) {
+		emailaddress = Tcl_GetHashValue(entryPtr);
+		Tcl_SetHashValue(entryPtr, NULL);
+		entryPtr = Tcl_CreateHashEntry(myRolesCurrent, role, &new);
+		Tcl_SetHashValue(entryPtr, emailaddress);
+	    } else {
+	        snprintf(buf, sizeof(buf), "%s,from", role);
+	        RatRoleWatcher(NULL, interp, name1, buf, flags);
+		Tcl_TraceVar2(interp, name1, buf,
+			      TCL_GLOBAL_ONLY|TCL_TRACE_WRITES|TCL_TRACE_UNSETS,
+			      RatRoleWatcher, clientData);
+		snprintf(buf, sizeof(buf), "%s,uqa_domain", role);
+		Tcl_TraceVar2(interp, name1, buf,
+			      TCL_GLOBAL_ONLY|TCL_TRACE_WRITES|TCL_TRACE_UNSETS,
+			      RatRoleWatcher, clientData);
+	    }
+	}
+    }
+
+    /*
+     * Remove traces for any roles that have gone away.
+     * Free the previous table.
+     */
+    for (entryPtr = Tcl_FirstHashEntry(myRolesPrevious, &search);
+	 entryPtr != NULL; entryPtr = Tcl_NextHashEntry(&search)) {
+	role = Tcl_GetHashKey(myRolesPrevious, entryPtr);
+	if (! Tcl_FindHashEntry(myRolesCurrent, role)) {
+	    snprintf(buf, sizeof(buf), "%s,from", role);
+	    Tcl_UntraceVar2(interp, name1, buf,
+			    TCL_GLOBAL_ONLY|TCL_TRACE_WRITES|TCL_TRACE_UNSETS,
+			    RatRoleWatcher, clientData);
+	    snprintf(buf, sizeof(buf), "%s,uqa_domain", role);
+	    Tcl_UntraceVar2(interp, name1, buf,
+			    TCL_GLOBAL_ONLY|TCL_TRACE_WRITES|TCL_TRACE_UNSETS,
+			    RatRoleWatcher, clientData);
+	}
+	emailaddress = Tcl_GetHashValue(entryPtr);
+	if (emailaddress) {
+	    ckfree(emailaddress);
+	}
+    }
+    Tcl_DeleteHashTable(myRolesPrevious);
+
+    RatRebuildMyAddressTable(clientData);
+
+    return NULL;
 }
 
 /*
@@ -415,47 +618,48 @@ RatAddressIsMeRole(Tcl_Interp *interp, ADDRESS *adrPtr, char *role)
 int
 RatAddressIsMe(Tcl_Interp *interp, ADDRESS *adrPtr, int trustUser)
 {
-    Tcl_Obj **objv, *oPtr;
     Tcl_CmdInfo cmdInfo;
-    int objc, i;
+    Tcl_HashEntry *entryPtr;
+    char buf[1024], *cp;
 
-    if (adrPtr == NULL) {
+    if ((adrPtr == NULL) || (adrPtr->mailbox == NULL) ||
+	(adrPtr->host == NULL)) {
 	return 0;
     }
     
-    if (RatAddressIsMeRole(interp, adrPtr, "")) {
-	return 1;
+    snprintf(buf, sizeof(buf), "%s@%s", adrPtr->mailbox, adrPtr->host);
+    for (cp = buf; *cp; cp++) {
+	*cp = tolower((unsigned char) *cp);
     }
 
-    if (trustUser) {
-	oPtr = Tcl_GetVar2Ex(interp, "option", "roles", TCL_GLOBAL_ONLY);
-	Tcl_ListObjGetElements(interp, oPtr, &objc, &objv);
-	for (i=0; i<objc; i++) {
-	    if (RatAddressIsMeRole(interp, adrPtr, Tcl_GetString(objv[i]))) {
-		return 1;
-	    }
-	}
-	if (Tcl_GetCommandInfo(interp, "RatUP_IsMe", &cmdInfo)) {
-	    Tcl_DString cmd;
-	    int isMe;
-	    Tcl_Obj *oPtr;
+    entryPtr = Tcl_FindHashEntry(&myAddressesTable, buf);
+    if (entryPtr != NULL) {
+        cp = (char *)Tcl_GetHashValue(entryPtr);
+        if (cp[0] == 'm' || (trustUser && (cp[0] == 'r'))) {
+            return 1;
+        }
+    }
 
-	    Tcl_DStringInit(&cmd);
-	    Tcl_DStringAppendElement(&cmd, "RatUP_IsMe");
-	    Tcl_DStringAppendElement(&cmd,adrPtr->mailbox?adrPtr->mailbox:"");
-	    Tcl_DStringAppendElement(&cmd,adrPtr->host?adrPtr->host:"");
-	    Tcl_DStringAppendElement(&cmd,
-				     adrPtr->personal ? adrPtr->personal : "");
-	    Tcl_DStringAppendElement(&cmd,adrPtr->adl?adrPtr->adl:"");
-	    if (TCL_OK == Tcl_Eval(interp, Tcl_DStringValue(&cmd))
-	    	    && (oPtr = Tcl_GetObjResult(interp))
-		    && TCL_OK == Tcl_GetBooleanFromObj(interp, oPtr, &isMe)) {
-		Tcl_DStringFree(&cmd);
-		return isMe;
-	    }
+    if (trustUser && Tcl_GetCommandInfo(interp, "RatUP_IsMe", &cmdInfo)) {
+	Tcl_DString cmd;
+	int isMe;
+	Tcl_Obj *oPtr;
+	
+	Tcl_DStringInit(&cmd);
+	Tcl_DStringAppendElement(&cmd, "RatUP_IsMe"); 
+	Tcl_DStringAppendElement(&cmd, adrPtr->mailbox ? adrPtr->mailbox : "");
+	Tcl_DStringAppendElement(&cmd, adrPtr->host ? adrPtr->host : "");
+	Tcl_DStringAppendElement(&cmd, adrPtr->personal ? adrPtr->personal:"");
+	Tcl_DStringAppendElement(&cmd, adrPtr->adl?adrPtr->adl:"");
+	if (TCL_OK == Tcl_Eval(interp, Tcl_DStringValue(&cmd))
+	    && (oPtr = Tcl_GetObjResult(interp))
+	    && TCL_OK == Tcl_GetBooleanFromObj(interp, oPtr, &isMe)) {
 	    Tcl_DStringFree(&cmd);
+	    return isMe;
 	}
+	Tcl_DStringFree(&cmd);
     }
+    
     return 0;
 }
 
@@ -573,7 +777,7 @@ RatAddressTranslate(Tcl_Interp *interp, ADDRESS *adrPtr)
  *----------------------------------------------------------------------
  */
 
-int
+static int
 RatAliasCmd(ClientData dummy,Tcl_Interp *interp,int objc,Tcl_Obj *CONST objv[])
 {
     Tcl_Obj *oPtr;
@@ -586,8 +790,9 @@ RatAliasCmd(ClientData dummy,Tcl_Interp *interp,int objc,Tcl_Obj *CONST objv[])
     if (!strcmp(Tcl_GetString(objv[1]), "add")) {
 	AliasInfo *aliasPtr;
 	Tcl_HashEntry *entryPtr;
-	char *key;
-	int new;
+	Tcl_Obj **fobjv;
+	char *key, *s;
+	int new, fobjc;
 
 	aliasPtr = (AliasInfo*)ckalloc(sizeof(AliasInfo));
 	switch (objc) {
@@ -597,6 +802,7 @@ RatAliasCmd(ClientData dummy,Tcl_Interp *interp,int objc,Tcl_Obj *CONST objv[])
 		aliasPtr->fullname = objv[3];
 		aliasPtr->content = objv[4];
 		aliasPtr->comment = Tcl_NewObj();
+		aliasPtr->pgp_key = Tcl_NewObj();
 		aliasPtr->flags = 0;
 		break;
 	    case 6:
@@ -605,6 +811,7 @@ RatAliasCmd(ClientData dummy,Tcl_Interp *interp,int objc,Tcl_Obj *CONST objv[])
 		aliasPtr->fullname = objv[3];
 		aliasPtr->content = objv[4];
 		aliasPtr->comment = Tcl_NewObj();
+		aliasPtr->pgp_key = Tcl_NewObj();
 		aliasPtr->flags = 0;
 		break;
 	    case 7:
@@ -613,18 +820,43 @@ RatAliasCmd(ClientData dummy,Tcl_Interp *interp,int objc,Tcl_Obj *CONST objv[])
 		aliasPtr->fullname = objv[4];
 		aliasPtr->content = objv[5];
 		aliasPtr->comment = objv[6];
+		aliasPtr->pgp_key = Tcl_NewObj();
 		aliasPtr->flags = 0;
 		break;
-	    case 8:
+  	    case 8:
 		aliasPtr->book = objv[2];
 		key = Tcl_GetString(objv[3]);
 		aliasPtr->fullname = objv[4];
 		aliasPtr->content = objv[5];
 		aliasPtr->comment = objv[6];
+		aliasPtr->pgp_key = Tcl_NewObj();
 		if (!strcmp(Tcl_GetString(objv[7]), "nofullname")) {
 		    aliasPtr->flags = ALIAS_FLAG_NOFULLNAME;
 		} else {
 		    aliasPtr->flags = 0;
+		}
+		break;
+  	    case 9:
+		aliasPtr->book = objv[2];
+		key = Tcl_GetString(objv[3]);
+		aliasPtr->fullname = objv[4];
+		aliasPtr->content = objv[5];
+		aliasPtr->comment = objv[6];
+		aliasPtr->pgp_key = objv[7];
+		aliasPtr->flags = 0;
+		if (TCL_OK ==
+		    Tcl_ListObjGetElements(interp, objv[8], &fobjc, &fobjv)) {
+		    int i, j;
+		    
+		    for (i=0; i<fobjc; i++) {
+			for (j=0; alias_flags[j].name; j++) {
+			    if (!strcmp(alias_flags[j].name,
+					Tcl_GetString(fobjv[i]))) {
+				aliasPtr->flags |= alias_flags[j].flag;
+				break;
+			    }
+			}
+		    }
 		}
 		break;
 	    default:
@@ -640,17 +872,44 @@ RatAliasCmd(ClientData dummy,Tcl_Interp *interp,int objc,Tcl_Obj *CONST objv[])
 		    TCL_STATIC);
 	    return TCL_OK;
 	}
+        if (overrideBook) {
+            Tcl_IncrRefCount(aliasPtr->book);
+            Tcl_DecrRefCount(aliasPtr->book);
+            aliasPtr->book = overrideBook;
+        }
+        aliasPtr->parsed = NULL;
 	aliasPtr->mark = 0;
 	if (Tcl_IsShared(aliasPtr->content)) {
 	    aliasPtr->content = Tcl_DuplicateObj(aliasPtr->content);
 	}
-	if (1 < AddressClean(aliasPtr->content)) {
+        
+        s = cpystr(Tcl_GetString(aliasPtr->content));
+        rfc822_parse_adrlist(&aliasPtr->parsed, s, "");
+        ckfree(s);
+
+        aliasPtr->address = NULL;
+        if (aliasPtr->parsed && aliasPtr->parsed->next) {
 	    aliasPtr->flags |= ALIAS_FLAG_ISLIST;
+	} else if (aliasPtr->parsed) {
+	    char buf[1024];
+	    
+            snprintf(buf, sizeof(buf), "%s@%s", aliasPtr->parsed->mailbox,
+                     aliasPtr->parsed->host);
+            if (!aliasPtr->parsed->personal
+                && !(aliasPtr->flags & ALIAS_FLAG_NOFULLNAME)) {
+                aliasPtr->parsed->personal =
+                    cpystr(Tcl_GetString(aliasPtr->fullname));
+            }
+            aliasPtr->address = cpystr(buf);
+
+	    entryPtr = Tcl_CreateHashEntry(&addressTable, buf, &new);
+	    Tcl_SetHashValue(entryPtr, (ClientData)aliasPtr);
 	}
 	Tcl_IncrRefCount(aliasPtr->book);
 	Tcl_IncrRefCount(aliasPtr->fullname);
 	Tcl_IncrRefCount(aliasPtr->content);
 	Tcl_IncrRefCount(aliasPtr->comment);
+	Tcl_IncrRefCount(aliasPtr->pgp_key);
 	entryPtr = Tcl_CreateHashEntry(&aliasTable, key, &new);
 	Tcl_SetHashValue(entryPtr, (ClientData)aliasPtr);
 	return TCL_OK;
@@ -664,12 +923,20 @@ RatAliasCmd(ClientData dummy,Tcl_Interp *interp,int objc,Tcl_Obj *CONST objv[])
 	    if ((entryPtr = Tcl_FindHashEntry(&aliasTable,
 		    Tcl_GetString(objv[i])))) {
 		aliasPtr = (AliasInfo*)Tcl_GetHashValue(entryPtr);
+		Tcl_DeleteHashEntry(entryPtr);
 		Tcl_DecrRefCount(aliasPtr->book);
 		Tcl_DecrRefCount(aliasPtr->fullname);
 		Tcl_DecrRefCount(aliasPtr->content);
 		Tcl_DecrRefCount(aliasPtr->comment);
+		Tcl_DecrRefCount(aliasPtr->pgp_key);
+		if (aliasPtr->address
+		    && (entryPtr = Tcl_FindHashEntry(&addressTable,
+						    aliasPtr->address))) {
+		    Tcl_DeleteHashEntry(entryPtr);
+		    ckfree(aliasPtr->address);
+		}
+                mail_free_address(&aliasPtr->parsed);
 		ckfree(aliasPtr);
-		Tcl_DeleteHashEntry(entryPtr);
 	    }
 	}
 	return TCL_OK;
@@ -693,12 +960,9 @@ RatAliasCmd(ClientData dummy,Tcl_Interp *interp,int objc,Tcl_Obj *CONST objv[])
 	Tcl_ListObjAppendElement(interp, oPtr, aliasPtr->fullname);
 	Tcl_ListObjAppendElement(interp, oPtr, aliasPtr->content);
 	Tcl_ListObjAppendElement(interp, oPtr, aliasPtr->comment);
-	if (aliasPtr->flags & ALIAS_FLAG_NOFULLNAME) {
-	    Tcl_ListObjAppendElement(interp, oPtr,
-		    Tcl_NewStringObj("nofullname", -1));
-	} else {
-	    Tcl_ListObjAppendElement(interp, oPtr, Tcl_NewObj());
-	}
+	Tcl_ListObjAppendElement(interp, oPtr, aliasPtr->pgp_key);
+	Tcl_ListObjAppendElement(interp, oPtr,
+				 RatGetFlagsList(interp, aliasPtr));
 	Tcl_SetObjResult(interp, oPtr);
 	return TCL_OK;
 
@@ -721,12 +985,9 @@ RatAliasCmd(ClientData dummy,Tcl_Interp *interp,int objc,Tcl_Obj *CONST objv[])
 	    Tcl_ListObjAppendElement(interp, oPtr, aliasPtr->fullname);
 	    Tcl_ListObjAppendElement(interp, oPtr, aliasPtr->content);
 	    Tcl_ListObjAppendElement(interp, oPtr, aliasPtr->comment);
-	    if (aliasPtr->flags & ALIAS_FLAG_NOFULLNAME) {
-		Tcl_ListObjAppendElement(interp, oPtr,
-			Tcl_NewStringObj("nofullname", -1));
-	    } else {
-		Tcl_ListObjAppendElement(interp, oPtr, Tcl_NewObj());
-	    }
+	    Tcl_ListObjAppendElement(interp, oPtr, aliasPtr->pgp_key);
+	    Tcl_ListObjAppendElement(interp, oPtr,
+				     RatGetFlagsList(interp, aliasPtr));
 	    Tcl_SetVar2Ex(interp, Tcl_GetString(objv[2]),
 		    Tcl_GetHashKey(&aliasTable, entryPtr), oPtr, 0);
 	}
@@ -734,23 +995,29 @@ RatAliasCmd(ClientData dummy,Tcl_Interp *interp,int objc,Tcl_Obj *CONST objv[])
 	
     } else if (!strcmp(Tcl_GetString(objv[1]), "read")) {
 	Tcl_Channel channel;
+        int ret;
 
-	if (objc != 3) {
+	if (objc != 4) {
 	    Tcl_AppendResult(interp, "wrong # args: should be \"",
-		    Tcl_GetString(objv[0]), " read filename\"", (char *) NULL);
+                             Tcl_GetString(objv[0]), " read book filename\"",
+                             (char *) NULL);
 	    return TCL_ERROR;
 	}
 	if (NULL == (channel = Tcl_OpenFileChannel(interp,
-		Tcl_GetString(objv[2]), "r", 0))) {
+		Tcl_GetString(objv[3]), "r", 0))) {
 	    return TCL_ERROR;
 	}
+        /* XXX */
 	Tcl_SetChannelOption(interp, channel, "-encoding", "utf-8");
 	oPtr = Tcl_NewObj();
 	while (0 <= Tcl_GetsObj(channel, oPtr) && !Tcl_Eof(channel)) {
 	    Tcl_AppendToObj(oPtr, ";", 1);
 	}
         Tcl_Close(interp, channel);
-	return Tcl_EvalObjEx(interp, oPtr,  TCL_EVAL_DIRECT);
+        overrideBook = objv[2];
+	ret = Tcl_EvalObjEx(interp, oPtr,  TCL_EVAL_DIRECT);
+        overrideBook = NULL;
+        return ret;
 	
     } else if (!strcmp(Tcl_GetString(objv[1]), "save")) {
 	Tcl_HashEntry *entryPtr;
@@ -758,7 +1025,6 @@ RatAliasCmd(ClientData dummy,Tcl_Interp *interp,int objc,Tcl_Obj *CONST objv[])
 	AliasInfo *aliasPtr;
 	Tcl_Channel channel;
 	Tcl_Obj *lPtr;
-	int perm;
 
 	if (objc != 4) {
 	    Tcl_AppendResult(interp, "wrong # args: should be \"",
@@ -767,10 +1033,8 @@ RatAliasCmd(ClientData dummy,Tcl_Interp *interp,int objc,Tcl_Obj *CONST objv[])
 	    return TCL_ERROR;
 	}
 
-	oPtr = Tcl_GetVar2Ex(interp, "option", "permissions", TCL_GLOBAL_ONLY);
-	Tcl_GetIntFromObj(interp, oPtr, &perm);
 	if (NULL == (channel = Tcl_OpenFileChannel(interp,
-		Tcl_GetString(objv[3]), "w", perm))) {
+		Tcl_GetString(objv[3]), "w", 0666))) {
 	    return TCL_ERROR;
 	}
 
@@ -787,12 +1051,10 @@ RatAliasCmd(ClientData dummy,Tcl_Interp *interp,int objc,Tcl_Obj *CONST objv[])
 	    Tcl_ListObjAppendElement(interp, lPtr, aliasPtr->fullname);
 	    Tcl_ListObjAppendElement(interp, lPtr, aliasPtr->content);
 	    Tcl_ListObjAppendElement(interp, lPtr, aliasPtr->comment);
-	    if (aliasPtr->flags & ALIAS_FLAG_NOFULLNAME) {
-		Tcl_ListObjAppendElement(interp, lPtr,
-			Tcl_NewStringObj("nofullname", -1));
-	    } else {
-		Tcl_ListObjAppendElement(interp, lPtr, Tcl_NewObj());
-	    }
+	    Tcl_ListObjAppendElement(interp, lPtr, aliasPtr->pgp_key);
+	    Tcl_ListObjAppendElement(interp, lPtr,
+				     RatGetFlagsList(interp, aliasPtr));
+	    Tcl_IncrRefCount(lPtr);
 	    Tcl_WriteChars(channel, "RatAlias add ", -1);
 	    Tcl_WriteObj(channel, lPtr);
 	    Tcl_DecrRefCount(lPtr);
@@ -800,8 +1062,7 @@ RatAliasCmd(ClientData dummy,Tcl_Interp *interp,int objc,Tcl_Obj *CONST objv[])
 	}
 	return Tcl_Close(interp, channel);
 	
-    } else if (!strcmp(Tcl_GetString(objv[1]), "expand1")
-	    || !strcmp(Tcl_GetString(objv[1]), "expand2")) {
+    } else if (!strcmp(Tcl_GetString(objv[1]), "expand")) {
 	Tcl_HashEntry *entryPtr;
 	AliasInfo *aliasPtr;
 	AliasExpand ae;
@@ -809,55 +1070,50 @@ RatAliasCmd(ClientData dummy,Tcl_Interp *interp,int objc,Tcl_Obj *CONST objv[])
 	char *role, *c, *s;
 	ADDRESS *adrPtr, *baseAdrPtr = NULL;
 
-	if (objc != 4) {
+	if (objc != 5) {
 	    Tcl_AppendResult(interp, "wrong # args: should be \"",
-		    Tcl_GetString(objv[0]), " expand[12] adrlist role\"",
+		    Tcl_GetString(objv[0]), " expand level adrlist role\"",
 		    (char *) NULL);
 	    return TCL_ERROR;
 	}
 
-	/*
-	 * Check syntax
-	 */
-	s = cpystr(Tcl_GetString(objv[2]));
-	for (c=s; *c; c++) {
-	    if ('\n' == *c || '\r' == *c || '\t' == *c) {
-		*c = ' ';
-	    }
+	if (!strcmp(Tcl_GetString(objv[2]), "display")) {
+	    ae.target = EXPAND_DISPLAY;
+	} else if (!strcmp(Tcl_GetString(objv[2]), "sending")) {
+	    ae.target = EXPAND_SENDING;
+	} else if (!strcmp(Tcl_GetString(objv[2]), "pgp")) {
+	    ae.target = EXPAND_PGP;
+	} else if (!strcmp(Tcl_GetString(objv[2]), "pgpactions")) {
+	    ae.target = EXPAND_PGPACTIONS;
+	} else {
+	    Tcl_AppendResult(interp, "bad level argument \"",
+                             Tcl_GetString(objv[2]), "\" should be display,"
+                             " sending, pgp or pgpactions", (char *) NULL);
+	    return TCL_ERROR;
 	}
-	rfc822_parse_adrlist(&baseAdrPtr, s, "");
-	ckfree(s);
-	for (adrPtr = baseAdrPtr; adrPtr; adrPtr = adrPtr->next) {
-	    if (adrPtr->error || (adrPtr->host && adrPtr->host[0] == '.')) {
-		mail_free_address(&baseAdrPtr);
-		Tcl_SetResult(interp, "Error in address list", TCL_STATIC);
-		return TCL_ERROR;
-	    }
-	}
-	mail_free_address(&baseAdrPtr);
-
-
-	/*
-	 * Ignore empty addresses
-	 */
-	for (c = Tcl_GetString(objv[2]); *c && isspace((unsigned char)*c);c++);
-	if (!*c) {
-	    return TCL_OK;
-	}
-	
-	role = Tcl_GetString(objv[3]);
+	role = Tcl_GetString(objv[4]);
 	ae.host = RatGetCurrent(interp, RAT_HOST, role);
 	oPtr = Tcl_GetVar2Ex(interp, "option", "lookup_name", TCL_GLOBAL_ONLY);
 	Tcl_GetBooleanFromObj(interp, oPtr, &ae.lookup_in_passwd);
-	if (!strcmp(Tcl_GetString(objv[1]), "expand2")) {
-	    ae.level = 2;
-	} else {
-	    Tcl_GetIntFromObj(interp, Tcl_GetVar2Ex(interp, "option",
-		    "alias_expand", TCL_GLOBAL_ONLY), &ae.level);
+        ae.flags = 0;
+
+        /*
+	 * Ignore empty addresses
+	 */
+	for (c = Tcl_GetString(objv[3]); *c && isspace((unsigned char)*c);c++);
+	if (!*c) {
+            if (EXPAND_PGPACTIONS == ae.target) {
+                Tcl_Obj *robjv[2];
+
+                robjv[0] = robjv[1] = Tcl_NewBooleanObj(0);
+                Tcl_SetObjResult(interp, Tcl_NewListObj(2, robjv));
+            }
+	    return TCL_OK;
 	}
 
 	/*
-	 * Create unique mark and possibly mark all aliases
+	 * Create unique mark
+         * Reset all aliases if alias mark has wrapped
 	 */
 	if (0 == ++aliasMark) {
 	    Tcl_HashSearch search;
@@ -870,19 +1126,50 @@ RatAliasCmd(ClientData dummy,Tcl_Interp *interp,int objc,Tcl_Obj *CONST objv[])
 	    }
 	}
 
-	Tcl_DStringInit(&list);
-	Tcl_DStringAppend(&list, Tcl_GetString(objv[2]), -1);
-	RatExpandAlias(interp, &list, &ae);
-	Tcl_DStringResult(interp, &list);
+	/*
+	 * Simplify whitespace and parse list
+	 */
+	s = cpystr(Tcl_GetString(objv[3]));
+	for (c=s; *c; c++) {
+	    if ('\n' == *c || '\r' == *c || '\t' == *c) {
+		*c = ' ';
+	    }
+	}
+        ae.mark = cpystr(ae.host);
+        for (c=ae.mark; *c; c++) {
+            *c = '#';
+        }
+	rfc822_parse_adrlist(&baseAdrPtr, s, ae.mark);
+	ckfree(s);
+	for (adrPtr = baseAdrPtr; adrPtr; adrPtr = adrPtr->next) {
+	    if (adrPtr->error || (adrPtr->host && adrPtr->host[0] == '.')) {
+		mail_free_address(&baseAdrPtr);
+		Tcl_SetResult(interp, "Error in address list", TCL_STATIC);
+		return TCL_ERROR;
+	    }
+	}
+
+        Tcl_DStringInit(&list);
+	RatExpandAlias(interp, baseAdrPtr, &list, &ae);
+	mail_free_address(&baseAdrPtr);
+
+        if (EXPAND_PGPACTIONS == ae.target) {
+            Tcl_Obj *robjv[2];
+
+            robjv[0] = Tcl_NewBooleanObj(ae.flags & ALIAS_FLAG_PGP_SIGN);
+            robjv[1] = Tcl_NewBooleanObj(ae.flags & ALIAS_FLAG_PGP_ENCRYPT);
+            Tcl_SetObjResult(interp, Tcl_NewListObj(2, robjv));
+        } else {
+            Tcl_DStringResult(interp, &list);
+        }
 	return TCL_OK;
     } else {
 	Tcl_AppendResult(interp, "bad option \"", Tcl_GetString(objv[1]),
 		"\": must be one of add, delete, get, list, read, save,",
-		" expand1 or expand2",
+		" or expand",
 		(char *) NULL);
 	return TCL_ERROR;
     }
-
 }
 
 /*
@@ -922,7 +1209,55 @@ RatAddressMail(ADDRESS *adrPtr)
 /*
  *----------------------------------------------------------------------
  *
- * RatSplitAddresses --
+ * RatAddressFull --
+ *
+ *      Prints the full address in rfc822 format of an ADDRESS entry.
+ *
+ * Results:
+ *	Pointer to a static storage area where the string is stored.
+ *
+ * Side effects:
+ *	None.
+ *
+ *
+ *----------------------------------------------------------------------
+ */
+
+char*
+RatAddressFull(Tcl_Interp *interp, ADDRESS *adrPtr, char *role)
+{
+    static char *store = NULL;
+    static int length = 0;
+    size_t size = RatAddressSize(adrPtr, 1);
+    ADDRESS *next = adrPtr->next;
+    int host_replaced = 0;
+
+    if (size > length) {
+	length = size+1024;
+	store = ckrealloc(store, length);
+    }
+    store[0] = '\0';
+    adrPtr->next = NULL;
+    if (NULL == adrPtr->host && role) {
+        adrPtr->host = RatGetCurrent(interp, RAT_HOST, role);
+        host_replaced = 1;
+    }
+    rfc822_write_address_full(store, adrPtr, NULL);
+    adrPtr->next = next;
+    if (host_replaced) {
+        adrPtr->host = NULL;
+    }
+    if (strstr(store, "=?")) {
+        return RatDecodeHeader(interp, store, 1);
+    } else {
+        return store;
+    }
+}
+
+/*
+ *----------------------------------------------------------------------
+ *
+ * RatSplitAdrCmd --
  *
  *	This routine takes an address list as argument and splits it.
  *
@@ -936,9 +1271,9 @@ RatAddressMail(ADDRESS *adrPtr)
  *----------------------------------------------------------------------
  */
  
-int
-RatSplitAddresses(ClientData clientData, Tcl_Interp *interp, int objc,
-		  Tcl_Obj *const objv[])
+static int
+RatSplitAdrCmd(ClientData clientData, Tcl_Interp *interp, int objc,
+		     Tcl_Obj *const objv[])
 {
     Tcl_Obj *rPtr;
     CONST84 char *s, *e, *n;
@@ -1119,7 +1454,7 @@ RatGenerateAddresses(Tcl_Interp *interp, const char *role, char *msgh,
  *----------------------------------------------------------------------
  */
 
-int
+static int
 RatGenerateAddressesCmd(ClientData clientData, Tcl_Interp *interp, int objc,
 			Tcl_Obj *const objv[])
 {
@@ -1168,147 +1503,109 @@ RatGenerateAddressesCmd(ClientData clientData, Tcl_Interp *interp, int objc,
  *----------------------------------------------------------------------
  */
 static void
-RatExpandAlias(Tcl_Interp *interp, Tcl_DString *list, AliasExpand *ae)
+RatExpandAlias(Tcl_Interp *interp, ADDRESS *address, Tcl_DString *list,
+               AliasExpand *ae)
 {
-    static char *buf = NULL;
-    static int bufsize = 0;
-    CONST84 char *entry_start, *entry_end, *key_start, *key_end, *c, *copy, *n;
-    struct passwd *pwPtr;
-    int length;
     AliasInfo *aliasPtr = NULL;
     Tcl_HashEntry *entryPtr;
-    Tcl_DString expanded;
-    ParseState ps;
+    struct passwd *pwPtr;
+    ADDRESS *ta, *next_address, aliasAddr;
+    char key_buf[1024], out_buf[1024];
+    char *key, *s;
 
-    /*
-     * Here we make a copy of the list of addresses.
-     * Then we loop over all addresses and try to expand them.
-     * After we have expanded an alias we try to expand the expansion as well.
-     */
-    copy = cpystr(Tcl_DStringValue(list));
-    Tcl_DStringSetLength(list, 0);
-    for (n = entry_start = copy; *n; entry_start = n+1) {
-	/*
-	 * Find addresses in string. We assume addresses are delimited by ','.
-	 * We will also ignore any comments in addresses.
-	 */
-	while (isspace(*(unsigned char*)entry_start)) {
-	    entry_start++;
-	}
-	ps = STATE_NORMAL;
-	n = RatFindCharInHeader(entry_start, ',');
-	if (NULL == n) {
-	    n = entry_start + strlen(entry_start);
-	}
-	for (entry_end = n-1;
-	     entry_end >= entry_start && isspace((unsigned char)*entry_end);
-	     entry_end--);
-	if (entry_start > entry_end) {
-	    continue;
-	}
-	key_start = entry_start;
-	while ('(' == *key_start && key_start < entry_end) {
-	    for (key_start++; *key_start && ')' != *key_start;key_start++);
-	    for (key_start++; *key_start&&isspace(*key_start);key_start++);
-	}
-	key_end = entry_end;
-	while (')' == *key_end && key_end > key_start) {
-	    for (; key_end >= key_start && '(' != *key_end; key_end--);
-	    for (;
-		 key_end >= key_start && (isspace(*key_end) || '(' ==*key_end);
-		 key_end--);
-	}
-	if (bufsize < (key_end-key_start+1)) {
-	    bufsize = key_end-key_start+256;
-	    buf = (char*)ckrealloc(buf, bufsize);
-	}
-	memcpy(buf, key_start, key_end-key_start+1);
-	buf[key_end-key_start+1] = '\0';
-
-	if (NULL != (entryPtr = Tcl_FindHashEntry(&aliasTable, buf))
+    for (; address; address = address->next) {
+        if (address->host && strlen(address->host)
+            && (ae->mark == NULL || strcmp(ae->mark, address->host))) {
+            snprintf(key_buf, sizeof(key_buf), "%s@%s",
+                     address->mailbox, address->host);
+            key = key_buf;
+        } else {
+            key = address->mailbox;
+        }
+        if (!key) {
+            continue;
+        }
+	if (NULL != (entryPtr = Tcl_FindHashEntry(&aliasTable, key))
 	    && (aliasPtr = (AliasInfo*)Tcl_GetHashValue(entryPtr))
 	    && aliasPtr->mark != aliasMark) {
-	    /*
-	     * Found entry in alias database
-	     */
-	    aliasPtr->mark = aliasMark;
-	    Tcl_DStringInit(&expanded);
-	    switch (ae->level) {
-	    case 0:
-		Tcl_DStringAppend(&expanded, Tcl_GetString(aliasPtr->content),
-				  -1);
-		break;
-	    case 1:
-		Tcl_DStringAppend(&expanded, key_start,
-				  key_end-key_start+1);
-		if (Tcl_GetCharLength(aliasPtr->fullname)) {
-		    Tcl_DStringAppend(&expanded, " (", 2);
-		    Tcl_DStringAppend(&expanded,
-				      Tcl_GetString(aliasPtr->fullname), -1);
-		    Tcl_DStringAppend(&expanded, ")", 1);
-		}
-		break;
-	    case 2:
-		Tcl_DStringAppend(&expanded, Tcl_GetString(aliasPtr->content),
-				  -1);
-		if (Tcl_GetCharLength(aliasPtr->fullname)
-		    && NULL == strchr(Tcl_GetString(aliasPtr->content), ',')) {
-		    Tcl_DStringAppend(&expanded, " (", 2);
-		    Tcl_DStringAppend(&expanded,
-				      Tcl_GetString(aliasPtr->fullname), -1);
-		    Tcl_DStringAppend(&expanded, ")", 1);
-		}
-	    }
-	    RatExpandAlias(interp, &expanded, ae);
-	    Tcl_DStringAppend(list, Tcl_DStringValue(&expanded),
-			      Tcl_DStringLength(&expanded));
-	    Tcl_DStringFree(&expanded);
-	    
-	} else if (ae->lookup_in_passwd && NULL != (pwPtr = getpwnam(buf))
-	    && (NULL == entryPtr || NULL == aliasPtr)) {
-	    /*
-	     * Found user in the passwd-database
-	     */
-	    switch (ae->level) {
-	    case 0:
-		Tcl_DStringAppend(list, pwPtr->pw_name, -1);
-		break;
-	    case 1:
-		Tcl_DStringAppend(list, pwPtr->pw_name, -1);
-		Tcl_DStringAppend(list, " (", 2);
-		if ((c = strchr(pwPtr->pw_gecos, ','))) {
-		    length = c - pwPtr->pw_gecos;
-		} else {
-		    length = strlen(pwPtr->pw_gecos);
-		}
-		Tcl_DStringAppend(list, pwPtr->pw_gecos, length);
-		Tcl_DStringAppend(list, ")", 1);
-		break;
-	    case 2:
-		Tcl_DStringAppend(list, pwPtr->pw_name, -1);
-		Tcl_DStringAppend(list, "@", 1);
-		Tcl_DStringAppend(list, ae->host, -1);
-		Tcl_DStringAppend(list, " (", 2);
-		if ((c = strchr(pwPtr->pw_gecos, ','))) {
-		    length = c - pwPtr->pw_gecos;
-		} else {
-		    length = strlen(pwPtr->pw_gecos);
-		}
-		Tcl_DStringAppend(list, pwPtr->pw_gecos, length);
-		Tcl_DStringAppend(list, ")", 1);
-		break;
-	    }
-	} else {
-	    /*
-	     * User not found anywhere
-	     */
-	    Tcl_DStringAppend(list, entry_start, entry_end-entry_start+1);
-	}
-	Tcl_DStringAppend(list, ", ", 2);
+            /* Key found in alias list */
+
+            aliasPtr->mark = aliasMark;
+            if (EXPAND_PGP == ae->target
+                && Tcl_GetCharLength(aliasPtr->pgp_key)) {
+                Tcl_DStringAppendElement(list,
+                                         Tcl_GetString(aliasPtr->pgp_key));
+                continue;
+            } else if (EXPAND_PGPACTIONS == ae->target) {
+                ae->flags |= aliasPtr->flags;
+            }
+
+            if (EXPAND_DISPLAY == ae->target) {
+                ta = &aliasAddr;
+                aliasAddr.personal = Tcl_GetString(aliasPtr->fullname);
+                aliasAddr.adl = NULL;
+                aliasAddr.mailbox = key;
+                aliasAddr.host = "";
+                aliasAddr.next = NULL;
+                
+            } else {
+                RatExpandAlias(interp, aliasPtr->parsed, list, ae);
+                continue;
+            }
+
+        } else if (EXPAND_PGPACTIONS == ae->target
+                   && (entryPtr = Tcl_FindHashEntry(&addressTable, key))
+                   && (aliasPtr = (AliasInfo*)Tcl_GetHashValue(entryPtr))) {
+            ae->flags |= aliasPtr->flags;
+            continue;
+            
+        } else if (EXPAND_PGP == ae->target
+                   && (entryPtr = Tcl_FindHashEntry(&addressTable, key))
+                   && (aliasPtr = (AliasInfo*)Tcl_GetHashValue(entryPtr))
+                   && Tcl_GetCharLength(aliasPtr->pgp_key)) {
+            Tcl_DStringAppendElement(list, Tcl_GetString(aliasPtr->pgp_key));
+            continue;
+            
+	} else if (ae->lookup_in_passwd
+                   && key
+                   && NULL != (pwPtr = getpwnam(key))
+                   && address->personal == NULL
+                   && ae->target != EXPAND_PGP
+                   && (NULL == entryPtr || NULL == aliasPtr)) {
+            /* Key found in /etc/passwd */
+            address->personal = cpystr(pwPtr->pw_gecos);
+            if (NULL != (s = strchr(address->personal, ','))) {
+                *s = '\0';
+            }
+            ta = address;
+        } else {
+            ta = address;
+        }
+        if (ae->mark != NULL && !strcmp(ae->mark, address->host)) {
+            if (EXPAND_DISPLAY == ae->target) {
+                address->host[0] = '\0';
+            } else {
+                strncpy(address->host, ae->host, strlen(address->host)+1);
+            }
+        }
+
+        if (EXPAND_PGP == ae->target) {
+            snprintf(out_buf, sizeof(out_buf), "%s@%s", ta->mailbox,
+                     ((ta->host && *ta->host) ? ta->host : ae->host));
+            Tcl_DStringAppendElement(list, out_buf);
+        } else if (RatAddressSize(ta, 1) < sizeof(out_buf)) {
+            next_address = ta->next;
+            ta->next = NULL;
+            out_buf[0] = '\0';
+            rfc822_write_address_full(out_buf, ta, NULL);
+            ta->next = next_address;
+            
+            if (Tcl_DStringLength(list)) {
+                Tcl_DStringAppend(list, ", ", 2);
+            }
+            Tcl_DStringAppend(list, out_buf, -1);
+        }
     }
-    ckfree(copy);
-    length = Tcl_DStringLength(list);
-    Tcl_DStringSetLength(list, length-2);
 }
 
 /*
@@ -1378,4 +1675,38 @@ RatFindCharInHeader(CONST84 char *header, char m)
 	}
     }
     return NULL;
+}
+
+
+/*
+ *----------------------------------------------------------------------
+ *
+ * RatGetFlagsList --
+ *
+ *      Returns a list of flags defined for this alias
+ *      field.
+ *
+ * Results:
+ *	A tcl_object containing a list of strings.
+ *
+ * Side effects:
+ *	None.
+ *
+ *
+ *----------------------------------------------------------------------
+ */
+static Tcl_Obj*
+RatGetFlagsList(Tcl_Interp *interp, AliasInfo *aliasPtr)
+{
+    Tcl_Obj *flagsPtr = Tcl_NewObj();
+    int i;
+    
+    for (i=0; alias_flags[i].name; i++) {
+	if (aliasPtr->flags & alias_flags[i].flag) {
+	    Tcl_ListObjAppendElement(
+		interp, flagsPtr,Tcl_NewStringObj(alias_flags[i].name,-1));
+	}
+    }
+
+    return flagsPtr;
 }

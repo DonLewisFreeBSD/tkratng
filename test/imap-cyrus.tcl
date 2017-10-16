@@ -21,7 +21,7 @@ proc init_imap_folder {def} {
 
     RatDeleteFolder $def
     if [catch {RatCreateFolder $def} result] {
-	puts "$LEAD $result [list $def]"
+	puts "$LEAD Failed to create folder $result [list $def]"
 	exit 1
     }
 }

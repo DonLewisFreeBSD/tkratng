@@ -3,7 +3,7 @@
  *
  *	This file contains code which implements dbase messages.
  *
- * TkRat software and its included text is Copyright 1996-2002 by
+ * TkRat software and its included text is Copyright 1996-2004 by
  * Martin Forssén
  *
  * The full text of the legal notice is contained in the file called
@@ -20,13 +20,6 @@ typedef struct DbMessageInfo {
     char *buffer;
     MESSAGE *messagePtr;
 } DbMessageInfo;
-
-/*
- * The ClientData for each bodypart entity
- */
-typedef struct DbBodyInfo {
-    unsigned char *text;
-} DbBodyInfo;
 
 /*
  * The number of message entities created. This is used to create new
@@ -187,13 +180,8 @@ static BodyInfo*
 Db_CreateBodyProc(Tcl_Interp *interp, MessageInfo *msgPtr)
 {
     DbMessageInfo *dbMsgPtr = (DbMessageInfo*)msgPtr->clientData;
-    DbBodyInfo *dbBodyInfoPtr = (DbBodyInfo*)ckalloc(sizeof(DbBodyInfo));
-    msgPtr->bodyInfoPtr = CreateBodyInfo(msgPtr);
-
-    msgPtr->bodyInfoPtr->bodyPtr = dbMsgPtr->messagePtr->body;
-    msgPtr->bodyInfoPtr->clientData = (ClientData)dbBodyInfoPtr;
-    dbBodyInfoPtr->text =
-	dbMsgPtr->messagePtr->text.text.data+dbMsgPtr->messagePtr->text.offset;
+    msgPtr->bodyInfoPtr = CreateBodyInfo(interp, msgPtr,
+					 dbMsgPtr->messagePtr->body);
     return msgPtr->bodyInfoPtr;
 }
 
@@ -268,24 +256,18 @@ Db_MsgDeleteProc(MessageInfo *msgPtr)
 static void
 Db_MakeChildrenProc(Tcl_Interp *interp, BodyInfo *bodyInfoPtr)
 {
-    DbBodyInfo *dbBodyInfoPtr = (DbBodyInfo*)bodyInfoPtr->clientData;
     BODY *bodyPtr = bodyInfoPtr->bodyPtr;
     BodyInfo *partInfoPtr, **partInfoPtrPtr;
-    DbBodyInfo *dbPartInfoPtr;
     PART *partPtr;
 
     if (!bodyInfoPtr->firstbornPtr) {
 	partInfoPtrPtr = &bodyInfoPtr->firstbornPtr;
 	for (partPtr = bodyPtr->nested.part; partPtr;
 		partPtr = partPtr->next) {
-	    partInfoPtr = CreateBodyInfo(bodyInfoPtr->msgPtr);
-	    dbPartInfoPtr = (DbBodyInfo*)ckalloc(sizeof(DbBodyInfo));
+	    partInfoPtr = CreateBodyInfo(interp, bodyInfoPtr->msgPtr,
+					 &partPtr->body);
 	    *partInfoPtrPtr = partInfoPtr;
-	    partInfoPtr->bodyPtr = &partPtr->body;
 	    partInfoPtrPtr = &partInfoPtr->nextPtr;
-	    partInfoPtr->clientData = (ClientData)dbPartInfoPtr;
-	    dbPartInfoPtr->text = dbBodyInfoPtr->text+
-				  partPtr->body.contents.offset;
 	}
     }
 }
@@ -304,14 +286,12 @@ Db_MakeChildrenProc(Tcl_Interp *interp, BodyInfo *bodyInfoPtr)
 static char*
 Db_FetchBodyProc(BodyInfo *bodyInfoPtr, unsigned long *lengthPtr)
 {
-    DbBodyInfo *dbBodyInfoPtr = (DbBodyInfo*)bodyInfoPtr->clientData;
-
     if (bodyInfoPtr->decodedTextPtr) {
 	*lengthPtr = Tcl_DStringLength(bodyInfoPtr->decodedTextPtr);
 	return Tcl_DStringValue(bodyInfoPtr->decodedTextPtr);
     }
     *lengthPtr = bodyInfoPtr->bodyPtr->contents.text.size;
-    return (char*)dbBodyInfoPtr->text;
+    return (char*)bodyInfoPtr->bodyPtr->contents.text.data;
 }
 
 
@@ -328,8 +308,7 @@ Db_FetchBodyProc(BodyInfo *bodyInfoPtr, unsigned long *lengthPtr)
 static void
 Db_BodyDeleteProc(BodyInfo *bodyInfoPtr)
 {
-    DbBodyInfo *dbBodyInfoPtr = (DbBodyInfo*)bodyInfoPtr->clientData;
-    ckfree(dbBodyInfoPtr);
+    /* Nothing to do */
 }
 
 
@@ -376,6 +355,7 @@ Db_GetInfoProc(Tcl_Interp *interp, ClientData clientData,
 	case RAT_FOLDER_SUBJECT:	/* fallthrough */
 	case RAT_FOLDER_CANONSUBJECT:	/* fallthrough */
 	case RAT_FOLDER_NAME:		/* fallthrough */
+	case RAT_FOLDER_ANAME:		/* fallthrough */
 	case RAT_FOLDER_MAIL_REAL:	/* fallthrough */
 	case RAT_FOLDER_MAIL:		/* fallthrough */
 	case RAT_FOLDER_NAME_RECIPIENT:	/* fallthrough */
@@ -394,6 +374,7 @@ Db_GetInfoProc(Tcl_Interp *interp, ClientData clientData,
 	case RAT_FOLDER_UNIXFLAGS:	/* fallthrough */
 	case RAT_FOLDER_MSGID:		/* fallthrough */
 	case RAT_FOLDER_REF:		/* fallthrough */
+	case RAT_FOLDER_UID:		/* fallthrough */
 	case RAT_FOLDER_THREADING:	/* fallthrough */
 	case RAT_FOLDER_INDEX:
 	    return Db_InfoProcInt(interp, msgPtr->folderInfoPtr,

@@ -9,7 +9,7 @@ namespace eval test_import {
 }
 
 proc test_import::check_result {path idr idv} {
-    global errors LEAD vFolderDef
+    global vFolderDef
     variable result
 
     if {"" == $path} {
@@ -20,9 +20,8 @@ proc test_import::check_result {path idr idv} {
 	set contents 3
     }
     if {$type != [lindex $vFolderDef($idv) 1]} {
-	puts [concat "$LEAD: vFolderDef($idv) is not an $type entry" \
-		"[list $vFolderDef($idv)]"]
-	incr errors
+	ReportError [join [list "vFolderDef($idv) is not an $type entry" \
+			       "[list $vFolderDef($idv)]"] "\n"]
 	return 1
     }
     foreach id [lindex $result($idr) $contents] {
@@ -36,29 +35,28 @@ proc test_import::check_result {path idr idv} {
     }
 
     if {[array size r] != [array size v]} {
-	puts "$LEAD: Length of contents in struct differs ($path)"
-	incr errors
+	ReportError "Length of contents in struct differs ($path)"
 	return 1
     }
 
     foreach n [array names r] {
 	if {![info exists v($n)]} {
-	    puts "$LEAD: Did not find element $path/$n in vFolderDef"
-	    incr errors
+	    ReportError "Did not find element $path/$n in vFolderDef"
 	    return 1
 	}
 	if {"[lindex $r($n) 2]" != "[lindex $v($n) 2]"} {
-	    puts [concat "$LEAD: Flags of $path/$n differs" \
-		    "[lindex $r($n) 2] != [lindex $v($n) 2]"]
-	    incr errors
+	    ReportError [joid [list "Flags of $path/$n differs" \
+				   "[lindex $r($n) 2] != [lindex $v($n) 2]"] \
+			     "\n"]
 	    return 1
 	}
 	switch [lindex $r($n) 1] {
 	    file {
 		if {"[lindex $r($n) 3]" != "[lindex $v($n) 3]"} {
-		    puts [concat "$LEAD: Filename of $path/$n differs" \
-			    "[lindex $r($n) 3] != [lindex $v($n) 3]"]
-		    incr errors
+		    ReportError \
+			[join [list "Filename of $path/$n differs" \
+				   "[lindex $r($n) 3] != [lindex $v($n) 3]"] \
+			     "\n"]
 		    return 1
 		}
 	    }
@@ -73,7 +71,7 @@ proc test_import::check_result {path idr idv} {
 }
 
 proc test_import::test_import {} {
-    global option LEAD vFolderDef mailServer env imap_serv
+    global option vFolderDef mailServer env imap_serv
     variable result
 
     # Copy old values
@@ -115,7 +113,7 @@ proc test_import::test_import {} {
     set result(9) [list f file {} $base/e/f]
     set result(10) [list d file {} $base/c/b/d]
 
-    puts "Test simple file import"
+    StartTest "Simple file import"
     catch {unset vFolderDef}
     set vFolderDef(0) {{} struct {} {1}}
     set vFolderDef(1) [list testroot import {} \
@@ -123,11 +121,11 @@ proc test_import::test_import {} {
     RatImport 1
     check_result "" 1 1
 
-    puts "Test re-import"
+    StartTest "Re-import"
     RatImport 1
     check_result "" 1 1
 
-    puts "Test re-import with addition at top level"
+    StartTest "Re-import with addition at top level"
     exec touch $base/h
     set result(1) [list test import {subscribed 0} \
 	    [list NAME1 file {} $base/import] * {2 3 4 5 6 11}]
@@ -135,7 +133,7 @@ proc test_import::test_import {} {
     RatImport 1
     check_result "" 1 1
 
-    puts "Test re-import with deletion at top level"
+    StartTest "Re-import with deletion at top level"
     file delete $base/h
     set result(1) [list test import {subscribed 0} \
 	    [list NAME1 file {} $base/import] * {2 3 4 5 6}]
@@ -143,21 +141,21 @@ proc test_import::test_import {} {
     RatImport 1
     check_result "" 1 1
 
-    puts "Test re-import with addition down below"
+    StartTest "Re-import with addition down below"
     exec touch $base/c/b/h
     set result(8) [list b struct {} {10 11}]
     set result(11) [list h file {} $base/c/b/h]
     RatImport 1
     check_result "" 1 1
 
-    puts "Test re-import with deletion down below"
+    StartTest "Re-import with deletion down below"
     file delete $base/c/b/h
     set result(8) [list b struct {} {10}]
     unset result(11)
     RatImport 1
     check_result "" 1 1
 
-    puts "Test with a flag-change"
+    StartTest "With a flag-change"
     set result(3) [list b file {flag 1} $base/b]
     foreach id [array names vFolderDef] {
 	if {"b" == [lindex $vFolderDef($id) 0]} {
@@ -168,7 +166,7 @@ proc test_import::test_import {} {
     RatImport 1
     check_result "" 1 1
 
-    puts "Test import via IMAP"
+    StartTest "import via IMAP"
     if {$imap_serv == "cyrus"} {
 	set result(1) [lreplace $result(1) 3 3 \
 		[list NAME! imap {} localhost user.$env(USER).import]]
@@ -227,7 +225,7 @@ proc test_import::test_import {} {
 	check_result "" 1 1
     }
     
-    puts "Test import after clear"
+    StartTest "Import after clear"
     unset result
     unset vFolderDef
     set result(0) {{} struct {} {1}}

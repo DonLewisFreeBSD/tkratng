@@ -1,5 +1,5 @@
 #
-#  TkRat software and its included text is Copyright 1996-2002 by
+#  TkRat software and its included text is Copyright 1996-2004 by
 #  Martin Forssén
 #
 #  The full text of the legal notices is contained in the file called
@@ -84,7 +84,7 @@ proc TkRatClientStart {} {
     } else {
 	# Send commands
 	if {[catch {send -- $appname [list RatExec $cmds]} result]} {
-	    # TODO
+            puts "Failed to send commands"
 	    global errorInfo
 	    puts $errorInfo
 	    exit

@@ -81,7 +81,6 @@ proc rat_list::create {listvar identifier addproc editproc deleteproc \
 	-relief sunken \
 	-command "$w.f.list yview" \
 	-highlightthickness 0
-    Size $w.f.list $identifier
     pack $w.f.scroll -side right -fill y
     pack $w.f.list -side left -expand 1 -fill both
 
@@ -109,7 +108,7 @@ proc rat_list::create {listvar identifier addproc editproc deleteproc \
 
     wm protocol $w WM_DELETE_WINDOW "rat_list::dismiss $id"
 
-    Place $w $identifier
+    ::tkrat::winctl::SetGeometry $identifier $w $w.f.list
 }
 
 proc rat_list::setState {id} {
@@ -181,8 +180,7 @@ proc rat_list::dismiss {id} {
 	eval $hd(dismissproc)
     }
     unset openLists($hd(listvar))
-    RecordSize $hd(list) $hd(identifier)
-    RecordPos $hd(w) $hd(identifier)
+    ::tkrat::winctl::RecordGeometry $hd(identifier) $hd(w) $hd(list)
     destroy $hd(w)
     unset hd
 }

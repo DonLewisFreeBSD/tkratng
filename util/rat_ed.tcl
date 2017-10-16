@@ -3,7 +3,7 @@
 # This file contains the code which implements the enabledisable command
 #
 #
-#  TkRat software and its included text is Copyright 1996-2002 by
+#  TkRat software and its included text is Copyright 1996-2004 by
 #  Martin Forssén
 #
 #  The full text of the legal notice is contained in the file called
@@ -25,7 +25,7 @@ namespace eval rat_ed {
 # ed	- true if we should enable
 # w	- name of the parent widget
 
-proc rat_ed::enabledisable {ed w} {
+proc rat_ed::enabledisable {ed wins} {
     variable disabledFg
     variable enabledFg
 
@@ -36,14 +36,14 @@ proc rat_ed::enabledisable {ed w} {
 	set state disabled
 	set fg $disabledFg
     }
-    foreach c [winfo children $w] {
-	if {[llength [winfo children $c]]} {
-	    rat_ed::enabledisable $ed $c
+    foreach w $wins {
+	if {[llength [winfo children $w]]} {
+	    rat_ed::enabledisable $ed [winfo children $w]
 	}
-	if {![catch {$c cget -state}]} {
-	    $c configure -state $state
+	if {![catch {$w cget -state}]} {
+	    $w configure -state $state
 	}
-	$c configure -foreground $fg
+	catch {$w configure -foreground $fg}
     }
 }
 

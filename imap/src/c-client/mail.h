@@ -10,10 +10,10 @@
  *		Internet: MRC@CAC.Washington.EDU
  *
  * Date:	22 November 1989
- * Last Edited:	6 December 2004
+ * Last Edited:	21 January 2005
  * 
  * The IMAP toolkit provided in this Distribution is
- * Copyright 1988-2004 University of Washington.
+ * Copyright 1988-2005 University of Washington.
  * The full text of our legal notices is contained in the file called
  * CPYRIGHT, included with this Distribution.
  */
@@ -40,6 +40,8 @@
 				/* default for syntax errors in addresses */
 #define ERRHOST ".SYNTAX-ERROR."
 
+/* TkRat addition */
+#define NODOMAIN "no.domain"
 
 /* Coddle certain compilers' 6-character symbol limitation */
 
@@ -445,7 +447,8 @@
 #define SA_UIDNEXT (long) 0x8	/* next UID to be assigned */
 				/* UID validity value */
 #define SA_UIDVALIDITY (long) 0x10
-
+				/* use multiple newsrcs */
+#define SA_MULNEWSRC (long) 0x20000000
 
 /* Mailgets flags */
 
@@ -1511,6 +1514,12 @@ void mm_nocritical (MAILSTREAM *stream);
 long mm_diskerror (MAILSTREAM *stream,long errcode,long serious);
 void mm_fatal (char *string);
 void *mm_cache (MAILSTREAM *stream,unsigned long msgno,long op);
+
+/* TkRat modifications */
+#define SMTPSTATE_MAIL_FROM       1
+#define SMTPSTATE_RCPT_TO         2
+#define SMTPSTATE_SENDING_DATA    3
+void mm_smtptrace(long smtpstate, char *string);
 
 extern STRINGDRIVER mail_string;
 void mail_link (DRIVER *driver);

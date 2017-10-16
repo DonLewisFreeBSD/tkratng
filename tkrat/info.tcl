@@ -4,17 +4,12 @@
 # about this program.
 #
 #
-#  TkRat software and its included text is Copyright 1996-2002 by
+#  TkRat software and its included text is Copyright 1996-2005 by
 #  Martin Forssén
 #
 #  The full text of the legal notice is contained in the file called
 #  COPYRIGHT, included with this distribution.
 
-# The version history
-set ratHistory {0.50 0.51 0.52 0.53 0.54 0.55 0.56 0.57 0.58 0.59
-		0.60 0.61 0.62 0.63 0.64 0.65 0.66 0.67 0.68 0.69
-		0.70 0.71 0.72 0.73 0.74 0.75 1.0 1.0.1 1.0.2 1.0.3
-		1.0.4 1.0.5 1.1a 1.2 2.0}
 
 # Version --
 #
@@ -40,28 +35,40 @@ proc Version {} {
     catch {font create norm -family Helvetica -size -12 -weight bold}
     label $w.tkrat -text "TkRat v$tkrat_version" -font big
     label $w.date -text "$t(date): $tkrat_version_date" -font norm
-    label $w.tcltk -text "Tcl-$tcl_patchLevel/Tk-$tk_patchLevel" -font norm
-    label $w.copyright -text "TkRat is copyright 1995-2000 by" -font norm
+    label $w.copyright -text "TkRat is copyright 1995-2005 by" -font norm
     label $w.author -text "Martin Forssén (maf@tkrat.org)" -font norm
+    label $w.tcltk -text "$t(using) Tcl-$tcl_patchLevel/Tk-$tk_patchLevel"
+    pack $w.tkrat \
+	 $w.date \
+	 $w.copyright \
+	 $w.author \
+	 $w.tcltk -side top -padx 5
+    if {![catch {package present Tkhtml 2.0} version]} {
+	label $w.tkhtml -text "$t(using) TkHtml-$version"
+	pack $w.tkhtml -side top -padx 5
+    }
+    if {![catch {package present Img} version]} {
+	label $w.img -text "$t(using) Img-$version"
+	pack $w.img -side top -padx 5
+    }
     message $w.more -text $t(send_bugs_etc) -aspect 700
-    text $w.text -relief flat -width 40 -height 8 -font norm
-    $w.text insert 1.0 $t(send_postcards)
-    $w.text configure -state disabled
+    pack $w.more -side top -padx 5
 
     button $w.ok \
             -text $t(ok) \
-            -command "RecordPos $w about; destroy $w" \
+            -command "destroy $w" \
             -width 20
 
     pack $w.tkrat \
 	 $w.date \
-	 $w.tcltk \
 	 $w.copyright \
 	 $w.author \
-	 $w.more \
-	 $w.text \
-	 $w.ok -side top -padx 5 -pady 5
-    Place $w about
+	 $w.tcltk \
+	 $w.more -side top -padx 5
+    pack $w.ok -side top -padx 5 -pady 5
+
+    bind $w.ok <Destroy> "::tkrat::winctl::RecordGeometry about $w"
+    ::tkrat::winctl::SetGeometry about $w
 }
 
 # Ratatosk --
@@ -86,12 +93,14 @@ proc Ratatosk {} {
 
     button $w.ok \
             -text $t(ok) \
-            -command "RecordPos $w ratatosk; destroy $w" \
+            -command "destroy $w" \
             -width 20
 
     message $w.message -aspect 400 -text $t(ratatosk)
     pack $w.message $w.ok -side top -padx 5 -pady 5
-    Place $w ratatosk
+
+    bind $w.ok <Destroy> "::tkrat::winctl::RecordGeometry ratatosk $w"
+    ::tkrat::winctl::SetGeometry ratatosk $w
 }
 
 # InfoWelcome --
@@ -166,7 +175,7 @@ proc InfoWelcome {} {
 	}
     }
 
-    Place .welcome welcome
+    ::tkrat::winctl::SetGeometry welcome .welcome
     tkwait window .welcome
 
     foreach bn [array names b .welcome.*] {unset b($bn)}
@@ -217,6 +226,7 @@ proc WelcomeLanguage {lang} {
     set welcomeLanguage [lindex $lang 1]
     set option(language) [lindex $lang 0]
     InitMessages $option(language) changes
+    InitMessages $option(language) balText
     wm title .welcome $changes(welcome_title)
     .welcome.message.text configure -state normal -font $propNormFont
     .welcome.message.text delete 0.0 end
@@ -225,80 +235,63 @@ proc WelcomeLanguage {lang} {
     WelcomeShowMenu
 }
 
-# InfoChanges --
+# InfoFeatures --
 #
-# Inform the user of the changes to the program since the last time it
-# was run.
+# Inform the user of new features since the last time.
 #
 # Arguments:
+# featureIndexes - List of features
 
-proc InfoChanges {} {
-    global option changes changesDone changesChanges \
-	   tkrat_version ratHistory b
+proc InfoFeatures {featureIndexes} {
+    global option changesDone changesChanges \
+	   tkrat_version features t b
 
     # Init messages
-    InitMessages $option(language) changes
+    InitMessages $option(language) features
 
     # Create window
     toplevel .changes -class TkRat
-    wm title .changes $changes(changes_title)
+    wm title .changes $t(changes_title)
 
     # Message part
     frame .changes.message
     text .changes.message.text -relief sunken -bd 1 \
-	    -yscrollcommand ".changes.message.scroll set" -setgrid 1 \
-	    -height 30 -width 80 -highlightthickness 0
+	-yscrollcommand ".changes.message.scroll set" -setgrid 1 \
+	-height 30 -width 80 -highlightthickness 0
+    .changes.message.text tag configure feature -wrap word \
+	-rmargin 10 -lmargin1 10 -lmargin2 25 -spacing1 10 -tabs 25
     scrollbar .changes.message.scroll -relief sunken -bd 1 \
 	    -command ".changes.message.text yview" -highlightthickness 0
     pack .changes.message.scroll -side right -fill y
     pack .changes.message.text -expand 1 -fill both
 
-    # Populate textwindow
-    set starts "********************"
-    set i [expr {[lsearch -exact $ratHistory $option(last_version)]+1}]
-    foreach ver [lrange $ratHistory $i end] {
-	.changes.message.text insert end \
-		"$starts $changes(changes_in) $ver $starts\n"
-	.changes.message.text insert end $changes($ver)
-	.changes.message.text insert end "\n\n\n"
-    }
-    .changes.message.text configure -state disabled
-
     # Buttons
     frame .changes.b
-    frame .changes.b.shutup
-    label .changes.b.shutup.label -textvariable changes(show_changes)
-    menubutton .changes.b.shutup.menu -textvariable changesChanges \
-	    -indicatoron 1 -menu .changes.b.shutup.menu.m -relief raised \
-	    -bd 1 -width 20 -anchor c
-    menu .changes.b.shutup.menu.m -tearoff 0
-    pack .changes.b.shutup.menu \
-	 .changes.b.shutup.label -side right
-    if {$option(info_changes)} {
-	set changesChanges $changes(show)
-    } else {
-	set changesChanges $changes(dont_show)
-    }
-    .changes.b.shutup.menu.m add command -label $changes(show) \
-	    -command "set changesChanges [list $changes(show)] ; \
-		      set option(info_changes) 1"
-    .changes.b.shutup.menu.m add command -label $changes(dont_show) \
-	    -command "set changesChanges [list $changes(dont_show)] ; \
-		      set option(info_changes) 0"
-    set b(.changes.b.shutup.menu) welcome_shutup
+    checkbutton .changes.b.shutup -text $t(do_not_show_window_in_future) \
+	-onvalue 0 -offvalue 1 -variable option(info_changes)
 
-    button .changes.b.cont -textvariable changes(continue) -bd 1 \
-	    -command {RecordPos .changes infoChanges; destroy .changes}
-    pack .changes.b.shutup -side top -pady 4
-    pack .changes.b.cont -side top -pady 10
+    button .changes.b.cont -textvariable t(continue) -bd 1 \
+	    -command {destroy .changes}
+    pack .changes.b.cont -side bottom -pady 10
+    pack .changes.b.shutup -side left -padx 10
     set b(.changes.b.cont) welcome_cont
     
     pack .changes.message -side top -expand 1 -fill both -padx 5 -pady 5
-    pack .changes.b
+    pack .changes.b -fill x
 
-    Place .changes infoChanges
+    ::tkrat::winctl::SetGeometry infoChanges .changes
+
+    # Populate textwindow
+    foreach featureIndex $featureIndexes {
+	foreach f [split $features($featureIndex) "\n"] {
+	    .changes.message.text insert end "-\t$f\n" feature
+	}
+    }
+    .changes.message.text configure -state disabled
+
     tkwait window .changes
 
+    ::tkrat::winctl::RecordGeometry infoChanges .changes
     foreach bn [array names b .welcome.*] {unset b($bn)}
 }
 
@@ -320,11 +313,9 @@ proc SeeLog {} {
     wm title $w $t(seelog_title)
 
     # Message part
-    button $w.button -text $t(close) -command "RecordPos $w seeLog; \
-	    RecordSize $w.list seeLog; destroy $w"
+    button $w.button -text $t(close) -command "destroy $w"
     listbox $w.list -yscroll "$w.scroll set" -relief sunken -bd 1 \
 	    -selectmode extended
-    Size $w.list seeLog
     scrollbar $w.scroll -relief raised -bd 1 \
 	    -command "$w.list yview"
     pack $w.button -side bottom -padx 5 -pady 5
@@ -335,7 +326,9 @@ proc SeeLog {} {
 	$w.list insert end $m
     }
 
-    Place $w seeLog
+    ::tkrat::winctl::SetGeometry seeLog $w $w.list
+
+    bind $w.list <Destroy> "::tkrat::winctl::RecordGeometry seeLog $w $w.list"
 }
 
 # SendBugReport --
@@ -352,7 +345,7 @@ proc SendBugReport {{attachments {}}} {
     # Create identifier
     set id sb[incr idCnt]
     set w .$id
-    upvar #0 $id hd
+    upvar \#0 $id hd
     set hd(oldfocus) [focus]
 
     # Create the toplevel
@@ -373,23 +366,25 @@ proc SendBugReport {{attachments {}}} {
 	    -yscrollcommand "$w.scroll set" -wrap none
     scrollbar $w.scroll -relief sunken -bd 1 -takefocus 0 \
 	    -command "$w.text yview" -highlightthickness 0
-    Size $w.text bugText
     grid $w.text - $w.scroll -sticky nsew
     set hd(text) $w.text
 
-    button $w.continue -text $t(continue) -command "DoSendBugReport $id"
-    grid $w.continue - -
+    frame $w.f
+    button $w.f.cancel -text $t(cancel) -command "destroy $w"
+    button $w.f.continue -text $t(continue) -command "DoSendBugReport $id"
+    pack $w.f.continue $w.f.cancel -side left -padx 10
+    grid $w.f - -
 
     grid columnconfigure $w 1 -weight 1
-    grid rowconfigure $w 1 -weight 1
+    grid rowconfigure $w 2 -weight 1
 
     # Binding and focus
     rat_edit::create $w.text
     focus $w.sentry
 
-    # Place window
-    Place $w sendBug
-    wm protocol $w WM_DELETE_WINDOW "unset $id; destroy $w"
+    ::tkrat::winctl::SetGeometry sendBug $w $w.text
+
+    bind $w.text <Destroy> "::tkrat::winctl::RecordGeometry sendBug $w $w.text; unset $id"
 }
 
 
@@ -401,12 +396,13 @@ proc SendBugReport {{attachments {}}} {
 # handler - name of global array holding data for the report
 
 proc DoSendBugReport {handler} {
-    upvar #0 $handler hd
+    upvar \#0 $handler hd
     global idCnt option t option tkrat_version tkrat_version_date \
-	   tcl_version tk_version tcl_patchLevel tk_patchLevel rat_lib
+	   tcl_version tk_version tcl_patchLevel tk_patchLevel rat_lib \
+	   rat_tmp
 
     set mhandler composeM[incr idCnt]
-    upvar #0 $mhandler mh
+    upvar \#0 $mhandler mh
 
     set mh(to) maf@tkrat.org
     set mh(subject) $hd(subject)
@@ -417,28 +413,32 @@ proc DoSendBugReport {handler} {
 
     foreach a $hd(attachments) {
 	set ahandler composeB[incr idCnt]
-	upvar #0 $ahandler ah
+	upvar \#0 $ahandler ah
 
 	lappend mh(attachmentList) $ahandler
 	set ah(type) text
 	set ah(subtype) plain
 	set ah(description) [lindex $a 0]
-	set ah(filename) [RatTildeSubst $option(send_cache)/rat.[RatGenId]]
+	set ah(filename) $rat_tmp/rat.[RatGenId]
 	set ah(removeFile) 1
-	set fh [open $ah(filename) w 0600]
+	set fh [open $ah(filename) w]
+        set ah(parameter) ""
+        set ah(disp_parm) ""
 	puts $fh [lindex $a 1]
 	close $fh
     }
 
     set ahandler composeB[incr idCnt]
-    upvar #0 $ahandler ah
+    upvar \#0 $ahandler ah
     lappend mh(attachmentList) $ahandler
     set ah(type) text
     set ah(subtype) plain
-    set ah(description) $t(configuration_information)
-    set ah(filename) [RatTildeSubst $option(send_cache)/rat.[RatGenId]]
+    set ah(content_description) $t(configuration_information)
+    set ah(filename) $rat_tmp/rat.[RatGenId]
     set ah(removeFile) 1
-    set fh [open $ah(filename) w 0600]
+    set ah(parameter) ""
+    set ah(disp_parm) ""
+    set fh [open $ah(filename) w]
     catch {exec uname -a} uname
     puts $fh "uname -a: '$uname'"
     puts $fh "Version: $tkrat_version ($tkrat_version_date)"
@@ -453,13 +453,14 @@ proc DoSendBugReport {handler} {
 	puts $fh "tcl_platform($n): '$tcl_platform($n)'"
     }
     foreach n [lsort [array names option]] {
-	puts $fh "option($n): '$option($n)'"
+        if {![regexp {,smtp_passwd} $n]} {
+            puts $fh "option($n): '$option($n)'"
+        }
     }
     close $fh
 
     catch {focus $hd(oldfocus)}
     destroy $hd(w)
-    unset hd
 
     DoCompose $mhandler $mh(role) 0 1
 }
@@ -488,15 +489,16 @@ proc Warn {tag} {
 	    -relief raised -bd 1 -padx 5 -pady 5
     checkbutton $w.but -text $t(do_not_show_again) -variable option($tag) \
 	    -onvalue 0 -offvalue 1
-    button $w.dismiss -text $t(dismiss) -command \
-	    "RecordPos $w warning; destroy $w"
+    button $w.dismiss -text $t(dismiss) -command "destroy $w"
     pack $w.msg -side top
     pack $w.but -side top -anchor w -pady 5 -padx 5
     pack $w.dismiss -pady 5
 
-    Place $w warning
+    ::tkrat::winctl::SetGeometry warning $w
 
     tkwait window $w
+
+    ::tkrat::winctl::RecordGeometry warning $w
 }
 
 
@@ -507,29 +509,37 @@ proc Warn {tag} {
 # Arguments:
 
 proc StartupInfo {} {
-    global option tkrat_version tkrat_version_date currentLanguage_t ratHistory
+    global option tkrat_version tkrat_version_date currentLanguage_t features
 
     # Check which version the user last used
-    if {![string length $option(last_version)]} {
+    if {0 == $option(last_version_date)} {
 	InfoWelcome
 
 	# Reinitialize language (if needed)
 	if {[string compare $option(language) $currentLanguage_t]} {
 	    InitMessages $option(language) t
+            InitMessages $option(language) balText
 	}
-	set option(last_version) $tkrat_version
 	set option(last_version_date) $tkrat_version_date
-	SaveOptions
+
+	InitMessages $option(language) features
+	set fs [lsort -integer [array names features]]
+	set option(last_seen_feature) [lindex $fs end]
+
+        return 1
+    } elseif {$option(last_version_date) < $tkrat_version_date} {
+	InitMessages $option(language) features
+
+	set fs [lsort -integer [array names features]]
+	if {$option(last_seen_feature) != [lindex $fs end]} {
+	    set start [expr [lsearch -exact $fs $option(last_seen_feature)]+1]
+	    InfoFeatures [lrange $fs $start end]
+	}
+	set option(last_seen_feature) [lindex $fs end]
+	set option(last_version_date) $tkrat_version_date
+        SaveOptions
+        return 0
     } else {
-	set io [lsearch -exact $ratHistory $option(last_version)]
-	set ic [lsearch -exact $ratHistory $tkrat_version]
-	if {$io < $ic && -1 != $io && $option(info_changes)} {
-	    InfoChanges
-	}
-	if {$option(last_version_date) < $tkrat_version_date} {
-	    set option(last_version_date) $tkrat_version_date
-	    set option(last_version) $tkrat_version
-	    SaveOptions
-	}
+        return 0
     }
 }

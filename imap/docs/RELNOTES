@@ -1,3 +1,40 @@
+Updated: 15 August 2005
+
+imap-2004f is a maintenance release, and consists solely of a bugfix to
+the TCP code.
+
+Also included is a new version of the UNIX SSL/TLS routines that allows the
+SSL/TLS certificate validation client code to validate alternative names in
+server certificates.  This code has not been thoroughly regression-tested but
+is believed to work.  To use this new code instead of the old support:
+	cd imap-2004f/src/osdep/unix
+	mv ssl_unix.c ssl_unix.old
+	mv ssl_unix.new ssl_unix.c
+Then rebuild.
+
+
+Updated: 21 June 2005
+
+imap-2004e is a maintenance release, and consists solely of bugfixes.
+
+There are no user-visible functional enhancements in this version.
+
+
+Updated: 20 April 2005
+
+imap-2004d is a maintenance release, released concurrently with Pine
+4.63, and consists primarily of bugfixes
+
+There is now a workaround for RedHat breaking flock().  However, since
+RedHat has said that they don't support flock(), there is no guarantee
+that they won't break it in the future.  So you may want to consider some
+other Linux distribution or BSD instead.  See:
+	https://bugzilla.redhat.com/bugzilla/show_bug.cgi?id=123415
+for the gruesome details.
+
+There are no user-visible functional enhancements in this version.
+
+
 Updated: 18 January 2005
 
 imap-2004c is a maintenance release, released concurrently with Pine

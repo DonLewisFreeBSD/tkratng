@@ -3,7 +3,7 @@
 # This file contains the code which handles the composing of messages
 #
 #
-#  TkRat software and its included text is Copyright 1996-2002 by
+#  TkRat software and its included text is Copyright 1996-2004 by
 #  Martin Forssén
 #
 #  The full text of the legal notice is contained in the file called
@@ -14,6 +14,9 @@ set composeWindowList {}
 
 # List of header names we know of
 set composeHeaderList {to subject cc bcc reply_to from}
+
+# List of headers which are not editable
+set composeAutoHeaderList {in_reply_to references date}
 
 # List of headers which contains addresses (OBS! must be lower case OBS!)
 set composeAdrHdrList {from to cc bcc reply_to}
@@ -27,6 +30,15 @@ mKCgoLCwsNjY2FhcWDAwMP//////////////////////////////////////////////////
 f0CH0FHRjDQQh+bxAA2HA8kTQHqSpENBwUHqOjBcEuRgeA4CnqFnMewUMmaQp0vylLudwyee
 FtrbenEEaltCeXtDEwwBGRUBHSEfChUUByFPBQYRFwgIBxsJAAgRAgpPFFUeHR2oIggdDgpY
 QhwgIBkNFhEUCQkNFBSmT8PET0EAOw==}]
+
+# ComposeLoad --
+#
+# Dummy proc used to force the loading of this file
+#
+# Arguments:
+
+proc ComposeLoad {} {
+}
 
 # Compose --
 #
@@ -48,17 +60,20 @@ proc Compose {role} {
 # Build a reply to the given message and let the user add his text
 #
 # Arguments:
-# msg -		Message to reply to
+# msg-		Message to reply to
 # to -		Whom the reply should be sent to, 'sender' or 'all'.
 # role -        The role to do the composing as
+# notify -      Command to run when message has been sent
 
-proc ComposeReply {msg to role} {
+proc ComposeReply {msg to role notify} {
     global t option
     set msg [ComposeChoose $msg $t(reply_to_which)]
     if {![string length $msg]} {
 	return 0
     }
-    set handler [$msg reply $to]
+    set handler [$msg reply $to $role]
+    upvar \#0 $handler mh
+    set mh(notify) $notify
     return [DoCompose $handler $role \
 		[expr {($option(reply_bottom)) ? "1" : "-1"}] \
 		[expr {($option(append_sig)) ? "1" : "0"}]]
@@ -74,9 +89,9 @@ proc ComposeReply {msg to role} {
 # role -        The role to do the composing as
 
 proc ComposeForwardInline {msg role} {
-    global idCnt option t
+    global idCnt option t rat_tmp
     set handler composeM[incr idCnt]
-    upvar #0 $handler mh
+    upvar \#0 $handler mh
 
     set msg [ComposeChoose $msg $t(forward_which)]
     if {![string length $msg]} {
@@ -86,12 +101,12 @@ proc ComposeForwardInline {msg role} {
     foreach header [$msg headers] {
 	set name [string tolower [lindex $header 0]]
 	switch $name {
-	subject		{ set mh(subject) "Fwd: [lindex $header 1]" }
-	description	{ set hd(description) [lindex $header 1] }
+	subject		    { set mh(subject) "Fwd: [lindex $header 1]" }
+	content_description { set hd(content_description) [lindex $header 1] }
 	}
 	if { -1 != [lsearch [string tolower $option(show_header_selection)] \
 		$name]} {
-	    regsub -all -- - $name _ name
+	    set name [string map {- _} $name]
 	    set inline_header($name) [lindex $header 1]
 	}
     }
@@ -124,15 +139,15 @@ proc ComposeForwardInline {msg role} {
 
     # Now we are ready to start constructing the new message
     set bhandler composeM[incr idCnt]
-    upvar #0 $bhandler bh
+    upvar \#0 $bhandler bh
     set mh(body) $bhandler
     set bh(type) text
     set bh(subtype) plain
     if {[string length $inline]} {
 	set bh(encoding) [$inline encoding]
 	set bh(parameter) [$inline params]
-	set bh(id) [$inline id]
-	set bh(description) [$inline description]
+	set bh(content_id) [$inline id]
+	set bh(content_description) [$inline description]
 	set preface "\n\n$option(forwarded_message)\n"
 	set length 5
 	foreach f $option(show_header_selection) {
@@ -141,7 +156,7 @@ proc ComposeForwardInline {msg role} {
 	    }
 	}
 	foreach field $option(show_header_selection) {
-	    regsub -all -- - [string tolower $field] _ f
+	    set f [string map {- _} [string tolower $field]]
 	    if {[info exists inline_header($f)]} {
 		if {[info exists t($f)]} {
 		    set name $t($f)
@@ -157,7 +172,7 @@ proc ComposeForwardInline {msg role} {
     }
     foreach child $attach {
 	set chandler composeC[incr idCnt]
-	upvar #0 $chandler ch
+	upvar \#0 $chandler ch
 	lappend bh(children) $chandler
 
 	set type [string tolower [$child type]]
@@ -167,18 +182,19 @@ proc ComposeForwardInline {msg role} {
 	set ch(parameter) [$child params]
 	set ch(disp_type) [$child disp_type]
 	set ch(disp_parm) [$child disp_parm]
-	set ch(id) [$child id]
-	set ch(description) [$child description]
+	set ch(content_id) [$child id]
+	set ch(content_description) [$child description]
 	if {![info exists mh(data)] && ![string compare text $ch(type)]} {
 	    set mh(data) [$child data 0]
 	    set mh(data_tags) "Cited noWrap no_spell"
 	} else {
-	    set ch(filename) [RatTildeSubst $option(send_cache)/rat.[RatGenId]]
-	    set fh [open $ch(filename) w 0600]
+	    set ch(filename) $rat_tmp/rat.[RatGenId]
+	    set fh [open $ch(filename) w]
 	    $child saveData $fh 1 0
 	    close $fh
 	    set ch(removeFile) 1
 	    lappend mh(attachmentList) $chandler
+            set ch(size) [file size $ch(filename)]
 	}
     }
 
@@ -196,7 +212,7 @@ proc ComposeForwardInline {msg role} {
 # role -        The role to do the composing as
 
 proc ComposeForwardAttachment {msg role} {
-    global option t idCnt
+    global option t idCnt rat_tmp
 
     set msg [ComposeChoose $msg $t(forward_which)]
     if {![string length $msg]} {
@@ -204,30 +220,31 @@ proc ComposeForwardAttachment {msg role} {
     }
 
     set handler composeM[incr idCnt]
-    upvar #0 $handler mh
+    upvar \#0 $handler mh
 
     #
     # Attach old message
     #
     set id compose[incr idCnt]
-    upvar #0 $id hd
+    upvar \#0 $id hd
 
-    set hd(description) $t(forwarded_message)
+    set hd(content_description) $t(forwarded_message)
     foreach header [$msg headers] {
 	switch [string tolower [lindex $header 0]] {
-	subject		{ set mh(subject) "Fwd: [lindex $header 1]" }
-	description	{ set hd(description) [lindex $header 1] }
+	subject		    { set mh(subject) "Fwd: [lindex $header 1]" }
+	content_description { set hd(content_description) [lindex $header 1] }
 	}
     }
-    set hd(filename) [RatTildeSubst $option(send_cache)/rat.[RatGenId]]
-    set fh [open $hd(filename) w 0600]
+    set hd(filename) $rat_tmp/rat.[RatGenId]
+    set fh [open $hd(filename) w]
     fconfigure $fh -translation binary 
-    regsub -all "\r\n" [$msg rawText] "\n" raw
+    set raw [string map {"\r\n" "\n"}  [$msg rawText]]
     puts -nonewline $fh $raw
     close $fh
     set hd(type) message
     set hd(subtype) rfc822
     set hd(removeFile) 1
+    set hd(size) [file size $hd(filename)]
     set mh(attachmentList) $id
 
     return [DoCompose $handler $role 0 1]
@@ -242,18 +259,61 @@ proc ComposeForwardAttachment {msg role} {
 # role -        The role to do the composing as
 
 proc ComposeBounce {msg role} {
-    global idCnt option t
+    global t idCnt
+
+    set msg [ComposeChoose $msg $t(bounce_which)]
+
     set handler composeM[incr idCnt]
-    upvar #0 $handler mh
+    upvar \#0 $handler mh
+    set mh(msgs) $msg
+    return [DoBounce $handler $role]
+}
 
-    set msg [ComposeChoose $msg $t(forward_which)]
-    if {![string length $msg]} {
-	return 0
-    }
+# ComposeContinue --
+#
+# Continue to compose a message
+#
+# Arguments:
+# msg - Message to continue composing
 
+proc ComposeContinue {msg} {
+    global idCnt option t rat_tmp
+    set handler composeM[incr idCnt]
+    upvar \#0 $handler mh
+
+    set role $option(default_role)
+    set mh(data_tags) ""
+    set mh(other_tags) ""
+    set replacements {}
     foreach header [$msg headers] {
 	set name [string tolower [lindex $header 0]]
-	set mh($name) [lindex $header 1]
+        if {[regexp -nocase {x-tkrat-original-([a-z]+)} $name unused f]} {
+            lappend replacements [list $f [lindex $header 1]]
+            continue
+        }
+	switch $name {
+	    x-tkrat-internal-tags {
+		set mh(other_tags) [lindex $header 1]
+	    }
+	    x-tkrat-internal-role {
+		set role [lindex $header 1]
+	    }
+	    x-tkrat-internal-pgpactions {
+		set a [lindex $header 1]
+                set mh(pgp_sign) [lindex $a 0]
+                set mh(pgp_encrypt) [lindex $a 1]
+                set mh(pgp_sign_explicit) 1
+	    }
+	    x-tkrat-internal-bcc {
+		set mh(bcc) [lindex $header 1]
+	    }
+	    default {
+		set mh($name) [lindex $header 1]
+	    }
+	}
+    }
+    foreach r $replacements {
+        set mh([lindex $r 0]) [lindex $r 1]
     }
 
     # Find if there is a bodypart which we can inline (a text part)
@@ -261,18 +321,15 @@ proc ComposeBounce {msg role} {
     set type [string tolower [$body type]]
     set inline {}
     set attach $body
-    if { (![string compare text [lindex $type 0]]
-	    && ![string compare plain [lindex $type 1]])
-	|| (![string compare message [lindex $type 0]]
-		&& ![string compare rfc822 [lindex $type 1]])} {
+    if { ("text" == [lindex $type 0] && "plain" == [lindex $type 1])
+	 || ("message" == [lindex $type 0] && "rfc822" == [lindex $type 1])} {
 	set inline $body
 	set attach {}
-    } elseif {![string compare multipart [lindex $type 0]]} {
+    } elseif {"multipart" == [lindex $type 0]} {
 	set children [$body children]
 	if {0 < [llength $children]} {
 	    set type [string tolower [[lindex $children 0] type]]
-	    if {![string compare text [lindex $type 0]]
-		    && ![string compare plain [lindex $type 1]]} {
+	    if {"text" == [lindex $type 0] && "plain" == [lindex $type 1]} {
 		set inline [lindex $children 0]
 		set attach [lrange $children 1 end]
 	    } else {
@@ -284,17 +341,17 @@ proc ComposeBounce {msg role} {
 
     # Now we are ready to start constructing the new message
     set bhandler composeM[incr idCnt]
-    upvar #0 $bhandler bh
+    upvar \#0 $bhandler bh
     set mh(body) $bhandler
     set body [$msg body]
     set type [string tolower [$body type]]
-    if {"multipart" == [lindex [string tolower [$body type]] 0]
-	    && 0 < [llength [$body children]]} {
+    set bh(type) [lindex $type 0]
+    set bh(subtype) [lindex $type 1]
+    if {"multipart" == $bh(type) && 0 < [llength [$body children]]} {
 	set mh(data) [[lindex [$body children] 0] data 0]
-        set mh(data_tags) "Cited noWrap no_spell"
 	foreach child [lrange [$body children] 1 end] {
 	    set chandler composeC[incr idCnt]
-	    upvar #0 $chandler ch
+	    upvar \#0 $chandler ch
 	    lappend bh(children) $chandler
 
 	    set type [string tolower [$child type]]
@@ -304,158 +361,26 @@ proc ComposeBounce {msg role} {
 	    set ch(parameter) [$child params]
 	    set ch(disp_type) [$child disp_type]
 	    set ch(disp_parm) [$child disp_parm]
-	    set ch(id) [$child id]
-	    set ch(description) [$child description]
+	    set ch(content_id) [$child id]
+	    set ch(content_description) [$child description]
 	    if {![info exists mh(data)] && ![string compare text $ch(type)]} {
 		set mh(data) [$child data 0]
-		set mh(data_tags) "Cited noWrap no_spell"
 	    } else {
-		set ch(filename) \
-			[RatTildeSubst $option(send_cache)/rat.[RatGenId]]
-		set fh [open $ch(filename) w 0600]
+		set ch(filename) $rat_tmp/rat.[RatGenId]
+		set fh [open $ch(filename) w]
 		$child saveData $fh 1 0
 		close $fh
 		set ch(removeFile) 1
+                set ch(size) [file size $ch(filename)]
 		lappend mh(attachmentList) $chandler
 	    }
 	}
     } else {
 	set mh(data) [$body data 0]
-	set mh(data_tags) "Cited noWrap no_spell"
-    }
-
-    return [DoCompose $handler $role 0 0]
-}
-
-
-# ComposeHeld --
-#
-# Choose a message in the hold and continue compose it.
-#
-# Arguments:
-
-proc ComposeHeld {} {
-    global idCnt t b
-
-    # First see if there are any held messages
-    if {![llength [set content [RatHold list]]]} {
-	Popup $t(no_held)
-	return 0
-    }
-
-    # Create identifier
-    set id gh[incr idCnt]
-    set w .$id
-    upvar #0 $id hd
-    set hd(done) 0
-
-    # Create toplevel
-    toplevel $w -class TkRat
-    wm title $w $t(getheld)
-
-    # Populate window
-    frame $w.list
-    scrollbar $w.list.scroll -relief sunken -command "$w.list.list yview" \
-	    -highlightthickness 0
-    listbox $w.list.list -yscroll "$w.list.scroll set" -height 10 \
-	    -width 80 -relief sunken -selectmode browse \
-	    -exportselection false -highlightthickness 0
-    set b($w.list.list) compose_held_pick
-    bind $w.list.list <Double-1> "set ${id}(done) 1"
-    pack $w.list.scroll -side right -fill y
-    pack $w.list.list -side left -expand 1 -fill both
-    OkButtons $w $t(ok) $t(cancel) "set ${id}(done)"
-    pack $w.buttons -side bottom -pady 5 -fill x
-    pack $w.list -expand 1 -fill both -padx 5 -pady 5
-
-    # Populate list
-    foreach m $content {
-	$w.list.list insert end $m
     }
     
-    Place $w composeHeld
-    ModalGrab $w
-    tkwait variable ${id}(done)
-    set index [$w.list.list curselection]
-    RecordPos $w composeHeld
-    destroy $w
 
-    if {1 == $hd(done)} {
-	if {[string length $index]} {
-	    return [ComposeExtracted [RatHold extract $index]]
-	} else {
-	    Popup $t(must_select)
-	}
-    }
-    unset b($w.list.list)
-    unset hd
-    return 0
-}
-
-# ComposeExtracted --
-#
-# Starts composing an extracted message
-#
-# Arguments:
-# mgh - handler of the extracted message
-
-proc ComposeExtracted {mgh} {
-    global charsetMapping option
-
-    upvar #0 $mgh mh
-    if {[info exists mh(body)]} {
-	upvar #0 $mh(body) bh
-	if {![string compare "$bh(type)/$bh(subtype)" text/plain]} {
-	    set edit $mh(body)
-	    set children {}
-	} elseif {![string compare "$bh(type)" multipart]} {
-	    set children $bh(children)
-	    upvar #0 [lindex $children 0] ch1
-	    if {![string compare "$ch1(type)/$ch1(subtype)" text/plain]} {
-		set edit [lindex $children 0]
-		set children [lreplace $children 0 0]
-	    } else {
-		set edit {}
-	    }
-	} else {
-	    set edit {}
-	    set children $mh(body)
-	}
-	if {[info exists bh(pgp_sign)]} {
-	    set mh(pgp_sign) $bh(pgp_sign)
-	    set mh(pgp_encrypt) $bh(pgp_encrypt)
-	}
-	if {[string length $edit]} {
-	    upvar #0 $edit bp
-	    set fh [open $bp(filename) r]
-	    if {[info exists bp(parameter)]} {
-		set params $bp(parameter)
-		lappend params {a a}
-		array get p $params
-	    }
-	    if {[info exists p(charset)]} {
-		set charset $p(charset)
-	    } else {
-		if {[info exists mh(charset)]} {
-		    set charset $mh(charset)
-		} else {
-		    set charset auto
-		}
-	    }
-	    if {"auto" == $charset} {
-		set charset utf-8
-	    } 
-	    fconfigure $fh -encoding $charsetMapping($charset)
-	    set mh(data) [read $fh]
-	    set mh(data_tags) {}
-	    close $fh
-	    if {$bp(removeFile)} {
-		catch "file delete -force -- $bp(filename)"
-	    }
-	}
-	set mh(attachmentList) $children
-    }
-    return [DoCompose $mgh $mh(role) 0 0]
+    return [DoCompose $handler $role 0 0]
 }
 
 # ComposeClient --
@@ -469,11 +394,149 @@ proc ComposeClient {hl} {
     global idCnt option
 
     set handler clientM[incr idCnt]
-    upvar #0 $handler mh
+    upvar \#0 $handler mh
     if {[llength $hl]} {
 	array set mh $hl
     }
     return [DoCompose $handler $option(default_role) 0 1]
+}
+
+# ForwardGroupSeparately --
+#
+# Forwards a group of messages as separate emails
+#
+# Arguments:
+# msgs - List of messages to forward
+# role - The role to do the composing as
+
+proc ForwardGroupSeparately {msgs role} {
+    global t idCnt
+
+    if {0 == [llength $msgs]} {
+	return 0
+    }
+
+    set handler composeM[incr idCnt]
+    upvar \#0 $handler mh
+    set mh(subject) $t(forwarded_message)
+    set mh(special) forward_group
+    set mh(msgs) $msgs
+    return [DoCompose $handler $role 0 1]
+}
+
+# ForwardGroupInOne --
+#
+# Forwards a group of messages as attachments in one email
+#
+# Arguments:
+# msgs - List of messages to forward
+# role - The role to do the composing as
+
+proc ForwardGroupInOne {msgs role} {
+    global t idCnt rat_tmp
+
+    if {0 == [llength $msgs]} {
+	return 0
+    }
+
+    set handler composeM[incr idCnt]
+    upvar \#0 $handler mh
+    set mh(subject) $t(forwarded_messages)
+
+    #
+    # Attach messages
+    #
+    foreach msg $msgs {
+        set id compose[incr idCnt]
+        upvar \#0 $id hd
+
+        set hd(content_description) $t(forwarded_message)
+        foreach header [$msg headers] {
+            switch [string tolower [lindex $header 0]] {
+                content_description {
+                    set hd(content_description) [lindex $header 1]
+                }
+            }
+        }
+        set hd(filename) $rat_tmp/rat.[RatGenId]
+        set fh [open $hd(filename) w]
+        fconfigure $fh -translation binary 
+        set raw [string map {"\r\n" "\n"}  [$msg rawText]]
+        puts -nonewline $fh $raw
+        close $fh
+        set hd(type) message
+        set hd(subtype) rfc822
+        set hd(removeFile) 1
+        set hd(size) [file size $hd(filename)]
+        lappend mh(attachmentList) $id
+    }
+
+    return [DoCompose $handler $role 0 1]
+}
+
+# BounceMessages --
+#
+# Bounces all the specified messages
+#
+# Arguments:
+# msgs - List of messages to forward
+# role - The role to do the composing as
+
+proc BounceMessages {msgs role} {
+    global t idCnt
+
+    if {0 == [llength $msgs]} {
+	return 0
+    }
+
+    set handler composeM[incr idCnt]
+    upvar \#0 $handler mh
+    set mh(special) bounce_group
+    set mh(msgs) $msgs
+    return [DoBounce $handler $role]
+}
+
+# ComposeInit --
+#
+# Initialize a number of compose variables
+#
+# Arguments:
+# handler   -	The handler for the active compose session
+# role -        The role to do the composing as
+
+proc ComposeInit {handler role} {
+    global composeHeaderList option
+    upvar \#0 $handler mh
+
+    foreach i $composeHeaderList {
+	set mh(O_$i) 0
+    }
+    foreach adr {from reply_to to cc bcc} {
+	if {![info exists mh($adr)]} {
+	    set mh($adr) {}
+	}
+    }
+    foreach f {from reply_to bcc role} {
+        set mh(orig,$f) ""
+    }
+
+    set mh(role) $role
+    set mh(save_to) ""
+    set mh(closing) 0
+    set mh(role_sig) 0
+    if {![info exists mh(pgp_sign)]} {
+	set mh(pgp_sign) $option($role,sign_outgoing)
+        set mh(pgp_sign_explicit) 0
+	set mh(pgp_encrypt) $option(pgp_encrypt)
+    }
+    set mh(pgp_signer) $option($mh(role),sign_as)
+    set mh(final_backup_done) 0
+    if {![info exists mh(special)]} {
+	set mh(special) none
+    }
+    if {![info exists mh(charset)]} {
+	set mh(charset) auto
+    }
 }
 
 # DoCompose --
@@ -483,54 +546,39 @@ proc ComposeClient {hl} {
 #
 # Arguments:
 # handler   -	The handler for the active compose session
+# role -        The role to do the composing as
 # edit_text -	'1' if we should place the cursor in the text field.
 #               '-1' if we should place the cursor at the top of the text field
 # add_sig   -   '1' if we should add the signature
-# role -        The role to do the composing as
 
 proc DoCompose {handler role edit_text add_sig} {
     global option t b composeHeaderList composeWindowList defaultFontWidth \
-	   tk_strictMotif env charsetName editors
-    upvar #0 $handler mh
+	   tk_strictMotif env charsetName editors fixedItalicFont
+    upvar \#0 $handler mh
 
     # Initialize variables
+    ComposeInit $handler $role
     if {![info exists editors]} {
 	EditorsRead
     }
-    foreach i $composeHeaderList {
-	set mh(O_$i) 0
-    }
-    regsub -all -- - [string tolower $option(compose_headers)] _ vars
+    set vars [string map {- _} [string tolower $option(compose_headers)]]
     foreach i $vars {
 	set mh(O_$i) 1
     }
-    foreach adr {to cc bcc} {
-	if {![info exists mh($adr)]} {
-	    set mh($adr) {}
-	}
-    }
-    set mh(role) $role
-    set mh(redo) 0
-    set mh(save_to) ""
-    set mh(doWrap) 1
-    set mh(doIndent) 1
-    set mh(closing) 0
-    set mh(eeditor) $option(eeditor)
-    set mh(mark_nowrap) 0
-    set mh(role_sig) 0
-    if {![info exists mh(charset)]} {
-	set mh(charset) auto
-    }
 
-    set mh(copy_attached) $option(copy_attached)
-    if {![info exists mh(pgp_sign)]} {
-	set mh(pgp_sign) $option(pgp_sign)
-	set mh(pgp_encrypt) $option(pgp_encrypt)
-    }
+    set mh(send_handler) ComposeSend
+    set mh(window_id) compose
+    set mh(redo) 0
+    set mh(do_wrap) $option(do_wrap)
+    set mh(eeditor) $option(eeditor)
+    set mh(mark_nowrap) $option(mark_nowrap)
+    set mh(autospell) $option(autospell)
+    set mh(dict) $option(def_spell_dict)
 
     # Create window
     set w .$handler
     set mh(toplevel) $w
+    set mh(title) $t(compose_name)
     toplevel $w -class TkRat
     wm iconname $w $t(compose_name)
 
@@ -545,13 +593,11 @@ proc DoCompose {handler role edit_text add_sig} {
 	    -command "ComposeInsertFile $handler"
     set b($m,[$m index end]) compose_insert_file
     $m add separator
-    $m add checkbutton -label $t(automatic_wrap) -variable ${handler}(doWrap) \
-	    -command "rat_edit::setWrap $w.body.text \$${handler}(doWrap)"
-    set b($m,[$m index end]) automatic_wrap
+    $m add command -label $t(store_snapshot) \
+	    -command "ComposeStoreSnapshot $handler"
     $m add separator
     $m add command -label $t(abort) \
-	    -command "ComposeBuildStruct $handler abort;\
-	              DoCompose2 $w $handler abort"
+	    -command "DoComposeCleanup $w $handler backup"
     set b($m,[$m index end]) abort_compose
     set mh(abort_menu) [list $m [$m index end]]
     lappend mh(eEditBlock) $w.menu.file
@@ -560,9 +606,13 @@ proc DoCompose {handler role edit_text add_sig} {
     menubutton $w.menu.edit -menu $m -text $t(edit) -underline $a(edit)
     menu $m -postcommand "ComposePostEdit $handler $m" -tearoff 1
     $m add command -label $t(undo) \
-	    -command "event generate $w.body.text <<Undo>>"
+        -command "event generate $w.body.text <<RatUndo>>"
     set b($m,[$m index end]) undo
     set mh(undo_menu) [list $m [$m index end]]
+    $m add command -label $t(redo) \
+        -command "event generate $w.body.text <<RatRedo>>"
+    set b($m,[$m index end]) redo
+    set mh(redo_menu) [list $m [$m index end]]
     $m add separator
     $m add command -label $t(cut) \
 	    -command "event generate $w.body.text <<Cut>>"
@@ -581,6 +631,14 @@ proc DoCompose {handler role edit_text add_sig} {
     set b($m,[$m index end]) cut_all
     set mh(cut_all_menu) [list $m [$m index end]]
     $m add separator
+    $m add checkbutton -label $t(show_addr_history) \
+        -variable option(show_autocomplete) -command SaveOptions
+    set b($m,[$m index end]) show_addr_history
+    $m add separator
+    $m add checkbutton -label $t(automatic_wrap) \
+        -variable ${handler}(do_wrap) \
+        -command [list ComposeSetWrap $handler]
+    set b($m,[$m index end]) automatic_wrap
     $m add command -label $t(wrap_paragraph) \
 	    -command "event generate $w.body.text <<Wrap>>"
     set b($m,[$m index end]) wrap_paragraph
@@ -590,12 +648,19 @@ proc DoCompose {handler role edit_text add_sig} {
     set b($m,[$m index end]) do_wrap_cited
     $m add checkbutton -label $t(underline_nonwrap) \
 	    -variable ${handler}(mark_nowrap) \
-	    -command "$w.body.text tag configure noWrap \
-				   -underline $${handler}(mark_nowrap)"
+            -command "ComposeSetMarkWrap $handler"
     set b($m,[$m index end]) mark_nowrap
-    $m add command -label $t(check_spelling) \
+    $m add separator
+    $m add command -label $t(check_spelling)... \
 	    -command "rat_ispell::CheckTextWidget $w.body.text"
     set b($m,[$m index end]) do_check_spelling
+    $m add checkbutton -label $t(mark_misspellings) \
+        -variable ${handler}(autospell) -onvalue 1 -offvalue 0 \
+        -command "MarkMisspellings $handler"
+    set mh(autospell_menu) [list $m [$m index end]]
+    $m add cascade -label $t(language) -menu $m.lang
+    menu $m.lang -postcommand "BuildComposeLang $handler $m.lang"
+    set mh(language_menu) [list $m [$m index end]]
     $m add separator
     $m add command -label $t(run_through_command)... \
 	    -command "ComposeSpecifyCmd $handler"
@@ -621,16 +686,6 @@ proc DoCompose {handler role edit_text add_sig} {
     set m $w.menu.extra.m
     menubutton $w.menu.extra -menu $m -text $t(extra) -underline $a(extra)
     menu $m -tearoff 1
-    $m add checkbutton \
-	    -label $t(copy_attached_files) \
-	    -variable ${handler}(copy_attached) \
-	    -onvalue 1 -offvalue 0
-    set b($m,[$m index end]) copy_attached_files
-    $m add checkbutton \
-	    -label $t(request_notification) \
-	    -variable ${handler}(request_dsn) \
-	    -onvalue 1 -offvalue 0
-    set b($m,[$m index end]) request_notification
     if {0 < $option(pgp_version)} {
 	$m add checkbutton \
 		-label $t(sign) \
@@ -642,6 +697,8 @@ proc DoCompose {handler role edit_text add_sig} {
 		-variable ${handler}(pgp_encrypt) \
 		-onvalue 1 -offvalue 0
 	set b($m,[$m index end]) pgp_encrypt
+	$m add command -label "$t(pgp_details)..." \
+            -command "PGPDetails $handler"
     }
     $m add cascade -label $t(charset) -menu $m.cm
     set b($m,[$m index end]) use_charset
@@ -689,8 +746,6 @@ proc DoCompose {handler role edit_text add_sig} {
 	    -command "$w.body.text yview" -highlightthickness 0
     text $w.body.text -relief sunken -bd 1 -setgrid true \
 	    -yscrollcommand "$w.body.scroll set" -wrap none
-    set b($w.body.text) compose_body
-    Size $w.body.text compose
     pack $w.body.scroll -side right -fill y
     pack $w.body.text -side left -expand yes -fill both
     set mh(composeBody) $w.body.text
@@ -733,7 +788,7 @@ proc DoCompose {handler role edit_text add_sig} {
 	    if {$option(sigdelimit)} {
 		$w.body.text insert end "\n" {} "-- " {noWrap no_spell}
 	    }
-	    $w.body.text insert end "\n$sigtext" {noWrap sig}
+	    $w.body.text insert end "\n$sigtext" {noWrap no_spell sig}
 	}
 	$w.body.text mark set insert $pos
     }
@@ -776,23 +831,26 @@ proc DoCompose {handler role edit_text add_sig} {
 	    -exportselection false -highlightthickness 0 -selectmode extended
     set b($w.attach.list.list) attachments
     bind $w.attach.list.list <ButtonRelease-1> \
-	    "if { 1 == \[llength \[%W curselection\]\]} {\
-	         $w.attach.b.detach configure -state normal}"
+        "CheckDeatchStatus $handler $w.attach.b.detach"
     bind $w.attach.list.list <KeyRelease> \
-	    "if { 1 == \[llength \[%W curselection\]\]} {\
-	         $w.attach.b.detach configure -state normal}"
+        "CheckDeatchStatus $handler $w.attach.b.detach"
     pack $w.attach.list.scroll -side right -fill y
     pack $w.attach.list.list -side left -expand 1 -fill both
     pack $w.attach.b \
 	 $w.attach.list -side top -fill x
     set mh(attachmentListWindow) $w.attach.list.list
+    if {"forward_group" == $mh(special)} {
+        $mh(attachmentListWindow) insert end \
+            "-- $t(forwarded_msg_goes_here) --"
+    }
     if {![info exists mh(attachmentList)]} {
 	set mh(attachmentList) {}
     } else {
 	foreach attachment $mh(attachmentList) {
-	    upvar #0 $attachment bp
-	    if { [info exists bp(description)] && "" != $bp(description) } {
-		set desc $bp(description)
+	    upvar \#0 $attachment bp
+	    if { [info exists bp(content_description)]
+                 && "" != $bp(content_description) } {
+		set desc $bp(content_description)
 	    } else {
 		set p(NAME) {}
 		set p(FILENAME) {}
@@ -807,16 +865,19 @@ proc DoCompose {handler role edit_text add_sig} {
 		    set desc "$bp(filename)"
 		}
 	    }
+            if {[info exists bp(size)]} {
+                set size " ([RatMangleNumber $bp(size)])"
+            } else {
+                set size ""
+            }
 	    $mh(attachmentListWindow) insert end \
-		    "$bp(type)/$bp(subtype) : $desc"
+		    "$bp(type)/$bp(subtype) : $desc$size"
 	}
-	$w.attach.b.detach configure -state normal
     }
 
     # Buttons
     frame $w.buttons
-    button $w.buttons.send -text $t(send) \
-	    -command "DoCompose2 $w $handler send"
+    button $w.buttons.send -text $t(send) -command "ComposeSend $w $handler"
     set b($w.buttons.send) send
     lappend mh(eEditBlock) $w.buttons.send
     menubutton $w.buttons.sendsave -text $t(send_save) -indicatoron 1 \
@@ -825,8 +886,9 @@ proc DoCompose {handler role edit_text add_sig} {
     menu $w.buttons.sendsave.m -tearoff 0 -postcommand \
 	    "RatSendSavePostMenu $w $w.buttons.sendsave.m $handler"
     lappend mh(eEditBlock) $w.buttons.sendsave
-    button $w.buttons.hold -text $t(hold)... -command "ComposeHold $w $handler"
-    set b($w.buttons.hold) hold
+    button $w.buttons.hold -text $t(postpone) \
+        -command "ComposeHold $w $handler"
+    set b($w.buttons.hold) postpone
     lappend mh(eEditBlock) $w.buttons.hold
     menubutton $w.buttons.edit -indicatoron 1 -menu $w.buttons.edit.m \
 	    -relief raised -direction flush -textvariable ${handler}(eeditor)
@@ -837,7 +899,7 @@ proc DoCompose {handler role edit_text add_sig} {
     set b($w.buttons.edit) eedit
     lappend mh(eEditBlock) $w.buttons.abort
     button $w.buttons.abort -text $t(abort) -command \
-	    "ComposeBuildStruct $handler abort; DoCompose2 $w $handler abort"
+	    "DoComposeCleanup $w $handler backup"
     set b($w.buttons.abort) abort_compose
     lappend mh(eEditBlock) $w.buttons.edit
     pack $w.buttons.send \
@@ -862,76 +924,63 @@ proc DoCompose {handler role edit_text add_sig} {
     } elseif {[string length $first]} {
 	focus $first
     }
-    Place $w compose
+    ::tkrat::winctl::SetGeometry compose $w $w.body.text
     lappend composeWindowList $handler
     ComposeBind $handler
-    bind $mh(composeBody) <Destroy> \
-	    "ComposeBuildStruct $handler abort; DoCompose2 $w $handler abort"
+    wm protocol $w WM_DELETE_WINDOW "DoComposeCleanup $w $handler backup"
 
     if { 1 == $option(always_editor) } {
 	ComposeEEdit $handler [lindex $editors 0]
     }
 
     UpdateComposeRole $handler
+    MarkMisspellings $handler
+
+    if {$option(compose_backup) > 0} {
+        set mh(next_backup) [after [expr $option(compose_backup)*1000] \
+                                 [list ComposeStoreBackup $handler 1]]
+    }
 
     return $handler
 }
-proc DoCompose2 {w handler do} {
-    global composeWindowList option b editors folderWindowList \
-	    vFolderDef
-    upvar #0 $handler mh
+proc DoComposeCleanup {w handler backup} {
+    global composeWindowList b editors folderWindowList
+    upvar \#0 $handler mh
 
     # Are we already doing this?
     if {0 == [info exists mh(closing)] || 1 == $mh(closing)} {
 	return
     }
+    set mh(closing) 1
 
-    # Check if a save folder is defined
-    if {![string length $mh(save_to)] \
-	    && "" != $option($mh(role),save_outgoing)} {
-	set mh(save_to) $vFolderDef($option($mh(role),save_outgoing))
-    }
-
-    set mh(do) $do
-    if { "send" == $do } {
-	# Check that send is eanbled
-	if {"disabled" == [[lindex $mh(sendButtons) 0] cget -state]} {
-	    bell
-	    return
-	}
-
-	set mh(closing) 1
-	# By moving the focus to the text windge we force all HeaderEntries
-	# to update their variables
-	focus $mh(composeBody)
-	update
-
-	wm withdraw $w
-	if {![ComposeSend $handler]} {
-	    set sent 1
-	    set doRemove 0
-	} else {
-	    set mh(closing) 0
-	    wm deiconify $w
-	    return
-	}
-    } elseif { "abort" == $do } {
-	set sent 0
-	set doRemove 1
-    } elseif { "hold" == $do } {
-	set sent 0
-	set doRemove 0
+    if {$backup != "noback"} {
+        ComposeDoFinalBackup $handler
     }
 
     if {[info exists mh(body)]} {
-	ComposeFreeBody $mh(body) $doRemove
+	ComposeFreeBody $mh(body)
+    }
+    foreach a $mh(attachmentList) {
+        upvar \#0 $a ah
+        if {[info exists ah]} {
+            if {[info exists ah(removeFile)] && $ah(removeFile)} {
+                catch {file delete -- $ah(filename)}
+            }
+            unset ah
+        }
     }
     set index [lsearch $composeWindowList $handler]
     set composeWindowList [lreplace $composeWindowList $index $index]
     if {[winfo exists $w]} {
-	RecordPos $w compose
-	RecordSize $mh(composeBody) compose
-	bind $mh(composeBody) <Destroy> { }
+        if {$mh(window_id) == "compose"} {
+            if {[info exists mh(composeBody)]} {
+                ::tkrat::winctl::RecordGeometry compose $w $mh(composeBody)
+            } else {
+                ::tkrat::winctl::RecordGeometry compose $w
+            }
+        } elseif {$mh(window_id) == "bounce"} {
+            ::tkrat::winctl::RecordGeometry bounce $w
+        }
 	foreach bn [array names b $w.*] {unset b($bn)}
 	destroy $w
 	if {![array size folderWindowList]} {
@@ -943,6 +992,78 @@ proc DoCompose2 {w handler do} {
     unset mh
 }
 
+# MarkMisspellings --
+#
+# Enable/disable marking of misspelled words
+#
+# Aruments:
+# handler -	The handler which identifies the context
+
+proc MarkMisspellings {handler} {
+    upvar \#0 $handler mh
+    global option
+
+    set option(autospell) $mh(autospell)
+    SaveOptions
+
+    if {$mh(autospell)} {
+        rat_textspell::init $mh(composeBody) $mh(dict)
+        set lang_state normal
+    } else {
+        rat_textspell::uninit $mh(composeBody)
+        set lang_state disabled
+    }
+    [lindex $mh(language_menu) 0] entryconfigure \
+        [lindex $mh(language_menu) 1] -state $lang_state
+}
+
+# BuildComposeLang --
+#
+# Build the compose language menu
+#
+# Arguments:
+# handler -	The handler which identifies the context
+# m       -     Nam eof the menu to build
+
+proc BuildComposeLang {handler m} {
+    upvar \#0 $handler mh
+    global t
+
+    $m configure -postcommand ""
+    foreach l [concat auto [rat_textspell::get_dicts]] {
+        if {"auto" == $l} {
+            set label $t(auto)
+        } else {
+            set label [string totitle $l]
+        }
+        $m add radiobutton -label $label -variable ${handler}(dict) -value $l \
+            -command [list rat_textspell::set_dict $mh(composeBody) $l]
+    }
+    FixMenu $m
+}
+
+# CheckDetachStatus --
+#
+# Update status of detach button
+#
+# Arguments:
+# handler -	The handler which identifies the context
+# detach  -     The detach button
+
+proc CheckDeatchStatus {handler detach} {
+    upvar \#0 $handler mh
+
+    set state disabled
+    if {0 < [llength [$mh(attachmentListWindow) curselection]]} {
+        set state normal
+    }
+    if {"forward_group" == $mh(special)
+        && 1 == [$mh(attachmentListWindow) selection includes 0]} {
+        set state disabled
+    }
+    $detach configure -state $state
+}
+
 # ComposeBind --
 #
 # Bind keyboard shortcuts for the compose window
@@ -951,31 +1072,134 @@ proc DoCompose2 {w handler do} {
 # handler -	The handler which identifies the context
 
 proc ComposeBind {handler} {
-    upvar #0 $handler mh
+    upvar \#0 $handler mh
 
-    foreach w "$mh(toplevel) $mh(composeBody)" {
+    set wins $mh(toplevel)
+    if {[info exists mh(composeBody)]} {
+        lappend wins $mh(composeBody)
+	RatBindMenu $mh(composeBody) compose_key_cut $mh(cut_menu)
+	RatBindMenu $mh(composeBody) compose_key_copy $mh(copy_menu)
+	RatBindMenu $mh(composeBody) compose_key_wrap $mh(wrap_menu)
+	RatBindMenu $mh(composeBody) compose_key_cut_all $mh(cut_all_menu)
+	RatBindMenu $mh(composeBody) compose_key_paste $mh(paste_menu)
+	RatBindMenu $mh(composeBody) compose_key_undo $mh(undo_menu)
+	RatBindMenu $mh(composeBody) compose_key_redo $mh(redo_menu)
+    }
+    foreach w $wins {
+	RatBindMenu $w compose_key_abort $mh(abort_menu)
 	RatBind $w compose_key_send \
-		"DoCompose2 $mh(toplevel) $handler send; break"
-	RatBind $w compose_key_abort "ComposeBuildStruct $handler abort; \
-		DoCompose2 $mh(toplevel) $handler abort; break" $mh(abort_menu)
+		"ComposeSend $mh(toplevel) $handler; break"
 	RatBind $w compose_key_editor \
 		"ComposeEEdit $handler \[lindex \$editors 0\]"
-	RatBind $mh(composeBody) compose_key_undo \
-		"event generate $mh(composeBody) <<Undo>>; break" \
-		$mh(undo_menu)
-	RatBind $mh(composeBody) compose_key_cut \
-		"event generate $mh(composeBody) <<Cut>>; break" $mh(cut_menu)
-	RatBind $mh(composeBody) compose_key_copy \
-		"event generate $mh(composeBody) <<Copy>>;break" $mh(copy_menu)
-	RatBind $mh(composeBody) compose_key_wrap \
-		"event generate $mh(composeBody) <<Wrap>>;break" $mh(wrap_menu)
-	RatBind $mh(composeBody) compose_key_cut_all \
-		"event generate $mh(composeBody) <<CutAll>>; break" \
-		$mh(cut_all_menu)
-	RatBind $mh(composeBody) compose_key_paste \
-		"event generate $mh(composeBody) <<Paste>>; break" \
-		$mh(paste_menu)
     }
+}
+
+
+# DoBounce --
+#
+# Actually do the bouncing. This involves building a window in which
+# the user may specify recipients
+#
+# Arguments:
+# handler   -	The handler for the active compose session
+# role -        The role to do the composing as
+
+proc DoBounce {handler role} {
+    global option t b composeHeaderList composeWindowList defaultFontWidth \
+	   tk_strictMotif env charsetName editors fixedItalicFont
+    upvar \#0 $handler mh
+
+    # Initialize variables
+    ComposeInit $handler $role
+
+    foreach h {{to 1} {cc 1} {bcc 0}} {
+        lappend headerList [lindex $h 0]
+        set mh(O_[lindex $h 0]) [lindex $h 1]
+    }
+    set mh(send_handler) ComposeBounceSend
+    set mh(window_id) bounce
+
+    set mh(attachmentList) {}
+
+    # Create window
+    set w .$handler
+    set mh(toplevel) $w
+    set mh(title) $t(bounce_name)
+    toplevel $w -class TkRat
+    wm iconname $w $t(bounce_name)
+
+    # Menus
+    FindAccelerators a {file role headers}
+
+    frame $w.menu -relief raised -bd 1
+    set m $w.menu.file.m
+    menubutton $w.menu.file -menu $m -text $t(file) -underline $a(file)
+    menu $m -tearoff 1
+    $m add command -label $t(abort) \
+	    -command "DoComposeCleanup $w $handler noback"
+    set b($m,[$m index end]) abort_compose
+    set mh(abort_menu) [list $m [$m index end]]
+
+    set m $w.menu.role.m
+    menubutton $w.menu.role -menu $m -text $t(role) -underline $a(role)
+    menu $m -postcommand \
+	    [list PostRoles $handler $m [list UpdateComposeRole $handler]]
+
+    menubutton $w.menu.headers -menu $w.menu.headers.m -text $t(headers) \
+			       -underline $a(headers)
+    set b($w.menu.headers) headers_menu
+    menu $w.menu.headers.m -tearoff 1
+    foreach header $headerList {
+	$w.menu.headers.m add checkbutton -label $t($header) \
+		-variable ${handler}(O_$header) \
+		-onvalue 1 -offvalue 0 \
+		-command "ComposeBuildHeaderEntries $handler"
+    }
+
+    pack $w.menu.file \
+	 $w.menu.role \
+	 $w.menu.headers -side left -padx 5
+
+    # Header fields
+    set mh(headerFrame) $w.h
+    frame $mh(headerFrame)
+
+    # Buttons
+    frame $w.buttons
+    button $w.buttons.send -text $t(send) \
+        -command "ComposeBounceSend $w $handler"
+    set b($w.buttons.send) send
+    menubutton $w.buttons.sendsave -text $t(send_save) -indicatoron 1 \
+	    -menu $w.buttons.sendsave.m -relief raised -underline 0
+    set b($w.buttons.sendsave) sendsave
+    menu $w.buttons.sendsave.m -tearoff 0 -postcommand \
+	    "RatSendSavePostMenu $w $w.buttons.sendsave.m $handler"
+    button $w.buttons.abort -text $t(abort) -command \
+	    "DoComposeCleanup $w $handler noback"
+    set b($w.buttons.abort) abort_compose
+    pack $w.buttons.send \
+	 $w.buttons.sendsave -side left -padx 5
+    pack $w.buttons.abort -side right -padx 5
+    lappend mh(sendButtons) $w.buttons.send
+    lappend mh(sendButtons) $w.buttons.sendsave
+
+    # Populate headerlist and pack everything
+    set first [ComposeBuildHeaderEntries $handler]
+    pack $w.menu -side top -fill x
+    pack $mh(headerFrame) -side top -fill x -padx 5 -pady 5
+    pack $w.buttons -side bottom -fill x -padx 5 -pady 5
+
+    set mh(oldfocus) [focus]
+    if {[string length $first]} {
+	focus $first
+    }
+    ::tkrat::winctl::SetGeometry bounce $w
+    lappend composeWindowList $handler
+    ComposeBind $handler
+
+    UpdateComposeRole $handler
+
+    return $handler
 }
 
 # RatSendSavePostMenu --
@@ -999,9 +1223,10 @@ proc RatSendSavePostMenu {w m handler} {
     $m add command -label $t(to_dbase)... \
 	    -command "RatSendSaveDo $w $handler \
 		      \[InsertIntoDBase [winfo toplevel $w]\]"
+    FixMenu $m
 }
 proc RatSendSaveDo {w handler save_to} {
-    upvar #0 $handler hd
+    upvar \#0 $handler hd
 
     if {"" == $save_to} {
 	return
@@ -1012,7 +1237,7 @@ proc RatSendSaveDo {w handler save_to} {
     } else {
 	set hd(save_to) $save_to
     }
-    DoCompose2 $w $handler send
+    $hd(send_handler) $w $handler
 }
 
 
@@ -1025,8 +1250,9 @@ proc RatSendSaveDo {w handler save_to} {
 
 proc ComposeBuildHeaderEntries {handler} {
     global composeHeaderList composeAdrHdrList t b
-    upvar #0 $handler mh
+    upvar \#0 $handler mh
 
+    set oldfocus [focus]
     foreach slave [grid slaves $mh(headerFrame)] {
 	destroy $slave
     }
@@ -1057,6 +1283,7 @@ proc ComposeBuildHeaderEntries {handler} {
 	}
     }
 
+    catch {focus $oldfocus}
     return $first
 }
 
@@ -1068,13 +1295,13 @@ proc ComposeBuildHeaderEntries {handler} {
 # handler -	The handler for the active compose session
 
 proc ComposeUpdateHeaderEntries {handler} {
-    upvar #0 $handler mh
+    upvar \#0 $handler mh
 
     foreach hh $mh(headerHandles) {
 	set w [lindex $hh 0]
 	set hd [lindex $hh 1]
-	upvar #0 $hd hdr
-	upvar #0 $hdr(varname) var
+	upvar \#0 $hd hdr
+	upvar \#0 $hdr(varname) var
 
 	$w delete 1.0 end
 	$w insert end $var
@@ -1082,148 +1309,314 @@ proc ComposeUpdateHeaderEntries {handler} {
     }
 }
 
-# ComposeBuildStruct --
-#
-# Builds the body structures needed by the RatSend and RatHold commands.
-#
-# Arguments:
-# handler -	The handler for the active compose session
-# mode -	The reason we are building the structure. Valid modes are:
-#               abort - Do minimum
-#               send  - Check charset
-#               hold
-
-proc ComposeBuildStruct {handler mode} {
-    upvar #0 $handler mh
-    global idCnt t option charsetMapping
-
-    # Create identifier
-    set id body[incr idCnt]
-    upvar #0 $id bh
-
-    set bh(type) text
-    set bh(subtype) plain
-    set bh(filename) [RatTildeSubst $option(send_cache)/rat.[RatGenId]]
-    set fh [open $bh(filename) w 0600]
-    set charset $mh(charset)
-    if {[info exists bh(parameter)]} {
-	set params $bh(parameter)
-	lappend params {a a}
-	array get p $params
-	if {[info exists p(charset)]} {
-	    set charset $p(charset)
-	}
-    }
-    catch {$mh(composeBody) get 1.0 end-1c} bodydata
-    if {"send" == $mode} {
-	if {"auto" == $charset} {
-	    set fallback $option(charset)
-	    set charset [RatCheckEncodings bodydata \
-			     $option(charset_candidates)]
-	} else {
-	    set fallback $charset
-	    set charset [RatCheckEncodings bodydata $mh(charset)]
-	}
-	if {"" == $charset} {
-	    if {0 != [RatDialog $mh(toplevel) $t(warning) $t(bad_charset) {} \
-		    0 $t(continue) $t(abort)]} {
-		return -1
-	    }
-	    set charset $fallback
-	}
-	if {![info exists p(charset)]} {
-	    lappend bh(parameter) [list charset $charset]
-	}
-    } elseif {"hold" == $mode} {
-	if {"auto" == $charset} {
-	    set charset utf-8
-	}
-	set mh(other_tags) {}
-	foreach tag {Cited noWrap no_spell sig} {
-	    lappend mh(other_tags) \
-		    [list $tag [$mh(composeBody) tag ranges $tag]]
-	}
-    }
-    if {"abort" != $mode} {
-	set mh(charset) $charset
-	if {[info exists charsetMapping($charset)]} {
-	    fconfigure $fh -encoding $charsetMapping($charset)
-	} else {
-	    fconfigure $fh -encoding $charset
-	}
-	puts -nonewline $fh $bodydata
-	close $fh
-	set bh(encoding) [RatGetCTE $bh(filename)]
-	if {[info exists mh(content-description)]} {
-	    if { 0 < [string length $mh(content-description)]} {
-		set bh(description) $mh(content-description)
-	    }
-	}
-    }
-    set bh(removeFile) 1
-    if {0 == [llength $mh(attachmentList)]} {
-	set bh(pgp_sign) $mh(pgp_sign)
-	set bh(pgp_encrypt) $mh(pgp_encrypt)
-	set mh(body) $id
-    } else {
-	# Create identifier
-	set mid body[incr idCnt]
-	upvar #0 $mid ph
-	set mh(body) $mid
-
-	set ph(pgp_sign) $mh(pgp_sign)
-	set ph(pgp_encrypt) $mh(pgp_encrypt)
-	set ph(type) multipart
-	set ph(subtype) mixed
-	set ph(encoding) 7bit
-	set ph(children) [linsert $mh(attachmentList) 0 $id]
-	set ph(removeFile) 0
-    }
-    return 0
-}
-
 # ComposeSend --
 #
 # Actually send a message
 #
 # Arguments:
+# mainW   -	The main compose window
 # handler -	The handler for the active compose session
 
-proc ComposeSend {handler} {
-    global t composeAdrHdrList
-    upvar #0 $handler mh
+proc ComposeSend {mainW handler} {
+    global t composeAdrHdrList vFolderDef vFolderOutgoing option \
+	folderWindowList idCnt rat_tmp
+    upvar \#0 $handler mh
 
+    # Update all header entries
+    foreach hh $mh(headerHandles) {
+	set w [lindex $hh 0]
+	set hhd [lindex $hh 1]
+	ComposeHandleHE $w $hhd
+    }
+
+    # Check that we have at least one recipient
     if { 0 == [string length "$mh(to)$mh(cc)$mh(bcc)"]} {
 	Popup $t(need_to) $mh(toplevel)
-	return 1
+	return
+    }
+
+    # Extract potential pgp keys to use
+    foreach e {to cc} {
+	if {![catch {RatAlias expand pgp $mh($e) $mh(role)} out]} {
+	    set mh_pgp($e) $out
+	} else {
+	    set mh_pgp($e) ""
+	}
     }
 
     # Alias expansion and syntax error checking
     set err {}
     foreach e $composeAdrHdrList {
-	if {[info exists mh($e)]} {
-	    if {![catch {RatAlias expand2 $mh($e) $mh(role)} out]} {
+	if {[info exists mh($e)] && [string length $mh($e)]} {
+	    if {![catch {RatAlias expand sending $mh($e) $mh(role)} out]} {
+                AddrListAdd $mh($e)
 		set mh($e) $out
 	    } else {
 		lappend err $t($e)
 	    }
 	}
     }
+    SaveAddrList
     if {0 < [llength $err]} {
 	Popup "$t(adr_syntax_error): $err" $mh(toplevel)
-	return 1
+	return
     }
 
-    if { -1 == [ComposeBuildStruct $handler send]} {
-	return 1
+    # Check if a save folder is defined
+    if {![string length $mh(save_to)] \
+	    && "" != $option($mh(role),save_outgoing)} {
+	set mh(save_to) $vFolderDef($option($mh(role),save_outgoing))
     }
 
-    if {[catch "RatSend send $handler" message]} {
-	RatLog 4 $message
-	return 1
+    # Prepare pgp recipients
+    if {$mh(pgp_signer) == ""} {
+	set mh(pgp_signer) [RatExtractAddresses $mh(role) $mh(from)]
+    }
+    set mh(pgp_rcpts) {}
+    foreach p [concat $mh_pgp(to) $mh_pgp(cc)] {
+        lappend mh(pgp_rcpts) [lindex $p 0]
+    }
+
+    # Generate date header
+    set mh(date) [RatGenerateDate]
+
+    set fh [RatOpenFolder $vFolderDef($vFolderOutgoing)]
+    if {"forward_group" == $mh(special)} {
+        foreach a $mh(msgs) {
+            set id compose[incr idCnt]
+            upvar \#0 $id hd
+
+            set hd(content_description) $t(forwarded_message)
+            foreach header [$a headers] {
+                switch -- [string tolower [lindex $header 0]] {
+                    content_description	{
+                        set hd(content_description) [lindex $header 1]
+                    }
+                }
+            }
+            set hd(filename) $rat_tmp/rat.[RatGenId]
+            set fileh [open $hd(filename) w]
+            fconfigure $fileh -translation binary 
+            puts -nonewline $fileh [string map {"\r\n" "\n"}  [$a rawText]]
+            close $fileh
+            set hd(type) message
+            set hd(subtype) rfc822
+            set hd(removeFile) 1
+            set oldAttachments $mh(attachmentList)
+            lappend mh(attachmentList) $id
+
+            set msg [ComposeCreateMsg $handler]
+            if {$mh(pgp_sign) || $mh(pgp_encrypt)} {
+                if {[catch {$msg pgp $mh(pgp_sign) $mh(pgp_encrypt) $mh(role) \
+                                $mh(pgp_signer) $mh(pgp_rcpts)}]} {
+                    $fh close
+                    return
+                }
+            }
+            $fh insert $msg
+            rename $msg ""
+            file delete $hd(filename)
+            unset hd
+            set mh(attachmentList) $oldAttachments
+        }
     } else {
-	return 0
+        # Create message and insert into outgoing queue
+        set msg [ComposeCreateMsg $handler]
+        if {$mh(pgp_sign) || $mh(pgp_encrypt)} {
+            if {[catch {$msg pgp $mh(pgp_sign) $mh(pgp_encrypt) $mh(role) \
+                            $mh(pgp_signer) $mh(pgp_rcpts)}]} {
+                $fh close
+                return
+            }
+        }
+
+        $fh insert $msg
+        rename $msg ""
     }
+    foreach i [$fh flagged seen 0] {
+        $fh setFlag $i seen 1
+    }
+
+    foreach h [array names folderWindowList] {
+	if {$folderWindowList($h) == $fh} {
+	    Sync $h update
+	}
+    }
+    $fh close
+
+    # Inform sender (if online)
+    if {$option(online)} {
+        RatNudgeSender
+    }
+
+    # Possibly inform folder window
+    if {[info exists mh(notify)]} {
+	eval $mh(notify)
+    }
+
+    # Get compose window to clean up
+    DoComposeCleanup $mainW $handler backup
+}
+
+# ComposeBounceSend --
+#
+# Actually bounce a message
+#
+# Arguments:
+# mainW   -	The main bounce window
+# handler -	The handler for the active bounce session
+
+proc ComposeBounceSend {mainW handler} {
+    global t idCnt composeAdrHdrList option vFolderDef vFolderOutgoing
+    upvar \#0 $handler mh
+
+    # By moving the focus to the text widget we force all HeaderEntries
+    # to update their variables
+    focus [lindex $mh(sendButtons) 0]
+    update
+
+    # Check that we have at least one recipient
+    if { 0 == [string length "$mh(to)$mh(cc)$mh(bcc)"]} {
+	Popup $t(need_to) $mh(toplevel)
+	return
+    }
+
+    # Alias expansion and syntax error checking
+    set err {}
+    foreach e $composeAdrHdrList {
+	if {[info exists mh($e)]} {
+	    if {![catch {RatAlias expand sending $mh($e) $mh(role)} out]} {
+                AddrListAdd $mh($e)
+		set mh($e) $out
+	    } else {
+		lappend err $t($e)
+	    }
+	}
+    }
+    SaveAddrList
+    if {0 < [llength $err]} {
+	Popup "$t(adr_syntax_error): $err" $mh(toplevel)
+	return
+    }
+
+    # Check if a save folder is defined
+    if {![string length $mh(save_to)] \
+	    && "" != $option($mh(role),save_outgoing)} {
+	set mh(save_to) $vFolderDef($option($mh(role),save_outgoing))
+    }
+
+    set fh [RatOpenFolder $vFolderDef($vFolderOutgoing)]
+
+    set good 0
+    set fail 0
+    foreach msg $mh(msgs) {
+        if {0 == [llength [info commands $msg]]} {
+            incr fail
+            continue
+        }
+        incr good
+        set envelope {}
+        set mh(files) {}
+        foreach h {to cc bcc} {
+            if {"" != $mh($h)} {
+                lappend envelope [list $h $mh($h)]
+            }
+        }
+        foreach header [$msg headers] {
+            set name [string map {- _} [string tolower [lindex $header 0]]]
+            if {"subject" == $name
+                || "from" == $name
+                || "reply_to" == $name} {
+                lappend envelope [list $name [lindex $header 1]]
+            }
+        }
+        lappend envelope [list message_id [RatGenerateMsgId $mh(role)]]
+
+        set bmsg [RatCreateMessage $mh(role) \
+                      [list $envelope \
+                           [ComposeCreateBody ${handler}(files) [$msg body]]]]
+        $fh insert $bmsg
+        rename $bmsg ""
+        foreach f $mh(files) {
+            file delete -force $f
+        }
+    }
+    if {$fail > 0} {
+        if {$fail == 1 && $good == 0} {
+            Popup $t(message_deleted)
+        } else {
+            Popup $t(messages_deleted)
+        }
+    }
+
+    foreach i [$fh flagged seen 0] {
+        $fh setFlag $i seen 1
+    }
+
+    foreach h [array names folderWindowList] {
+	if {$folderWindowList($h) == $fh} {
+	    Sync $h update
+	}
+    }
+    $fh close
+
+    # Inform sender (if online)
+    if {$option(online)} {
+        RatNudgeSender
+    }
+
+    # Possibly inform folder window
+    if {[info exists mh(notify)]} {
+	eval $mh(notify)
+    }
+
+    # Get compose window to clean up
+    DoComposeCleanup $mainW $handler backup
+}
+
+# ComposeCreateBody --
+#
+# Create a body for for sending to ratCreateMessage
+#
+# Arguments:
+# flist - Name of list which will contain names of used files
+# body  - Body command
+
+proc ComposeCreateBody {flist body} {
+    global rat_tmp
+    upvar \#0 $flist filelist
+
+    set type [$body type]
+    set desc [$body description]
+    set header {}
+    if {"" != $desc} {
+        lappend header [list content_description $desc]
+    }
+    set ltype [string tolower [lindex $type 0]]
+    if {"multipart" == $ltype} {
+        set bodydata {}
+        foreach c [$body children] {
+            lappend bodydata [ComposeCreateBody $flist $c]
+        }
+    } elseif {"text" == $ltype} {
+        set bodydata [list utfblob [$body data 0 utf-8]]
+    } else {
+        set filename $rat_tmp/rat.[RatGenId]
+        set fh [open $filename w]
+        $body saveData $fh 1 0
+        close $fh
+        set bodydata [list file $filename]
+        lappend filelist $filename
+    }
+    return [list \
+                [lindex $type 0] \
+                [lindex $type 1] \
+                [$body params] \
+                [$body encoding] \
+                [$body disp_type] \
+                [$body disp_parm] \
+                $header \
+                $bodydata]
 }
 
 # CompseEEdit --
@@ -1235,7 +1628,7 @@ proc ComposeSend {handler} {
 # e	  -	Id of external editor to use
 
 proc ComposeEEdit {handler e} {
-    upvar #0 $handler mh
+    upvar \#0 $handler mh
     global t idCnt editor charsetMapping rat_tmp
 
     if {[info exists mh(eedit_running)]} {
@@ -1243,7 +1636,7 @@ proc ComposeEEdit {handler e} {
     }
 
     set ehandler compose_E[incr idCnt]
-    upvar #0 $ehandler eh
+    upvar \#0 $ehandler eh
 
     # Write data, change text visible and edit
     set ecmd [lindex $editor($e) 0]
@@ -1252,7 +1645,7 @@ proc ComposeEEdit {handler e} {
 	set charset $charsetMapping($charset)
     }
     set fname $rat_tmp/rat.[RatGenId]
-    set fh [open $fname w 0600]
+    set fh [open $fname w]
     if {"system" != $charset} {
 	if {[catch {fconfigure $fh -encoding $charset} error]} {
 	    Popup $error $mh(toplevel)
@@ -1278,8 +1671,8 @@ proc ComposeEEdit {handler e} {
     RatBgExec ${ehandler}(status) $cmd
 }
 proc ComposeEEdit2 {handler fname charset name1 name2 op} {
-    upvar #0 $handler mh
-    upvar #1 $name1 eh
+    upvar \#0 $handler mh
+    upvar \#1 $name1 eh
 
     # Check if still active, if then insert data
     if {[info exists mh]} {
@@ -1312,19 +1705,27 @@ proc ComposeEEdit2 {handler fname charset name1 name2 op} {
 
 proc Attach {handler} {
     global idCnt t b option fixedNormFont
-    upvar #0 $handler mh
+    upvar \#0 $handler mh
 
     # Create identifier
     set id attach[incr idCnt]
     set w .$id
-    upvar #0 $id hd
+    upvar \#0 $id hd
     set hd(done) 0
 
-    set hd(filename) [rat_fbox::run -title $t(attach_file) -ok $t(open) \
-	    -mode open -parent $mh(toplevel)]
+    set hd(filename) [rat_fbox::run \
+                          -title $t(attach_file) \
+                          -ok $t(open) \
+                          -initialdir $option(initialdir) \
+                          -mode open \
+                          -parent $mh(toplevel)]
     if {"" == $hd(filename)} {
 	unset hd
 	return
+    }
+    if {$option(initialdir) != [file dirname $hd(filename)]} {
+        set option(initialdir) [file dirname $hd(filename)]
+        SaveOptions
     }
 
     toplevel $w -class TkRat
@@ -1336,6 +1737,7 @@ proc Attach {handler} {
     set hd(typestring) [lindex $type 0]
     set hd(encoding) [lindex $type 1]
     set hd(disp_fname) [file tail $hd(filename)]
+    set hd(size) [file size $hd(filename)]
 
     # Build specification window
     frame $w.file
@@ -1357,7 +1759,7 @@ proc Attach {handler} {
 		   {audio {basic}}
 		   {video {mpeg}}
 		   {message {rfc822 partial external-body}}
-		   {application {octet-stream pdf postscript}}} {
+		   {application {octet-stream pdf postscript msword}}} {
 	set typename [lindex $type 0]
 	set submenu $w.type.type.m.$typename
 	$w.type.type.m add cascade -menu $submenu -label $typename
@@ -1417,14 +1819,14 @@ proc Attach {handler} {
 
     frame $w.desc
     label $w.desc.label -width 14 -anchor e -text $t(description):
-    entry $w.desc.entry -width 65 -textvariable ${id}(description)
+    entry $w.desc.entry -width 65 -textvariable ${id}(content_description)
     pack $w.desc.label \
 	 $w.desc.entry -side left
     set b($w.desc.entry) attach_description
 
     frame $w.id
     label $w.id.label -width 14 -anchor e -text $t(id):
-    entry $w.id.entry -width 65 -textvariable ${id}(id)
+    entry $w.id.entry -width 65 -textvariable ${id}(content_id)
     set b($w.id.entry) attach_id
     pack $w.id.label \
 	 $w.id.entry -side left
@@ -1438,8 +1840,8 @@ proc Attach {handler} {
 	 $w.id \
 	 $w.buttons -side top -fill both -pady 2
 
-    Place $w attach2
-    ModalGrab $w $w.desc.entry
+    ::tkrat::winctl::SetGeometry attach2 $w
+    ::tkrat::winctl::ModalGrab $w $w.desc.entry
     $w.desc.entry icursor 0
     tkwait variable ${id}(done)
 
@@ -1448,44 +1850,37 @@ proc Attach {handler} {
 	set hd(type) [lindex $type 0]
 	set hd(subtype) [lindex $type 1]
 	set hd(removeFile) 0
+        if {"text" == $hd(type)} {
+            set f [open $hd(filename) r]
+            set bd [read $f 32768]
+            close $f
+            set charset [RatCheckEncodings bd $option(charset_candidates)]
+            if {"" == $charset} {
+                set charset $option(charset)
+            }
+            set hd(parameter) \{[list charset $charset]\}
+        }
 	if {[string length $hd(disp_fname)]} {
 	    set hd(disp_parm) \{[list filename $hd(disp_fname)]\}
-	    set hd(parameter) \{[list name     $hd(disp_fname)]\}
+            if {[info exists hd(parameter)]} {
+                lappend hd(parameter) [list name $hd(disp_fname)]
+            } else {
+                set hd(parameter) \{[list name $hd(disp_fname)]\}
+            }
 	}
 	set hd(disp_type) attachment
-	if {$mh(copy_attached)} {
-	    set fname [RatTildeSubst $option(send_cache)/[RatGenId]]
-	    if {"link" == [file type $hd(filename)]} {
-		set l [file readlink $hd(filename)]
-		if {"relative" == [file pathtype $l]} {
-		    set d [file dirname $hd(filename)]
-		    if {"relative" == [file pathtype $d]} {
-			set d [pwd]/$d
-		    }
-		    set l $d/$l
-		}
-		if {[catch {exec ln -s $l $fname} result]} {
-		    Popup "$t(failed_to_make_copy): $result" $w
-		}
-	    } elseif {[catch {file copy -- $hd(filename) $fname} result]} {
-		Popup "$t(failed_to_make_copy): $result" $w
-	    } else {
-		set hd(filename) $fname
-		set hd(removeFile) 1
-	    }
-	}
 	lappend mh(attachmentList) $id
-	if { "" != $hd(description) } {
-	    set desc $hd(description)
+	if { "" != $hd(content_description) } {
+	    set desc $hd(content_description)
 	} else {
-	    set desc "$hd(typestring): $hd(disp_fname)"
+	    set desc "$hd(typestring): $hd(disp_fname) ([RatMangleNumber $hd(size)])"
 	}
 	$mh(attachmentListWindow) insert end $desc
     } else {
 	unset hd
     }
 
-    RecordPos $w attach2
+    ::tkrat::winctl::RecordGeometry attach2 $w
     foreach bn [array names b $w.*] {unset b($bn)}
     destroy $w
 }
@@ -1501,12 +1896,12 @@ proc Attach {handler} {
 # topwin -	The window we should be transient for
 
 proc SubtypeSpec {variable type topwin} {
-    upvar #0 $variable var
+    upvar \#0 $variable var
     global t idCnt fixedNormFont
 
     set id subtype[incr idCnt]
     set w .$id
-    upvar #0 $id hd
+    upvar \#0 $id hd
     set hd(done) 0
     toplevel $w -class TkRat
     wm title $w $t(custom_type)
@@ -1531,8 +1926,8 @@ proc SubtypeSpec {variable type topwin} {
     bind $w <Return> "set ${id}(done) 1"
     bind $w.subtype.entry <Tab> "set ${id}(done) 1"
 
-    Place $w subtypeSpec
-    ModalGrab $w $w.subtype.entry
+    ::tkrat::winctl::SetGeometry subtypeSpec $w
+    ::tkrat::winctl::ModalGrab $w $w.subtype.entry
 
     tkwait variable ${id}(done)
 
@@ -1540,7 +1935,7 @@ proc SubtypeSpec {variable type topwin} {
 	set var $type/$hd(spec)
     }
 
-    RecordPos $w subtypeSpec
+    ::tkrat::winctl::RecordGeometry subtypeSpec $w
     destroy $w
     unset hd
 }
@@ -1556,27 +1951,27 @@ proc AttachKeys {handler} {
     RatPGPGetIds AttachKeysDo $handler
 }
 proc AttachKeysDo {handler ids} {
-    global idCnt t option
-    upvar #0 $handler mh
+    global idCnt t option rat_tmp
+    upvar \#0 $handler mh
 
     foreach keyid $ids {
 	# Create identifier
 	set id attach[incr idCnt]
-	upvar #0 $id hd
+	upvar \#0 $id hd
 
 	set hd(type) application
 	set hd(subtype) pgp-keys
 	set hd(encoding) 7bit
-	set hd(description) \
+	set hd(content_description) \
 		"$t(pgp_key) [lindex $keyid 0] $t(for) [lindex $keyid 1]"
-	set hd(filename) [RatTildeSubst $option(send_cache)/[RatGenId]]
+	set hd(filename) $rat_tmp/[RatGenId]
 	set hd(removeFile) 1
 
 	set f [open $hd(filename) w]
 	puts $f [RatPGP extract [lindex $keyid 0]]
 	close $f
 	lappend mh(attachmentList) $id
-	$mh(attachmentListWindow) insert end $hd(description)
+	$mh(attachmentListWindow) insert end $hd(content_description)
     }
 }
 
@@ -1589,12 +1984,15 @@ proc AttachKeysDo {handler ids} {
 # button  -	The button which shall be disabled
 
 proc Detach {handler button} {
-    upvar #0 $handler mh
+    upvar \#0 $handler mh
     $button configure -state disabled
     foreach element [lsort -integer -decreasing \
 			    [$mh(attachmentListWindow) curselection]] {
 	$mh(attachmentListWindow) delete $element
-	ComposeFreeBody [lindex $mh(attachmentList) $element] 1
+        if {"forward_group" == $mh(special)} {
+            incr element -1
+        }
+	ComposeFreeBody [lindex $mh(attachmentList) $element]
 	set mh(attachmentList) [lreplace $mh(attachmentList) $element $element]
     }
 }
@@ -1605,22 +2003,22 @@ proc Detach {handler button} {
 #
 # Arguments:
 # handler -	The handler for the active compose session
-# doRemove -	True if we should actually remove associated files
 
-proc ComposeFreeBody {handler doRemove} {
-    upvar #0 $handler bh
+proc ComposeFreeBody {handler} {
+    upvar \#0 $handler bh
 
+    if {![info exists bh(type)]} {
+	return
+    }
     if { "multipart" == $bh(type)} {
 	if {[info exists bh(children)]} {
 	    foreach body $bh(children) {
-		ComposeFreeBody $body $doRemove
+		ComposeFreeBody $body
 	    }
 	}
     } 
-    if {[info exists bh(removeFile)]} {
-	if {$doRemove && $bh(removeFile)} {
-	    catch {file delete -- $bh(filename)}
-	}
+    if {[info exists bh(removeFile)] && $bh(removeFile)} {
+	catch {file delete -- $bh(filename)}
     }
     unset bh
 }
@@ -1634,58 +2032,35 @@ proc ComposeFreeBody {handler doRemove} {
 # handler -	The handler for the active compose session
 
 proc ComposeHold {mainW handler} {
-    upvar #0 $handler mh
-    global idCnt t b
+    upvar \#0 $handler mh
+    global t vFolderDef vFolderHold
 
-    # Create identifier
-    set id hold[incr idCnt]
-    set w .$id
-    upvar #0 $id hd
-    set hd(done) 0
-
-    # Set default
-    set hd(desc) ""
-    if {[string length $mh(to)]} {
-	set hd(desc) "$t(to): $mh(to)   "
-    }
-    if {[string length $mh(subject)]} {
-	set hd(desc) "$hd(desc) $t(subject): $mh(subject)"
+    # Update all header entries
+    foreach hh $mh(headerHandles) {
+	set w [lindex $hh 0]
+	set hhd [lindex $hh 1]
+	ComposeHandleHE $w $hhd
     }
 
-    # Create toplevel
-    toplevel $w -class TkRat
-    wm title $w $t(hold_message)
-    wm transient $w $mh(toplevel)
+    # Cancel any pending backups
+    if {[info exists mh(next_backup)]} {
+        catch {after cancel $mh(next_backup)}
+    }
 
-    # Populate window
-    frame $w.desc
-    label $w.desc.label -width 10 -anchor e -text $t(description):
-    entry $w.desc.entry -width 80 -textvariable ${id}(desc)
-    pack $w.desc.label \
-	 $w.desc.entry -side left
-    OkButtons $w $t(ok) $t(cancel) "set ${id}(done)"
-    pack $w.desc -side top -anchor w -padx 5 -pady 5
-    pack $w.buttons -side top -pady 5 -fill x
-    set b($w.desc.entry) hold_description
+    # Create message and insert into hold
+    set msg [ComposeCreateMsg $handler]
+    set fh [RatOpenFolder $vFolderDef($vFolderHold)]
+    $fh insert $msg
+    rename $msg ""
+
+    # Mark all messages in hold as read
+    foreach i [$fh flagged seen 0] {
+	$fh setFlag $i seen 1
+    }
+    $fh close
     
-    Place $w composeHold
-    ModalGrab $w $w.desc.entry
-
-    tkwait variable ${id}(done)
-
-    if {1 == $hd(done)} {
-	ComposeBuildStruct $handler hold
-	if {![catch [list RatHold insert $handler $hd(desc)] message]} {
-	    DoCompose2 $mainW $handler hold
-	} else {
-	    Popup "$t(hold_failed); $message" $w
-	}
-    }
-
-    RecordPos $w composeHold
-    unset b($w.desc.entry)
-    destroy $w
-    unset hd
+    # Get compose window to clean up
+    DoComposeCleanup $mainW $handler noback
 }
 
 
@@ -1714,7 +2089,7 @@ proc ComposeChoose {msg info} {
     # Create identifier
     set id cc[incr idCnt]
     set w .$id
-    upvar #0 $id hd
+    upvar \#0 $id hd
     set hd(done) 0
 
     # Create toplevel
@@ -1736,7 +2111,6 @@ proc ComposeChoose {msg info} {
 	    -command "$w.l.canvas yview" \
 	    -highlightthickness 0
     pack $w.l.scroll -side right -fill y
-    Size $w.l.canvas msgList
     pack $w.l.canvas -expand 1 -fill both
     frame $w.l.canvas.f
     set elemId [$w.l.canvas create window 0 0 -anchor nw -window $w.l.canvas.f]
@@ -1755,7 +2129,7 @@ proc ComposeChoose {msg info} {
 	}
 	foreach field [string tolower $option(show_header_selection)] {
 	    if {[info exists header($field)]} {
-		regsub -all -- - $field _ n
+		set n [string map {- _} $field]
 		if {[info exists t($n)]} {
 		    set name $t($n)
 		} else {
@@ -1781,15 +2155,14 @@ proc ComposeChoose {msg info} {
     OkButtons $w $t(ok) $t(cancel) "set ${id}(done)"
     pack $w.buttons -fill both -pady 5
 
-    Place $w composeChoose
+    ::tkrat::winctl::SetGeometry composeChoose $w $w.l.canvas
     update idletasks
     set bbox [$w.l.canvas bbox $elemId]
     eval {$w.l.canvas configure -scrollregion $bbox}
 
-    ModalGrab $w
+    ::tkrat::winctl::ModalGrab $w
     tkwait variable ${id}(done)
-    RecordSize $w.l.canvas msgList
-    RecordPos $w composeChoose
+    ::tkrat::winctl::RecordGeometry composeChoose $w $w.l.canvas
     destroy $w
 
     if {1 == $hd(done)} {
@@ -1840,15 +2213,15 @@ proc ComposeChooseDig {body msgs} {
 
 proc ComposeBuildHE {w mhandler textvariable} {
     global idCnt defaultFontWidth ISO_Left_Tab book_img
-    upvar #0 $textvariable textvar
-    upvar #0 $mhandler mh
+    upvar \#0 $textvariable textvar
+    upvar \#0 $mhandler mh
 
     set handler compHE[incr idCnt]
-    upvar #0 $handler hd
+    upvar \#0 $handler hd
 
     # Build windows
     frame $w
-    text $w.t -relief sunken -yscroll "$w.s set" -width 1 -height 1 -wrap none
+    text $w.t -relief sunken -yscroll "$w.s set" -width 40 -height 1 -wrap none
     scrollbar $w.s -relief sunken -command "$w.t yview" -highlightthickness 0
     button $w.b -command "ComposeHandleHEAlias $w.t $handler" -bd 1 \
 	    -image $book_img -padx 0 -pady 0 -takefocus 0
@@ -1862,6 +2235,8 @@ proc ComposeBuildHE {w mhandler textvariable} {
     set hd(scroll) 0
     set hd(width) 0
     set hd(mhandler) $mhandler
+    set hd(autocomplete_list) {}
+    set hd(autocomplete_start) {}
 
     # Do bindings
     bind $w <FocusIn> "focus $w.t"
@@ -1870,13 +2245,15 @@ proc ComposeBuildHE {w mhandler textvariable} {
     bind $w.t <Shift-Tab> {focus [tk_focusPrev %W]; break}
     bind $w.t <$ISO_Left_Tab> {focus [tk_focusPrev %W]; break}
     bind $w.t <Shift-space> { }
-    bind $w.t <KeyRelease-comma> "ComposeHandleHE %W $handler"
-    bind $w.t <FocusOut> "ComposeHandleHE %W $handler"
+    bind $w.t <KeyRelease-comma> "ComposeHandleHEComma %W $handler"
+    bind $w.t <FocusOut> "after 1 ComposeHandleHEFocusOut %W $handler"
     bind $w.t <Destroy> "unset $handler"
     bind $w.t <<PasteSelection>> "ComposeHandleHEPaste %W $handler; break"
     bind $w.t <<Paste>> "ComposeHandleHEPaste %W $handler; break"
     bind $w.t <Control-l> "ComposeHandleHEAlias %W $handler"
     bind $w.t <Configure> "ComposeHandleHEConfigure %W $handler %w"
+
+    AddrListInit $w.t
 
     # Create error tag
     if {[winfo cells $w.t] > 2} {
@@ -1905,7 +2282,7 @@ proc ComposeBuildHE {w mhandler textvariable} {
 
 proc ComposeHandleHEConfigure {w handler pixwidth} {
     global defaultFontWidth
-    upvar #0 $handler hd
+    upvar \#0 $handler hd
 
     if {![info exists hd(borders)]} {
 	set hd(borders) [expr {2*([$w cget -borderwidth] \
@@ -1921,6 +2298,34 @@ proc ComposeHandleHEConfigure {w handler pixwidth} {
     ComposeHandleHE $w $handler
 }
 
+# ComposeHandleHEFocusOut --
+#
+# Handle FocusOut events for the eheader entry. This routine checks if
+# the actually still has focus and in that case does nothing.
+#
+# Arguments:
+# w	  - The text widget
+# handler - The handler which identifies this address widget
+
+proc ComposeHandleHEFocusOut {w handler} {
+    if {[winfo exists $w] && [focus] != $w && 0 == [AddrListClose $w 0]} {
+        ComposeHandleHE $w $handler
+    }
+}
+
+# ComposeHandleHEComma --
+#
+# Handle address separator events
+#
+# Arguments:
+# w	  - The text widget
+# handler - The handler which identifies this address widget
+
+proc ComposeHandleHEComma {w handler} {
+    AddrListClose $w 1
+    ComposeHandleHE $w $handler
+}
+
 # ComposeHandleHE --
 #
 # Handle events in an address entry
@@ -1930,37 +2335,51 @@ proc ComposeHandleHEConfigure {w handler pixwidth} {
 # handler - The handler which identifies this address widget
 
 proc ComposeHandleHE {w handler} {
-    upvar #0 $handler hd
-    upvar #0 $hd(varname) var
-    upvar #0 $hd(mhandler) mh
+    upvar \#0 $handler hd
+    upvar \#0 $hd(varname) var
+    upvar \#0 $hd(mhandler) mh
 
     set sr [$w tag nextrange sel 1.0]
     if {[llength $sr]} {
 	set sel [$w get [lindex $sr 0] [lindex $sr 1]]
     }
-    set var [string trim [$w get 1.0 end]]
+    set old [string trim [$w get 1.0 end]]
 
     $w delete 1.0 end
-    set tempalist [RatSplitAdr $var]
+    set tempalist [RatSplitAdr $old]
     set alist {}
     set max 0
     set tot 0
-    foreach adr $tempalist {	
-	if {[catch {RatAlias expand1 $adr $mh(role)} adr2]} {
+    foreach adr $tempalist {
+	if {[catch {RatAlias expand display $adr $mh(role)} adr2]} {
 	    set tag($adr) error
 	    lappend alist $adr
 	} else {
 	    set alist [concat $alist [RatSplitAdr $adr2]]
 	}
     }
+
+    # PGP actions
+    foreach adr $tempalist {
+        if {![catch {RatAlias expand pgpactions $adr $mh(role)} pgpa]} {
+            if {[lindex $pgpa 0]} {
+                set mh(pgp_sign) 1
+                set mh(pgp_sign_explicit) 1
+            }
+            if {[lindex $pgpa 1]} {
+                set mh(pgp_encrypt) 1
+            }
+        }
+    }
+
     foreach adr $alist {
 	if {![info exists tag($adr)]} {
 	    set tag($adr) {}
 	}
-	incr tot [string length $adr]
-	incr tot 2
-	if {[string length $adr] > $max} {
-	    set max [string length $adr]
+        set len [expr [string length $adr]+2]
+	incr tot $len
+	if {$len > $max} {
+	    set max $len
 	}
     }
     if {$tot <= $hd(width)} {
@@ -1983,8 +2402,11 @@ proc ComposeHandleHE {w handler} {
 	    $w insert end $adr $tag($adr) ",\n"
 	}
     }
-    if {[string length $var] && ![regexp {,$} $var]} {
-	$w delete [$w search -backwards , end] end
+    if {[string length $old] && ![regexp {,$} $old]} {
+        set s [$w search -backwards , end]
+        if {$s != ""} {
+            $w delete $s end
+        }
     }
     set hd(lines) [expr {int([$w index end])-1}]
 
@@ -2008,6 +2430,8 @@ proc ComposeHandleHE {w handler} {
 	    $w tag add sel $r $r+[string length $sel]c
 	}
     }
+
+    set var [string trim [$w get 1.0 end]]
 }
 
 # ComposeHandleHEPaste --
@@ -2020,7 +2444,7 @@ proc ComposeHandleHE {w handler} {
 
 proc ComposeHandleHEPaste {w handler} {
     catch {
-	regsub -all mailto: [selection get -displayof $w] {} var
+	set var [string map {mailto: {}} [selection get -displayof $w]]
 	$w insert insert $var
     }
     ComposeHandleHE $w $handler
@@ -2044,83 +2468,6 @@ proc ComposeHandleHEAlias {w handler} {
     }
 }
 
-# SendDeferred --
-#
-# Send deferred messages
-#
-# Arguments:
-
-proc SendDeferred {} {
-    global t numDeferred deferred ratSenderSending fixedNormFont
-
-    set w .deferred
-
-    # Allow only one window at a time.
-    if {[winfo exists $w]} {
-	incr deferred(to_send) [RatSend sendDeferred]
-	return {}
-    }
-
-    set deferred(to_send) [RatSend sendDeferred]
-    if {0 == $deferred(to_send)} {
-	return {}
-    }
-
-    set deferred(w) $w
-    set deferred(sent) 0
-    set deferred(oldDeferred) $numDeferred
-
-    toplevel $w -class TkRat
-    wm title $w $t(send_deferred)
-
-    frame $w.f
-    message $w.f.message -aspect 500 -text $t(sending_deferred)...
-    grid $w.f.message -columnspan 2 
-    label $w.f.to_label -text $t(to_send): -anchor e
-    label $w.f.to_num -textvariable deferred(to_send) -font $fixedNormFont
-    grid $w.f.to_label $w.f.to_num -sticky ew
-    label $w.f.sent_label -text $t(sent): -anchor e
-    label $w.f.sent_num -textvariable deferred(sent) -font $fixedNormFont
-    grid $w.f.sent_label $w.f.sent_num -sticky ew
-    pack $w.f -padx 10 -pady 10
-
-    Place $w sendDeferred
-    trace variable numDeferred w SendDeferredUpdate
-    trace variable ratSenderSending w SendDeferredUpdate
-
-    return $w
-}
-
-# SendDeferredUpdate --
-#
-# Update the send deferred window
-#
-# Arguments:
-# name1	- the variable that was updated
-# name2	- notused
-# op	- notused
-
-proc SendDeferredUpdate {name1 name2 op} {
-    global t numDeferred deferred ratSenderSending
-
-    if {![string compare $name1 ratSenderSending]} {
-	if {1 == $ratSenderSending} { return }
-	RatSend init
-	return
-    }
-    if {$numDeferred < $deferred(oldDeferred)} {
-	incr deferred(sent) 1
-	incr deferred(to_send) -1
-    }
-    set deferred(oldDeferred) $numDeferred
-    if {0 == $deferred(to_send) || 0 == $ratSenderSending} {
-	RecordPos $deferred(w) sendDeferred
-	destroy $deferred(w)
-	trace vdelete numDeferred w SendDeferredUpdate
-	trace vdelete ratSenderSending w SendDeferredUpdate
-    }
-}
-
 # ComposeInsertFile --
 #
 # Insert a file into the message currently being composed
@@ -2129,14 +2476,21 @@ proc SendDeferredUpdate {name1 name2 op} {
 # handler -	The handler for the active compose session
 
 proc ComposeInsertFile {handler} {
-    global t
-    upvar #0 $handler mh
+    global t option
+    upvar \#0 $handler mh
 
-    set filename [rat_fbox::run -ok $t(open) -title $t(insert_file) \
-				 -parent [winfo toplevel $mh(composeBody)] \
-				 -mode open]
+    set filename [rat_fbox::run \
+                      -ok $t(open) \
+                      -title $t(insert_file) \
+                      -initialdir $option(initialdir) \
+                      -parent [winfo toplevel $mh(composeBody)] \
+                      -mode open]
 
     if {$filename != ""} {
+        if {$option(initialdir) != [file dirname $filename]} {
+            set option(initialdir) [file dirname $filename]
+            SaveOptions
+        }
 	if {[catch {open $filename} fh]} {
 	    Popup [format $t(failed_to_open_file) $fh] $mh(toplevel)
 	} else {
@@ -2159,14 +2513,15 @@ proc ComposeInsertFile {handler} {
 
 proc ComposePostEdit {handler m} {
     global cmdList cmdName cmdCmd t
-    upvar #0 $handler hd
+    upvar \#0 $handler hd
 
     rat_edit::state $hd(composeBody) state
 
-    $m entryconfigure 3 -state $state(selection)
-    $m entryconfigure 4 -state $state(selection)
-    $m entryconfigure 5 -state $state(paste)
-    #$m entryconfigure 9 -state $state(selection)
+    $m entryconfigure [lindex $hd(undo_menu) 1] -state $state(undo)
+    $m entryconfigure [lindex $hd(redo_menu) 1] -state $state(redo)
+    $m entryconfigure [lindex $hd(cut_menu) 1] -state $state(selection)
+    $m entryconfigure [lindex $hd(copy_menu) 1] -state $state(selection)
+    $m entryconfigure [lindex $hd(paste_menu) 1] -state $state(paste)
 
     if {![info exist cmdList]} {
 	CmdRead
@@ -2188,12 +2543,12 @@ proc ComposePostEdit {handler m} {
 
 proc ComposeSpecifyCmd {handler} {
     global idCnt t b cmdArrayId cmdList cmdName cmdCmd
-    upvar #0 $handler mh
+    upvar \#0 $handler mh
 
     # Create identifier
     set id insert[incr idCnt]
     set w .$id
-    upvar #0 $id hd
+    upvar \#0 $id hd
     set hd(done) 0
 
     # Create toplevel
@@ -2220,18 +2575,17 @@ proc ComposeSpecifyCmd {handler} {
 
     # The text widget and the buttons
     text $w.t -relief sunken -bd 1 -wrap word -setgrid 1
-    Size $w.t giveCmd
     set b($w.t) command_to_run_through
     OkButtons $w $t(ok) $t(cancel) "set ${id}(done)"
 
     pack $w.s -side top -anchor w -fill x
-    pack $w.t -side top -expand 1 -padx 5
+    pack $w.t -side top -expand 1 -fill both -padx 5
     pack $w.buttons -fill both -pady 5
 
-    Place $w giveCmd
-    ModalGrab $w $w.s.entry
+    ::tkrat::winctl::SetGeometry giveCmd $w $w.t
+    ::tkrat::winctl::ModalGrab $w $w.s.entry
     tkwait variable ${id}(done)
-    RecordPos $w giveCmd
+    ::tkrat::winctl::RecordGeometry giveCmd $w $w.t
 
     if {1 == $hd(done)} {
 	if {$hd(doSave)} {
@@ -2260,7 +2614,7 @@ proc ComposeSpecifyCmd {handler} {
 # cmd	  -	The command to run
 
 proc ComposeRunCmd {handler cmd} {
-    upvar #0 $handler hd
+    upvar \#0 $handler hd
     global t rat_tmp
 
     # Find area to work on
@@ -2286,7 +2640,7 @@ proc ComposeRunCmd {handler cmd} {
     puts $fh [$hd(composeBody) get $start $end]
     close $fh
     if {[regexp {%s} $cmd]} {
-	regsub -all {%s} $cmd $name.in cmd
+	set cmd [string map [list %s $name.in] $cmd]
     } else {
 	set cmd "cat $name.in | $cmd >$name.out"
     }
@@ -2307,7 +2661,7 @@ proc ComposeRunCmd {handler cmd} {
     }
 }
 proc ComposeRunCmdDone {handler name name1 name2 op} {
-    upvar #0 $handler hd
+    upvar \#0 $handler hd
 
     if {[info exists hd]} {
 	foreach block $hd(eEditBlock) {
@@ -2381,7 +2735,7 @@ proc CmdList {} {
 
     # Create identifier
     set id ccmd[incr idCnt]
-    upvar #0 $id hd
+    upvar \#0 $id hd
     set w .$id
     set hd(changed) 0
     set hd(list) $w.l.list
@@ -2406,7 +2760,6 @@ proc CmdList {} {
 	    -highlightthickness 0
     pack $w.l.scroll -side right -fill y
     pack $hd(list) -expand 1 -fill both
-    Size $hd(list) cmdList
     set b($hd(list)) saved_commands
 
     # The buttons
@@ -2415,7 +2768,7 @@ proc CmdList {} {
 	    -state disabled
     button $hd(delete) -text $t(delete) -command "CmdDelete $w $id" \
 	    -state disabled
-    button $w.b.close -text $t(close) -command "CmdClose $w $id"
+    button $w.b.close -text $t(close) -command "destroy $w"
     pack $hd(apply) \
 	 $w.b.delete \
 	 $w.b.close -side top -pady 5 -padx 5
@@ -2434,7 +2787,7 @@ proc CmdList {} {
     set b($hd(text)) command_content
 
     # Pack them all
-    pack $hd(text) -side bottom
+    pack $hd(text) -side bottom -expand 1 -fill x
     pack $w.b -side right -padx 5 -pady 5
     pack $w.l -fill both -expand 1 -padx 5 -pady 5
 
@@ -2461,9 +2814,10 @@ proc CmdList {} {
 	    $hd(text) insert 1.0 \
 		    \$cmdCmd(\[lindex \$cmdList \[%W index @%x,%y\]\])"
     bind $hd(text) <KeyRelease> "CmdTextCheck $w $id"
-    wm protocol $w WM_DELETE_WINDOW "CmdClose $w $id"
+    wm protocol $w WM_DELETE_WINDOW "destroy $w"
+    bind $hd(list) <Destroy> "CmdClose $w $id"
 
-    Place $w cmdList
+    ::tkrat::winctl::SetGeometry cmdList $w $hd(list)
 }
 
 # CmdDelete --
@@ -2476,7 +2830,7 @@ proc CmdList {} {
 
 proc CmdDelete {w handler} {
     global cmdList cmdName
-    upvar #0 $handler hd
+    upvar \#0 $handler hd
 
     set index [$hd(list) curselection]
     unset cmdName([lindex $cmdList $index])
@@ -2508,7 +2862,7 @@ proc CmdDelete {w handler} {
 
 proc CmdTextCheck {w handler} {
     global cmdList cmdCmd
-    upvar #0 $handler hd
+    upvar \#0 $handler hd
 
     if {[string compare [$hd(text) get 1.0 end-1c] \
 	    $cmdCmd([lindex $cmdList [$hd(list) curselection]])]} {
@@ -2528,7 +2882,7 @@ proc CmdTextCheck {w handler} {
 
 proc CmdApply {w handler} {
     global cmdList cmdCmd
-    upvar #0 $handler hd
+    upvar \#0 $handler hd
 
     set cmdCmd([lindex $cmdList [$hd(list) curselection]]) \
 	    [$hd(text) get 1.0 end-1c]
@@ -2545,15 +2899,15 @@ proc CmdApply {w handler} {
 # handler -	The changes variable
 
 proc CmdClose {w handler} {
-    upvar #0 $handler hd
+    upvar \#0 $handler hd
 
+    ::tkrat::winctl::RecordGeometry cmdList $w $hd(list)
     if { 1 == $hd(changed)} {
 	CmdWrite
     }
 
     catch {focus $hd(oldfocus)}
     unset hd
-    destroy $w
 }
 
 # ShowGeneratedHeaders --
@@ -2577,13 +2931,9 @@ proc ShowGeneratedHeaders {handler} {
     # Message part
     frame $w.b
     button $w.b.update -text $t(update) -command "UpdateGH $handler $w.text"
-    button $w.b.dismiss -text $t(dismiss) -command "\
-	    RecordPos $w showGH; \
-	    RecordSize $w.text showGH; \
-	    destroy $w"
+    button $w.b.dismiss -text $t(dismiss) -command "destroy $w"
     pack $w.b.update $w.b.dismiss -side left -padx 5 -expand 1
     text $w.text -yscroll "$w.scroll set" -relief sunken -bd 1 -wrap none
-    Size $w.text showGH
     scrollbar $w.scroll -relief raised -bd 1 \
 	    -command "$w.text yview"
     pack $w.b -side bottom -pady 5 -fill x 
@@ -2595,7 +2945,8 @@ proc ShowGeneratedHeaders {handler} {
 
     UpdateGH $handler $w.text
 
-    Place $w showGH
+    bind $w.text <Destroy> "::tkrat::winctl::RecordGeometry showGH $w $w.text"
+    ::tkrat::winctl::SetGeometry showGH $w $w.text
 }
 
 # FixAddress --
@@ -2629,7 +2980,7 @@ proc FixAddress {role al mode} {
 
 proc UpdateGH {handler w args} {
     global option
-    upvar #0 $handler hd
+    upvar \#0 $handler hd
 
     $w configure -state normal
     $w delete 1.0 end
@@ -2660,8 +3011,8 @@ proc UpdateGH {handler w args} {
     }
     set first 1
     RatAlias list alist
-    foreach a [split [FixAddress $hd(role) [RatAlias expand2 $al $hd(role)] \
-	    mail] ,] {
+    foreach a [split [FixAddress $hd(role) \
+			  [RatAlias expand sending $al $hd(role)] mail] ,] {
 	if {$first} {
 	    set first 0
 	} else {
@@ -2681,21 +3032,21 @@ proc UpdateGH {handler w args} {
     # Reply-to
     if { "" != $hd(reply_to)} {
 	$w insert end "Reply-To: " name \
-		"[FixAddress $hd(role) [RatAlias expand2 $hd(reply_to) $hd(role)] rfc822]\n" \
+		"[FixAddress $hd(role) [RatAlias expand sending $hd(reply_to) $hd(role)] rfc822]\n" \
 		value
     }
 
     # To
     if { "" != $hd(to)} {
 	$w insert end "      To: " name \
-		"[FixAddress $hd(role) [RatAlias expand2 $hd(to) $hd(role)] rfc822]\n" \
+		"[FixAddress $hd(role) [RatAlias expand sending $hd(to) $hd(role)] rfc822]\n" \
 		value
     }
 
     # CC
     if { "" != $hd(cc)} {
 	$w insert end "      cc: " name \
-		"[FixAddress $hd(role) [RatAlias expand2 $hd(cc) $hd(role)] rfc822]\n" \
+		"[FixAddress $hd(role) [RatAlias expand sending $hd(cc) $hd(role)] rfc822]\n" \
 		value
     }
 
@@ -2802,7 +3153,7 @@ proc EditorsEdit {mode arg1 {arg2 {}}} {
     # Create identifier
     set id eedit[incr idCnt]
     set w .$id
-    upvar #0 $id hd
+    upvar \#0 $id hd
     set hd(w) $w
     set hd(mode) $mode
     set hd(oldfocus) [focus]
@@ -2867,7 +3218,8 @@ proc EditorsEdit {mode arg1 {arg2 {}}} {
     }
     set hd(charset_name) $hd(chname,$hd(charset))
 
-    Place $w editorsEdit
+    bind $w.lname <Destroy> "EditorsEditClosed $id"
+    ::tkrat::winctl::SetGeometry editorsEdit $w
 }
 
 # EditorsEditDone --
@@ -2879,7 +3231,7 @@ proc EditorsEdit {mode arg1 {arg2 {}}} {
 # ok	  - Boolean indicating if ok was pressed
 
 proc EditorsEditDone {handler ok} {
-    upvar #0 $handler hd
+    upvar \#0 $handler hd
     global editor editorsChanged b t
 
     if {$ok} {
@@ -2906,10 +3258,23 @@ proc EditorsEditDone {handler ok} {
 	}
 	incr editorsChanged
     }
-    RecordPos $hd(w) editorsEdit
+    destroy $hd(w)
+}
+
+# EditorsEditClosed --
+#
+# Destroy handler
+#
+# Arguments:
+# handler - Handler describing the windo
+
+proc EditorsEditClosed {handler} {
+    upvar \#0 $handler hd
+    global b
+
+    ::tkrat::winctl::RecordGeometry editorsEdit $hd(w)
     foreach bn [array names b $hd(w).*] {unset b($bn)}
     catch {focus $hd(oldfocus)}
-    destroy $hd(w)
     unset hd
 }
 
@@ -2922,7 +3287,7 @@ proc EditorsEditDone {handler ok} {
 # args	  - Arguments provided by trace
 
 proc ComposeEEditorPopulate {handler args} {
-    upvar #0 $handler hd
+    upvar \#0 $handler hd
     global editors
 
     $hd(eeditm) delete 0 end
@@ -2941,11 +3306,11 @@ proc ComposeEEditorPopulate {handler args} {
 # handler - Handler identifying the compose window
 
 proc ComposeWrapCited {handler} {
-    upvar #0 $handler hd
+    upvar \#0 $handler hd
 
     set s 1.0
 
-    rat_edit::initUndo $hd(composeBody) 1.0 end
+    rat_edit::storeSnapshot $hd(composeBody)
     while {[llength [set r [$hd(composeBody) tag nextrange Cited $s]]]} {
 	set start [lindex $r 0]
 	set end [lindex $r 1]
@@ -2954,6 +3319,20 @@ proc ComposeWrapCited {handler} {
 	$hd(composeBody) insert $start $n {noWrap Cited no_spell}
 	set s [lindex $r 1]
     }
+}
+
+# CompareAddresses --
+#
+# Compares two list of addresses and returns 0 if they are equal
+#
+# Arguments:
+# role - Role to operate under
+# adr1, adr2 - List of addresses
+
+proc CompareAddresses {role adr1 adr2} {
+    set l1 [lsort [RatExtractAddresses $role $adr1]]
+    set l2 [lsort [RatExtractAddresses $role $adr2]]
+    return [string compare $l1 $l2]
 }
 
 # UpdateComposeRole
@@ -2965,20 +3344,27 @@ proc ComposeWrapCited {handler} {
 
 proc UpdateComposeRole {handler} {
     global t option
-    upvar #0 $handler mh
+    upvar \#0 $handler mh
 
     set role $mh(role)
-    set mh(request_dsn) $option($role,dsn_request)
     foreach v {from reply_to bcc} {
-	set mh($v) $option($role,$v)
+        if {![CompareAddresses $mh(orig,role) $mh($v) $mh(orig,$v)]} {
+            set mh($v) $option($role,$v)
+        }
+        set mh(orig,$v) $option($role,$v)
     }
+    set mh(orig,role) $role
     set gen [RatGenerateAddresses $handler]
     set mh(from) [lindex $gen 0]
     set mh(sender) [lindex $gen 1]
+    if {0 == $mh(pgp_sign) || 0 == $mh(pgp_sign_explicit)} {
+        set mh(pgp_sign) $option($role,sign_outgoing)
+    }
+    set mh(pgp_signer) $option($mh(role),sign_as)
 
     ComposeUpdateHeaderEntries $handler
 
-    wm title $mh(toplevel) "$t(compose_name) ($option($mh(role),name))"
+    wm title $mh(toplevel) "$mh(title) ($option($mh(role),name))"
 
     if {1 >= [llength [split $mh(from) .]]
         && 0 == $option(force_send)} {
@@ -3004,7 +3390,384 @@ proc UpdateComposeRole {handler} {
 	} elseif {$option(sigdelimit)} {
 	    $mh(composeBody) insert end "\n" {} "-- " {noWrap no_spell}
 	}
-	$mh(composeBody) insert end "\n$sigtext" {noWrap sig}
+	$mh(composeBody) insert end "\n$sigtext" {noWrap no_spell sig}
 	$mh(composeBody) mark set insert $insert
     }
+}
+
+# ComposeCreateMsg --
+#
+# Creates a message from a compose window
+#
+# Arguments:
+# handler - Handler identifying the compose window
+
+proc ComposeCreateMsg {handler {extra_envelope {}}} {
+    global composeHeaderList composeAutoHeaderList option t charsetMapping \
+        composeAdrHdrList
+    upvar \#0 $handler mh
+
+    # Envelope
+    set envelope {}
+    foreach h [concat $composeHeaderList $composeAutoHeaderList] {
+	if {[info exists mh($h)] && [string length $mh($h)]} {
+            lappend envelope [list $h $mh($h)]
+            if {-1 != [lsearch $composeAdrHdrList $h]} {
+                lappend envelope [list X-TkRat-Original-$h $mh($h)]
+            }
+	}
+    }
+
+    # Text body
+    if {[info exists mh(composeBody)]} {
+        if [catch {$mh(composeBody) get 1.0 end-1c} bodydata] {
+            set bodydata {}
+        }
+        set tags {}
+        foreach tag {Cited noWrap no_spell sig} {
+            lappend tags [list $tag [$mh(composeBody) tag ranges $tag]]
+        }
+        lappend envelope [list X-TkRat-Internal-Tags $tags]
+
+        # Determine suitable charset
+        set p(charset) $mh(charset)
+        if {[info exists bh(parameter)]} {
+            set params $bh(parameter)
+            lappend params {a a}
+            array get p $params
+        }
+        if {"auto" == $p(charset)} {
+            set fallback $option(charset)
+            set p(charset) [RatCheckEncodings bodydata \
+                                $option(charset_candidates)]
+        } else {
+            set fallback $p(charset)
+            set p(charset) [RatCheckEncodings bodydata $mh(charset)]
+        }
+        if {"" == $p(charset)} {
+            if {0 != [RatDialog $mh(toplevel) $t(warning) $t(bad_charset) {} \
+                          0 $t(continue) $t(abort)]} {
+                return {}
+            }
+            set p(charset) $fallback
+        }
+
+        # Find encoding
+        set fn [RatTildeSubst $option(tmp)/rat.[RatGenId]]
+        set fh [open $fn w]
+        if {[info exists charsetMapping($p(charset))]} {
+            fconfigure $fh -encoding $charsetMapping($p(charset))
+        } else {
+            fconfigure $fh -encoding $p(charset)
+        }
+        puts -nonewline $fh $bodydata
+        close $fh
+        set encoding [RatGetCTE $fn]
+        file delete $fn
+    } else {
+        set bodydata {}
+        set encoding ""
+    }
+
+    lappend envelope [list message_id [RatGenerateMsgId $mh(role)]]
+    lappend envelope [list X-TkRat-Internal-Role $mh(role)]
+    lappend envelope [list X-TkRat-Internal-PGPActions \
+                          [list $mh(pgp_sign) $mh(pgp_encrypt)]]
+    if {[string length $mh(save_to)]} {
+	lappend envelope [list X-TkRat-Internal-Save-To $mh(save_to)]
+    }
+    foreach e $extra_envelope {
+        lappend envelope $e
+    }
+
+    # Prepare parameters array
+    set params {}
+    foreach name [array names p] {
+	lappend params [list $name $p($name)]
+    }
+
+
+    # Collect into body entity
+    set body [list text plain $params $encoding inline {} {} \
+		  [list utfblob $bodydata]]
+
+    # Handle attachments
+    if { 0 < [llength $mh(attachmentList)]} {
+	set attachments [list $body]
+	foreach a $mh(attachmentList) {
+	    upvar \#0 $a bh
+	    set body_header {}
+	    foreach h {content_description content_id} {
+		if {[info exists bh($h)] && [string length $bh($h)]} {
+		    lappend body_header [list $h $bh($h)]
+		}
+	    }
+	    foreach v {parameter disp_parm} {
+		if {![info exists bh($v)]} {
+		    set bh($v) {}
+		}
+	    }
+	    if {![info exists bh(encoding)]} {
+		set bh(encoding) 7bit
+	    }
+	    set bp [list $bh(type) $bh(subtype) $bh(parameter) $bh(encoding) \
+			attachment $bh(disp_parm) $body_header \
+			[list file $bh(filename)]]
+	    lappend attachments $bp
+	}
+	set body [list multipart mixed {} 7bit {} {} {} $attachments]
+    }
+
+    return [RatCreateMessage $mh(role) [list $envelope $body]]
+}
+
+
+# RatSendFailed --
+#
+# Handles a failed send. Does this bu first poping up a error dialog and
+# then restart composing of the message.
+#
+# Arguments:
+# name   - Handler of message
+# reason - Text string desribing failure
+
+proc RatSendFailed {name reason} {
+    global t
+
+    catch {
+	Popup "$t(send_failed)\n$reason"
+	ComposeContinue $name
+    }
+}
+
+# RatSaveOutgoing --
+#
+# Save a copy of a sent message to the given folder
+#
+# Arguments:
+# msg    - Handler of message
+# folder - Folder to save message in
+
+proc RatSaveOutgoing {msg folder} {
+    global t
+
+    set msg2 [$msg duplicate]
+    $msg2 remove_internal
+    if {![catch {$msg2 copy $folder} err]} {
+	rename $msg2 ""
+	return
+    }
+
+    # The save failed, present dialog which allows them to select a new folder
+    set handler save_outgoing_failed
+    set w .$handler
+    toplevel $w -class TkRat
+
+    set subject ""
+    set recipients ""
+    foreach h [$msg2 headers] {
+	set hn [string tolower [lindex $h 0]]
+	if {"subject" == $hn} {
+	    set subject [lindex $h 1]
+	} elseif {-1 != [lsearch -exact {to cc bcc} $hn]} {
+	    if {"" != $recipients} {
+		set recipients "$recipients, [lindex $h 1]"
+	    } else {
+		set recipients [lindex $h 1]
+	    }
+	}
+    }
+    if {[string length $subject] > 40} {
+	set subject "[string range $subject 0 36]..."
+    }
+    if {[string length $recipients] > 40} {
+	set recipients "[string range $recipients 0 36]..."
+    }
+    message $w.msg -justify left -text $t(save_outgoing_failed) -aspect 600
+    label $w.subject_l -text "$t(subject):" -anchor e
+    label $w.subject_v -text $subject -anchor w
+    label $w.recipients_l -text "$t(recipients):" -anchor e
+    label $w.recipients_v -text $recipients -anchor w
+    frame $w.b -bd 5
+    button $w.b.cancel -text " $t(cancel) " \
+	-command "destroy $w; rename $msg2 {}"
+    menubutton $w.b.save -text $t(save_to) -indicatoron 1 \
+	-menu $w.b.save.m -relief raised -underline 0 \
+	-padx 5 -pady 2
+    menu $w.b.save.m -tearoff 0 -postcommand \
+	    "RatSaveOutgoingPostMenu $w $w.b.save.m $msg2"
+    pack $w.b.save $w.b.cancel -side left -expand 1
+
+    grid $w.msg -
+    grid $w.subject_l $w.subject_v -sticky ew
+    grid $w.recipients_l $w.recipients_v -sticky ew
+    grid $w.b - -sticky ew
+
+    bind $w.msg <Destroy> "::tkrat::winctl::RecordGeometry saveOutgoing $w"
+    wm title $w $t(save_outgoing_failed_title)
+    ::tkrat::winctl::SetGeometry saveOutgoing $w
+}
+
+# RatSaveOutgoingPostMenu --
+#
+# Create the want to save to menu
+#
+# Arguments:
+# w   -	Name of window
+# m   - Name of menu
+# msg - Message to save
+
+proc RatSaveOutgoingPostMenu {w m msg} {
+    global t
+
+    $m delete 0 end
+    VFolderBuildMenu $m 0 "RatSaveOutgoingDo $w $msg" 1
+    $m add separator
+    $m add command -label $t(to_file)... \
+	    -command "RatSaveOutgoingDo $w $msg \
+		      \[InsertIntoFile [winfo toplevel $w]\]"
+    $m add command -label $t(to_dbase)... \
+	    -command "RatSaveOutgoingDo $w $msg \
+		      \[InsertIntoDBase [winfo toplevel $w]\]"
+    FixMenu $m
+}
+proc RatSaveOutgoingDo {w msg save_to} {
+    if {"" == $save_to} {
+	return
+    }
+    if {1 == [llength $save_to]} {
+	global vFolderDef
+	set def $vFolderDef($save_to)
+    } else {
+	set def $save_to
+    }
+    if {![catch {$msg copy $def} err]} {
+	rename $msg ""
+	destroy $w
+    }
+}
+
+# ComposeStoreBackup --
+#
+# Store a backup of the current message
+#
+# Arguments:
+# handler   -	The handler for the active compose session
+# schedule  -   True if another backup should be scheduled
+
+proc ComposeStoreBackup {handler schedule} {
+    upvar \#0 $handler mh
+    global option vFolderDef vFolderHold
+
+    if {![info exists mh(hold_fh)]} {
+        set mh(hold_fh) [RatOpenFolder $vFolderDef($vFolderHold)]
+    }
+
+    set msg [ComposeCreateMsg $handler \
+                 [list [list X-TkRat-Internal-AutoBackup [clock seconds]]]]
+    foreach u [$mh(hold_fh) list "%u"] {
+        set uids($u) 1
+    }
+    $mh(hold_fh) insert $msg
+    rename $msg ""
+    foreach u [$mh(hold_fh) list "%u"] {
+        if {![info exists uids($u)]} {
+            break
+        }
+    }
+    if {[info exists mh(old_backup)]} {
+        ComposeRemoveOldBackup $mh(hold_fh) $mh(old_backup)
+    }
+    set mh(old_backup) $u
+
+    if {$option(compose_backup) > 0 && $schedule} {
+        set mh(next_backup) [after [expr $option(compose_backup)*1000] \
+                                 [list ComposeStoreBackup $handler 1]]
+    }
+}
+
+proc ComposeRemoveOldBackup {hold_fh old_backup} {
+    set uids [$hold_fh list "%u"]
+    set index [lsearch -exact $uids $old_backup]
+    if {-1 != $index} {
+        $hold_fh setFlag $index deleted 1
+        $hold_fh update sync
+    }
+}
+
+# ComposeDoFinalBackup --
+#
+# Remove the backup of the current message
+#
+# Arguments:
+# handler   -	The handler for the active compose session
+
+proc ComposeDoFinalBackup {handler} {
+    upvar \#0 $handler mh
+    global option
+
+    if {$mh(final_backup_done)} {
+        return
+    }
+    set mh(final_backup_done) 1
+
+    if {[info exists mh(next_backup)]} {
+        catch {after cancel $mh(next_backup)}
+    }
+
+    ComposeStoreBackup $handler 0
+
+    after [expr $option(compose_last_chance)*1000] \
+        "ComposeRemoveOldBackup $mh(hold_fh) $mh(old_backup); $mh(hold_fh) close"
+}
+
+# ComposeStoreSnapshot --
+#
+# Store a snopshot of the message being composed
+#
+# Arguments:
+# handler   -	The handler for the active compose session
+
+proc ComposeStoreSnapshot {handler} {
+    upvar \#0 $handler mh
+    global option vFolderDef vFolderHold
+
+    if {![info exists mh(hold_fh)]} {
+        set mh(hold_fh) [RatOpenFolder $vFolderDef($vFolderHold)]
+    }
+    set msg [ComposeCreateMsg $handler]
+    $mh(hold_fh) insert $msg
+    rename $msg ""
+}
+
+# ComposeSetWrap --
+#
+# Set the wrap lines mode
+#
+# Arguments:
+# handler   -	The handler for the active compose session
+
+proc ComposeSetWrap {handler} {
+    upvar \#0 $handler mh
+    global option
+
+    set option(do_wrap) $mh(do_wrap)
+    SaveOptions
+    rat_edit::setWrap $mh(composeBody) $mh(do_wrap)
+}
+
+# ComposeSetMarkWrap --
+#
+# Set the mark non-wrappable mode
+#
+# Arguments:
+# handler   -	The handler for the active compose session
+
+proc ComposeSetMarkWrap {handler} {
+    upvar \#0 $handler mh
+    global option
+
+    set option(mark_nowrap) $mh(mark_nowrap)
+    SaveOptions
+    $mh(composeBody) tag configure noWrap -underline $mh(mark_nowrap)
 }

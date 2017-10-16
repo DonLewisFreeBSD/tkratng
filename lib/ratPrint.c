@@ -4,7 +4,7 @@
  *	This file contains the code for a simple prettyprinter.
  *	Unfortunately it is currently limited to iso8859-1 characters.
  *
- * TkRat software and its included text is Copyright 1996-2002 by
+ * TkRat software and its included text is Copyright 1996-2004 by
  * Martin Forssén
  *
  * The full text of the legal notice is contained in the file called
@@ -13,6 +13,7 @@
 
 #include "ratFolder.h"
 #include <tk.h>
+#include <math.h>
 
 typedef enum {
     FONT_SMALL,
@@ -37,12 +38,14 @@ static char *font, *boldfont;
 static int *font_wx, *boldfont_wx;
 static int yPos;
 static int pagenum;
+static int last_font = -1;
 #define DATEWIDTH	fontsize*6
 #define PAGENUMWIDTH	fontsize*4
 #define SPACE		5
 #define HINDENT		20
 
-#define CHECK_NEWPAGE(x, y)	{if (yPos < SPACE) Newpage(x, y, NULL, NULL);}
+#define CHECK_NEWPAGE(x, y) \
+        {if (yPos < SPACE) Newpage(x, y, NULL, NULL, NULL);}
 
 /*
  * PostScript prolog, partly stolen from the tk 8.2b1 one
@@ -270,11 +273,12 @@ static int cob_wx[256] = {
  */
 static void InitPrintData(Tcl_Interp *interp);
 static float GetStringLength(RatFont font, const char *string,
-	int length);
-static void Newpage(Tcl_Interp *interp, Tcl_Channel channel,
-	const char *subjectArg, MESSAGECACHE *elt);
+			     int length);
+static void Newpage(Tcl_Interp *interp, Tcl_Channel channel, Tcl_Encoding enc,
+		    const char *subjectArg, MESSAGECACHE *elt);
 static void Startpage(Tcl_Interp *interp, Tcl_Channel channel,
-	const char *subject, MESSAGECACHE *elt, int pagenum);
+                      Tcl_Encoding enc, const char *subject,
+                      MESSAGECACHE *elt, int pagenum);
 static void Endpage(Tcl_Channel channel);
 static void PsPrintString(Tcl_Interp *interp, Tcl_Channel channel,
 			  RatFont font, Tcl_Encoding enc,
@@ -287,12 +291,12 @@ static void PrintBody(Tcl_Interp *interp, Tcl_Channel channel,
 static int PrintBodyText(Tcl_Interp *interp, Tcl_Channel channel,
 			 Tcl_Encoding enc, BodyInfo *bodyInfoPtr);
 static int PrintBodyImage(Tcl_Interp *interp, Tcl_Channel channel,
-	BodyInfo *bodyInfoPtr);
+			  BodyInfo *bodyInfoPtr);
 
 /*
  *----------------------------------------------------------------------
  *
- * RatPrettyPrintMsg --
+ * RatPrettyPrintMsgCmd --
  *
  *      Print a message prettily
  *
@@ -306,8 +310,8 @@ static int PrintBodyImage(Tcl_Interp *interp, Tcl_Channel channel,
  */
 
 int
-RatPrettyPrintMsg(ClientData dummy, Tcl_Interp *interp, int objc,
-	Tcl_Obj *CONST objv[])
+RatPrettyPrintMsgCmd(ClientData dummy, Tcl_Interp *interp, int objc,
+		     Tcl_Obj *CONST objv[])
 {
     MESSAGECACHE *elt;
     Tcl_Channel channel;
@@ -315,6 +319,7 @@ RatPrettyPrintMsg(ClientData dummy, Tcl_Interp *interp, int objc,
     MessageInfo *msgPtr;
     char *subject, *hs, buf[1024];
     Tcl_Obj *oPtr, **bv;
+    Tcl_Encoding enc;
     int bc, i;
 
     if (5 != objc) {
@@ -329,7 +334,11 @@ RatPrettyPrintMsg(ClientData dummy, Tcl_Interp *interp, int objc,
      */
     channel = Tcl_GetChannel(interp, Tcl_GetString(objv[1]), NULL);
     hs = Tcl_GetString(objv[2]);
-    Tcl_GetCommandInfo(interp, Tcl_GetString(objv[3]), &cmdInfo);
+    if (0 == Tcl_GetCommandInfo(interp, Tcl_GetString(objv[3]), &cmdInfo)) {
+        oPtr = Tcl_GetVar2Ex(interp, "t", "message_deleted", TCL_GLOBAL_ONLY);
+        Tcl_SetObjResult(interp, oPtr);
+	return TCL_ERROR;
+    }
     msgPtr = (MessageInfo*)cmdInfo.objClientData;
     oPtr = RatMsgInfo(interp, msgPtr, RAT_FOLDER_SUBJECT);
     subject = Tcl_GetString(oPtr);
@@ -340,12 +349,13 @@ RatPrettyPrintMsg(ClientData dummy, Tcl_Interp *interp, int objc,
      */
     InitPrintData(interp);
     pagenum = 0;
+    enc = Tcl_GetEncoding(interp, "iso8859-1");
 
     /* Print prelude & prolog */
     Tcl_WriteChars(channel, "%!PS-Adobe-3.0\n"
     			    "%%Createor: TkRat\n"
     			    "%%Pages: (atend)\n"
-    			    "%%DOcumentData: Clean7Bit\n", -1);
+    			    "%%DocumentData: Clean7Bit\n", -1);
     snprintf(buf, sizeof(buf),
 	    "%%%%Orientation: %s\n"
 	    "%%%%DocumentNeededResources: font %s\n%%%%+ font %s\n",
@@ -372,10 +382,10 @@ RatPrettyPrintMsg(ClientData dummy, Tcl_Interp *interp, int objc,
     Tcl_WriteChars(channel, "%%EndProlog\n", -1);
 
     /* Print page borders etc */
-    Newpage(interp, channel, subject, elt);
+    Newpage(interp, channel, enc, subject, elt);
 
     /* Print headers */
-    PrintHeaders(interp, channel, NULL, hs, msgPtr);
+    PrintHeaders(interp, channel, enc, hs, msgPtr);
 
     /* Print bodyparts */
     Tcl_ListObjGetElements(interp, objv[4], &bc, &bv);
@@ -383,7 +393,7 @@ RatPrettyPrintMsg(ClientData dummy, Tcl_Interp *interp, int objc,
 	yPos -= fontsize*1.1;
 	CHECK_NEWPAGE(interp, channel);
 	Tcl_GetCommandInfo(interp, Tcl_GetString(bv[i]), &cmdInfo);
-	PrintBody(interp, channel, NULL, (BodyInfo*)cmdInfo.objClientData);
+	PrintBody(interp, channel, enc, (BodyInfo*)cmdInfo.objClientData);
     }
 
     /* Print postludium */
@@ -538,10 +548,11 @@ GetStringLength(RatFont font, const char *string, int length)
  */
 
 static void
-Newpage(Tcl_Interp *interp, Tcl_Channel channel, const char *subjectArg,
-	MESSAGECACHE *eltArg)
+Newpage(Tcl_Interp *interp, Tcl_Channel channel, Tcl_Encoding encArg,
+        const char *subjectArg, MESSAGECACHE *eltArg)
 {
     static const char *subject;
+    static Tcl_Encoding enc;
     static MESSAGECACHE *elt;
 
     if (subjectArg) {
@@ -550,11 +561,14 @@ Newpage(Tcl_Interp *interp, Tcl_Channel channel, const char *subjectArg,
     if (eltArg) {
 	elt = eltArg;
     }
+    if (encArg) {
+	enc = encArg;
+    }
 
     if (pagenum > 0) {
 	Endpage(channel);
     }
-    Startpage(interp, channel, subject, elt, ++pagenum);
+    Startpage(interp, channel, enc, subject, elt, ++pagenum);
 }
 
 /*
@@ -574,11 +588,11 @@ Newpage(Tcl_Interp *interp, Tcl_Channel channel, const char *subjectArg,
  */
 
 static void
-Startpage(Tcl_Interp *interp, Tcl_Channel channel, const char *subject,
-	  MESSAGECACHE *elt, int pagenum)
+Startpage(Tcl_Interp *interp, Tcl_Channel channel, Tcl_Encoding enc,
+          const char *subject, MESSAGECACHE *elt, int pagenum)
 {
     char buf[1024];
-    const unsigned char *cPtr;
+    const char *cPtr;
     CONST84 char *s;
     float x, y, w, h, l;
     int objc;
@@ -658,7 +672,7 @@ Startpage(Tcl_Interp *interp, Tcl_Channel channel, const char *subject,
     x += GetStringLength(FONT_BOLD, s, -1);
     snprintf(buf, sizeof(buf),"textfont setfont %.2f %.2f moveto\n(", x+2, y);
     Tcl_WriteChars(channel, buf, -1);
-    Tcl_UtfToExternalDString(NULL, subject, -1, &ds);
+    Tcl_UtfToExternalDString(enc, subject, -1, &ds);
     for (cPtr = Tcl_DStringValue(&ds); *cPtr; cPtr++) {
 	if ('(' == *cPtr || ')' == *cPtr || '\\' == *cPtr) {
 	    Tcl_WriteChars(channel, "\\", 1);
@@ -688,6 +702,11 @@ Startpage(Tcl_Interp *interp, Tcl_Channel channel, const char *subject,
     sprintf(buf, "bigfont setfont %.2f %.2f moveto (%d) show\n", x, y,pagenum);
     Tcl_WriteChars(channel, buf, -1);
 
+    /*
+     * Can not set this to FONT_BIG because then tab_width will not be
+     * calculated in PsPrintString().
+     */
+    last_font = -1;
 }
 
 /*
@@ -736,43 +755,55 @@ PsPrintString(Tcl_Interp *interp, Tcl_Channel channel, RatFont font,
 	      Tcl_Encoding enc, float lm, float hm,
 	      const char *string, int length)
 {
+    static float tab_width;
     char buf[1024], *fn = "";
     const unsigned char *cPtr;
     float ll, l;
     Tcl_DString ds;
 
-    switch (font) {
+    if (font != last_font) {
+        switch (font) {
 	case FONT_SMALL:  fn = "smallfont"; break;
 	case FONT_NORMAL: fn = "textfont"; break;
 	case FONT_BOLD:	  fn = "boldfont"; break;
 	case FONT_BIG:	  fn = "bigfont"; break;
+        }
+        snprintf(buf, sizeof(buf), "%s setfont ", fn);
+        Tcl_WriteChars(channel, buf, -1);
+        last_font = font;
+        tab_width = GetStringLength(font, "XXXXXXXX", 8);
     }
 
     Tcl_UtfToExternalDString(enc, string, length, &ds);
 
-    snprintf(buf, sizeof(buf), "%s setfont %.2f %d moveto\n(", fn, lm, yPos);
+    snprintf(buf, sizeof(buf), "%.2f %d moveto\n(", lm, yPos);
     Tcl_WriteChars(channel, buf, -1);
-    for (cPtr = Tcl_DStringValue(&ds), ll=lm; *cPtr; cPtr++) {
-	ll += (l = GetStringLength(font, cPtr, 1));
-	if (ll > ps_xsize-hm) {
-	    Tcl_WriteChars(channel, ") show\n", -1);
-	    yPos -= fontsize*1.1;
-	    CHECK_NEWPAGE(interp, channel);
-	    snprintf(buf, sizeof(buf), "%s setfont %.2f %d moveto\n(",
-		    fn, lm, yPos);
-	    Tcl_WriteChars(channel, buf, -1);
-	    ll = lm;
-	}
-
-	if ('(' == *cPtr || ')' == *cPtr || '\\' == *cPtr) {
-	    Tcl_WriteChars(channel, "\\", 1);
-	}
-	if (*cPtr >= 32 && *cPtr < 127) {
-	    Tcl_WriteChars(channel, cPtr, 1);
-	} else {
-	    snprintf(buf, sizeof(buf), "\\%o", *cPtr);
-	    Tcl_WriteChars(channel, buf, -1);
-	}
+    for (cPtr = (unsigned char*)Tcl_DStringValue(&ds), ll=lm; *cPtr; cPtr++) {
+        if ('\t' == *cPtr) {
+            ll = floor((ll-lm+tab_width)/tab_width)*tab_width+lm;
+            snprintf(buf, sizeof(buf), ") show\n%.2f %d moveto (", ll, yPos);
+            Tcl_WriteChars(channel, buf, -1);
+        } else {
+            ll += (l = GetStringLength(font, (char*)cPtr, 1));
+            if (ll > ps_xsize-hm) {
+                Tcl_WriteChars(channel, ") show\n", -1);
+                yPos -= fontsize*1.1;
+                CHECK_NEWPAGE(interp, channel);
+                snprintf(buf, sizeof(buf), "%.2f %d moveto\n(", lm, yPos);
+                Tcl_WriteChars(channel, buf, -1);
+                ll = lm;
+            }
+            
+            if ('(' == *cPtr || ')' == *cPtr || '\\' == *cPtr) {
+                Tcl_WriteChars(channel, "\\", 1);
+            }
+            if (*cPtr >= 32 && *cPtr < 127) {
+                Tcl_WriteChars(channel, (char*)cPtr, 1);
+            } else {
+                snprintf(buf, sizeof(buf), "\\%o", *cPtr);
+                Tcl_WriteChars(channel, buf, -1);
+            }
+        }
     }
     Tcl_WriteChars(channel, ") show\n", -1);
     Tcl_DStringFree(&ds);
@@ -798,7 +829,7 @@ static void
 PrintHeaders(Tcl_Interp *interp, Tcl_Channel channel,
 	     Tcl_Encoding enc, char *hs, MessageInfo *msgPtr)
 {
-    Tcl_Obj **fhv, **phv, *oPtr, *o2Ptr;
+    Tcl_Obj **fhv, **phv, *oPtr, *tPtr, *o2Ptr, **thv;
     char buf[1024], *s;
     int i, j, l, fhc, phc;
     float maxX, *lengths;
@@ -833,14 +864,35 @@ PrintHeaders(Tcl_Interp *interp, Tcl_Channel channel,
 	phv = fhv;
 	phc = fhc;
     }
+    thv = (Tcl_Obj**)ckalloc(phc * sizeof(char*));
 
+    /*
+     * Translate header names
+     */
+    for (i=0; i<phc; i++) {
+	Tcl_ListObjIndex(interp, phv[i], 0, &oPtr);
+        strlcpy(buf, Tcl_GetString(oPtr), sizeof(buf));
+        for (s=buf; *s; s++) {
+            if ('-' == *s) {
+                *s = '_';
+            } else if (isupper((unsigned char)*s)) {
+                *s = tolower((unsigned char)*s);
+            }
+        }
+        tPtr = Tcl_GetVar2Ex(interp, "t", buf, TCL_GLOBAL_ONLY);
+        if (!tPtr) {
+            tPtr = oPtr;
+        }
+        Tcl_IncrRefCount(tPtr);
+        thv[i] = tPtr;
+    }
+        
     /*
      * Find maximum length
      */
     lengths = (float*)ckalloc(sizeof(float)*phc);
     for (i=maxX=0; i<phc; i++) {
-	Tcl_ListObjIndex(interp, phv[i], 0, &oPtr);
-	lengths[i] = GetStringLength(FONT_BOLD, Tcl_GetString(oPtr), -1);
+	lengths[i] = GetStringLength(FONT_BOLD, Tcl_GetString(thv[i]), -1);
 	if (lengths[i] > maxX) {
 	    maxX = lengths[i];
 	}
@@ -852,8 +904,7 @@ PrintHeaders(Tcl_Interp *interp, Tcl_Channel channel,
      */
     for (i=0; i<phc; i++) {
 	CHECK_NEWPAGE(interp, channel);
-	Tcl_ListObjIndex(interp, phv[i], 0, &oPtr);
-	snprintf(buf, sizeof(buf), "%s:", Tcl_GetString(oPtr));
+	snprintf(buf, sizeof(buf), "%s:", Tcl_GetString(thv[i]));
 	PsPrintString(interp, channel, FONT_BOLD, enc,
 		      HINDENT + maxX - lengths[i], 0, buf, -1);
 	Tcl_ListObjIndex(interp, phv[i], 1, &oPtr);
@@ -868,6 +919,10 @@ PrintHeaders(Tcl_Interp *interp, Tcl_Channel channel,
     if (!strcmp("selected", hs)) {
 	ckfree(phv);
     }
+    for (i=0; i<phc; i++) {
+        Tcl_DecrRefCount(thv[i]);
+    }
+    ckfree(thv);
     ckfree(lengths);
 }
 
@@ -948,6 +1003,7 @@ PrintBodyText(Tcl_Interp *interp, Tcl_Channel channel, Tcl_Encoding enc,
     char *cPtr, *nPtr;
 
     oPtr = RatBodyData(interp, bodyInfoPtr, 0, NULL);
+    Tcl_IncrRefCount(oPtr);
 
     cPtr = Tcl_GetString(oPtr);
     while (*cPtr) {
@@ -999,7 +1055,7 @@ PrintBodyImage(Tcl_Interp *interp, Tcl_Channel channel, BodyInfo *bodyInfoPtr)
     objv[++i] = Tcl_NewStringObj("photo", -1);
     objv[++i] = Tcl_NewStringObj("-data", -1);
     objv[++i] = RatCode64(RatBodyData(interp, bodyInfoPtr, 0, NULL));
-    r = Tcl_EvalObjv(interp, i+1, objv, 0);
+    r = Tcl_EvalObjv(interp, i, objv, 0);
     for (; i>=0; i--) {
 	Tcl_DecrRefCount(objv[i]);
     }
@@ -1017,7 +1073,7 @@ PrintBodyImage(Tcl_Interp *interp, Tcl_Channel channel, BodyInfo *bodyInfoPtr)
     psw = (block.width*72)/resolution;
     psh = (block.height*72)/resolution;
     if (yPos < psh+SPACE) {
-	Newpage(interp, channel, NULL, NULL);
+	Newpage(interp, channel, NULL, NULL, NULL);
     }
     yPos -= psh;
     sprintf(buf, "gsave\n/picstr %d string def\n", block.width*3);

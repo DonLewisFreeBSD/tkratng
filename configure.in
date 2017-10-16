@@ -2,7 +2,7 @@ dnl     This file should be processed by autoconf to generate a configuration
 dnl	script. It has leant heavily from other similar scripts, most from
 dnl	tcl/tk.
 dnl
-dnl   TkRat software and its included text is Copyright 1996-2002 by
+dnl   TkRat software and its included text is Copyright 1996-2004 by
 dnl   Martin Forssén.
 dnl
 dnl   The full text of the legal notices is contained in the file called
@@ -16,7 +16,7 @@ AC_INIT(/lib/rat.h)
 AC_CONFIG_HEADER(config.h)
 
 # Version numbers of tkrat
-VERSION=2.1
+VERSION=2.2
 BUSYLIB_VERSION=1.0
 AC_SUBST(VERSION)
 AC_SUBST(BUSYLIB_VERSION)
@@ -24,6 +24,13 @@ AC_SUBST(BUSYLIB_VERSION)
 AC_CONFIG_AUX_DIR(misc)
 
 AC_ARG_PROGRAM
+
+# Define precious variables
+AC_ARG_VAR(compress, [Path to compress command])
+AC_ARG_VAR(ssh, [Path to ssh command])
+AC_ARG_VAR(tclsh, [Path to tclsh command])
+AC_ARG_VAR(wish, [Path to wish command])
+AC_ARG_VAR(etags, [Path to etags command])
 
 dnl Checks for programs
 AC_PROG_CC
@@ -44,57 +51,61 @@ AC_SUBST(compress)
 AC_SUBST(cp)
 AC_SUBST(csuffix)
 AC_SUBST(CFLAGS)
+AC_SUBST(CCLIENT_FLAGS)
 
-# Etags is needed for build environment only
-AC_PATH_PROG(etags, etags)
-AC_SUBST(etags)
+dnl Check for gcc > 4.0
+if test "${GCC}" = "yes"; then
+   AC_MSG_CHECKING(version of GCC)
+   GCC_version=`${CC} --version | sed -n '1s/^[[^ ]]* ([[^(]]*) //;s/ .*$//;1p'`
+   AC_MSG_RESULT(${GCC_version})
+fi
 
-dnl check for special libraries
-# NetBSD have crypt in a special library
-AC_CHECK_LIB(c, crypt, [true],
-	[have_libcrypt=yes
-	 AC_CHECK_LIB(crypt, crypt)])
-# AIX needs the s library
-AC_CHECK_LIB(s, getuserattr)
+case "${GCC_version}" in
+     4*)
+        CCLIENT_FLAGS="-Wno-pointer-sign"
+        ;;
+esac
 
-dnl Check for header files
-AC_ISC_POSIX
-AC_HEADER_DIRENT
-AC_HEADER_SYS_WAIT
-AC_CHECK_HEADERS(fcntl.h unistd.h)
+#
+# If users has explicitly specified a tclsh-command, then force us to use
+# that version.
+#
+AC_ARG_WITH(tcl,
+	[  --with-tcl=PATH         use this version of tclsh (path to binary or bindir)], tclpath=$withval)
 
-dnl Checks for typedefs, structures, and compiler characteristics.
-AC_C_CONST
-
-dnl Checks for library functions.
-AC_FUNC_UTIME_NULL
-AC_CHECK_FUNCS(snprintf)
-AC_CHECK_FUNCS(strlcpy)
-AC_CHECK_FUNCS(strlcat)
+if test "x$tclpath" != "x"; then
+   if test -x "$tclpath"; then
+      forced_tclsh=$tclpath
+      required_tcl_version=`echo 'puts $tcl_version' | $forced_tclsh`
+      PATH=`dirname $forced_tclsh`:$PATH
+   else
+      PATH=$tclpath:$PATH
+   fi
+fi
 
 #
 # See if user has specified tcl/tk include directory. If he has then check
 # files there to see which versions of tclsh and wish are needed.
 #
 AC_ARG_WITH(tcl-include, 
-	[  --with-tcl-include=DIR  directory to look for tcl.h and tk.h],
+	[  --with-tcl-include=DIR  directory to look for tcl.h and tk.h in],
 	tcl_with_include=$withval)
 if test "x$tcl_with_include" != "x"; then
-    for i in $tcl_with_include ; do
+    if test "x$forced_tclsh" != "x"; then
+       AC_MSG_ERROR('--with-tcl-include can not be used together with --with-tclsh')
+    fi
+    for i in $tcl_with_include ; do 
 	if test -r $i/tcl.h ; then
 	    MAJOR=`grep TCL_MAJOR_VERSION $i/tcl.h | awk '{print $3}'`
 	    MINOR=`grep TCL_MINOR_VERSION $i/tcl.h | awk '{print $3}'`
-	    if test $MAJOR$MINOR -lt 81 ; then
-		AC_MSG_ERROR('Specified --with-tcl-include directory contains version $MAJOR.$MINOR. 8.2 or later required')
+	    if test $MAJOR$MINOR -lt 83 ; then
+		AC_MSG_ERROR('Specified --with-tcl-include directory contains version $MAJOR.$MINOR. 8.3 or later required')
 	    fi
 	    required_tcl_version=$MAJOR.$MINOR
 	fi
     done
 fi
 
-AC_ARG_WITH(tcl-bin, 
-	[  --with-tcl-bin=DIR      directory to look for tclsh and wish in],
-	PATH=$withval:$PATH, )
 if test "x$required_tcl_version" != "x"; then
     AC_PATH_PROG(tclsh, tclsh$required_tcl_version, , $PATH)
     tv=$required_tcl_version
@@ -102,18 +113,22 @@ if test "x$required_tcl_version" != "x"; then
 	AC_MSG_ERROR('Can not find tcl/tk $required_tcl_version in path')
     fi
 else
-    tv=8.3
-    AC_PATH_PROG(tclsh, tclsh8.3, , $PATH)
+    AC_PATH_PROG(tclsh, tclsh8.5, , $PATH)
+    tv=8.5
     if test "x$tclsh" = "x"; then
-	AC_PATH_PROG(tclsh, tclsh8.2, , $PATH)
-	tv=8.2
+	AC_PATH_PROG(tclsh, tclsh8.4, , $PATH)
+	tv=8.4
+    fi
+    if test "x$tclsh" = "x"; then
+	AC_PATH_PROG(tclsh, tclsh8.3, , $PATH)
+	tv=8.3
     fi
     if test "x$tclsh" = "x"; then
 	AC_PATH_PROG(tclsh, tclsh, , $PATH)
 	tv=`echo 'puts $tcl_version' | $tclsh`
 	changequote(<<, >>)dnl
 	case $tv in
-	    8.[23456789]*)
+	    8.[3456789]*)
 		;;
 	    *)
 	        tclsh=
@@ -123,13 +138,10 @@ else
 	cmd_without_version=ok
     fi
     if test "x$tclsh" = "x"; then
-	AC_PATH_PROG(tclsh, tclsh8.4, , $PATH)
-	tv=8.4
-    fi
-    if test "x$tclsh" = "x"; then
-	AC_MSG_ERROR('Can not find tcl/tk 8.2 or later in path')
+	AC_MSG_ERROR('Can not find tcl/tk 8.3 or later in path')
     fi
 fi
+PATH=`dirname $tclsh`:$PATH
 AC_PATH_PROG(wish, wish$tv, , $PATH)
 if test "x$wish" = "x" -a "x$cmd_without_version" = "xok"; then
    AC_PATH_PROG(wish, wish, , $PATH)
@@ -229,7 +241,7 @@ AC_SUBST(TCL_INCLUDE)
 # Try to locate tkConfig.sh
 #
 AC_ARG_WITH(tkconfig, 
-	[  --with-tkconfig=DIR     directory to look for tkConfig.sh],
+	[  --with-tkconfig=DIR     directory to look for tkConfig.sh in],
 	tkconfig_with=$withval)
 AC_MSG_CHECKING(tkConfig.sh)
 if test "x$tkconfig_with" != "x"; then
@@ -313,28 +325,27 @@ AC_SUBST(XINCLUDES)
 #
 # Check for openssl installation
 # If found the build the imap toolkit with ssl-support
-# This code is based on code found in the portable distribution of OpenSSH
-#
-AC_ARG_WITH(ssl,
-    [  --with-ssl              Enable/disable SSL support (default eanbled) ],
-    [
-	if test "x$withval" != "xno" ; then
-	    tryssl=yes
-	else
-	    tryssl=no
-	fi ],
-    [ tryssl=yes ]
-)
+# This code was based on code found in the portable distribution of OpenSSH
+# [MH] Enhanced by some parts from cURL  http://curl.haxx.se/. To be continued.
 
-if test "x$tryssl" = "xyes"; then
-    AC_ARG_WITH(ssl-dir,
-	[  --with-ssl-dir=PATH     Specify path to OpenSSL installation ],
-	[
-	    if test "x$withval" != "xno" ; then
-		tryssldir=$withval
-	    fi
-	]
-    )
+# default on
+tryssl=yes
+
+AC_ARG_WITH(ssl, AC_HELP_STRING([--with-ssl=PATH],
+[where to look for SSL, PATH points to the SSL installation (default: many)])
+AC_HELP_STRING([--without-ssl], [disable SSL]),
+  tryssl=$withval)
+
+if test X"$tryssl" = X"no"; then
+
+    AC_MSG_WARN(SSL support disabled)
+    IMAPFLAGS="SSLTYPE=none"
+
+else
+
+    if test X"$tryssl" != Xyes; then
+	tryssldir=$tryssl
+    fi
 
     saved_LIBS="$LIBS"
     saved_LDFLAGS="$LDFLAGS"
@@ -344,7 +355,7 @@ if test "x$tryssl" = "xyes"; then
     fi
     AC_CACHE_CHECK([for OpenSSL], ac_cv_openssldir, [
 
-	for ssldir in $tryssldir "" /usr/local/openssl /usr/lib/openssl /usr/local/ssl /usr/lib/ssl /usr/local /usr/pkg /opt /opt/openssl ; do
+	for ssldir in $tryssldir "" /usr/local/openssl /usr/lib/openssl /usr/local/ssl /usr/lib/ssl /usr/share/ssl /usr/local /usr/pkg /opt /opt/openssl /sw ; do
 	    if test ! -z "$ssldir" ; then
 		if test ! -f "$ssldir/include/openssl/rand.h" ; then
 		    continue
@@ -406,13 +417,13 @@ int main(void)
 	EXTRA_LIBS="$EXTRA_LIBS -L$SSLDIR/lib -lssl -lcrypto"
 	IMAPFLAGS="SSLTYPE=unix SSLDIR=$SSLDIR"
 	AC_SUBST(SSLDIR)
-	AC_SUBST(IMAPFLAGS)
     else
-    	LDFLAGS="$saved_LDFLAGS"
-	CFLAGS="$saved_CFLAGS"
-	LIBS="$saved_LIBS"     
+
+	AC_MSG_ERROR(cannot find openssl; try --without-ssl?)
     fi
 fi
+
+AC_SUBST(IMAPFLAGS)
 
 #
 # Find installation prefix (if any)
@@ -423,6 +434,102 @@ AC_ARG_WITH(install-prefix,
 	INSTALL_PREFIX=$withval)
 AC_SUBST(INSTALL_PREFIX)
 
+# Etags is needed for build environment only
+AC_PATH_PROG(etags, etags)
+AC_SUBST(etags)
+
+dnl check for special libraries
+# NetBSD have crypt in a special library
+AC_CHECK_LIB(c, crypt, [true],
+	[have_libcrypt=yes
+	 AC_CHECK_LIB(crypt, crypt)])
+# AIX needs the s library
+AC_CHECK_LIB(s, getuserattr)
+
+dnl Check for header files
+AC_ISC_POSIX
+AC_HEADER_DIRENT
+AC_HEADER_SYS_WAIT
+AC_CHECK_HEADERS(fcntl.h unistd.h)
+
+dnl Checks for typedefs, structures, and compiler characteristics.
+AC_C_CONST
+
+dnl Checks for library functions.
+AC_FUNC_UTIME_NULL
+AC_CHECK_FUNCS(snprintf)
+AC_CHECK_FUNCS(strlcpy)
+AC_CHECK_FUNCS(strlcat)
+
+#------------------------------------------------------------------------------
+#       Find out all about time handling differences.
+#------------------------------------------------------------------------------
+    
+AC_CHECK_HEADERS(sys/time.h)
+AC_HEADER_TIME
+AC_STRUCT_TIMEZONE
+
+AC_MSG_CHECKING([tm_tzadj in struct tm])      
+AC_TRY_COMPILE([#include <time.h>], [struct tm tm; tm.tm_tzadj;],
+        [AC_DEFINE(HAVE_TM_TZADJ)
+         AC_MSG_RESULT(yes)],
+         AC_MSG_RESULT(no))
+    
+AC_MSG_CHECKING([tm_gmtoff in struct tm])
+AC_TRY_COMPILE([#include <time.h>], [struct tm tm; tm.tm_gmtoff;],
+        [AC_DEFINE(HAVE_TM_GMTOFF)
+         AC_MSG_RESULT(yes)],
+         AC_MSG_RESULT(no))
+
+#
+# Its important to include time.h in this check, as some systems (like convex)
+# have timezone functions, etc.
+# 
+have_timezone=no
+AC_MSG_CHECKING([long timezone variable])
+AC_TRY_COMPILE([#include <time.h>], 
+        [extern long timezone;
+         timezone += 1;
+         exit (0);],
+        [have_timezone=yes
+         AC_DEFINE(HAVE_TIMEZONE_VAR)
+         AC_MSG_RESULT(yes)],
+         AC_MSG_RESULT(no))
+
+#
+# On some systems (eg IRIX 6.2), timezone is a time_t and not a long.
+#
+if test "$have_timezone" = no; then
+   AC_MSG_CHECKING([time_t timezone variable])
+   AC_TRY_COMPILE([#include <time.h>],
+        [extern time_t timezone;
+         timezone += 1;
+         exit (0);],
+        [AC_DEFINE(HAVE_TIMEZONE_VAR)
+         AC_MSG_RESULT(yes)],
+         AC_MSG_RESULT(no))
+fi      
+
+#
+# AIX does not have a timezone field in struct tm. When the AIX bsd
+# library is used, the timezone global and the gettimeofday methods are
+# to be avoided for timezone deduction instead, we deduce the timezone
+# by comparing the localtime result on a known GMT value.
+#
+if test "`uname -s`" = "AIX" ; then
+    AC_CHECK_LIB(bsd, gettimeofday, libbsd=yes)
+    if test $libbsd = yes ; then
+	AC_DEFINE(USE_DELTA_FOR_TZ)
+    fi      
+fi
+
+#
+# Some systems require a -lcrypt
+#
+if test "$have_libcrypt" = yes ; then
+    EXTRA_LIBS="$EXTRA_LIBS -lcrypt"
+fi
+AC_SUBST(EXTRA_LIBS)
 
 #########################################################################
 # The following code checks the system type and defines variables for   #
@@ -511,6 +618,13 @@ changequote([, ])dnl
 	SHLIB_LD_LIBS='${LIBS}'
 	SHLIB_SUFFIX=".so"
 	OSTYPE=bs3
+	;;
+    Darwin-7.*)
+	SHLIB_CFLAGS=""
+        SHLIB_LD="libtool -dynamic -single_module -flat_namespace -undefined suppress -multiply_defined suppress"
+	SHLIB_LD_LIBS='-lSystem -lcc_dynamic'
+	SHLIB_SUFFIX=".dylib"
+	test -e /sw/include/openssl && OSTYPE=fnk || OSTYPE=osx
 	;;
     dgux*)
 	SHLIB_CFLAGS="-K PIC"
@@ -827,76 +941,6 @@ AC_SUBST(BUSYLIB_SUFFIX)
 AC_SUBST(OSTYPE)
 
 
-#------------------------------------------------------------------------------
-#       Find out all about time handling differences.
-#------------------------------------------------------------------------------
-    
-AC_CHECK_HEADERS(sys/time.h)
-AC_HEADER_TIME
-AC_STRUCT_TIMEZONE
-
-AC_MSG_CHECKING([tm_tzadj in struct tm])      
-AC_TRY_COMPILE([#include <time.h>], [struct tm tm; tm.tm_tzadj;],
-        [AC_DEFINE(HAVE_TM_TZADJ)
-         AC_MSG_RESULT(yes)],
-         AC_MSG_RESULT(no))
-    
-AC_MSG_CHECKING([tm_gmtoff in struct tm])
-AC_TRY_COMPILE([#include <time.h>], [struct tm tm; tm.tm_gmtoff;],
-        [AC_DEFINE(HAVE_TM_GMTOFF)
-         AC_MSG_RESULT(yes)],
-         AC_MSG_RESULT(no))
-
-#
-# Its important to include time.h in this check, as some systems (like convex)
-# have timezone functions, etc.
-# 
-have_timezone=no
-AC_MSG_CHECKING([long timezone variable])
-AC_TRY_COMPILE([#include <time.h>], 
-        [extern long timezone;
-         timezone += 1;
-         exit (0);],
-        [have_timezone=yes
-         AC_DEFINE(HAVE_TIMEZONE_VAR)
-         AC_MSG_RESULT(yes)],
-         AC_MSG_RESULT(no))
-
-#
-# On some systems (eg IRIX 6.2), timezone is a time_t and not a long.
-#
-if test "$have_timezone" = no; then
-   AC_MSG_CHECKING([time_t timezone variable])
-   AC_TRY_COMPILE([#include <time.h>],
-        [extern time_t timezone;
-         timezone += 1;
-         exit (0);],
-        [AC_DEFINE(HAVE_TIMEZONE_VAR)
-         AC_MSG_RESULT(yes)],
-         AC_MSG_RESULT(no))
-fi      
-
-#
-# AIX does not have a timezone field in struct tm. When the AIX bsd
-# library is used, the timezone global and the gettimeofday methods are
-# to be avoided for timezone deduction instead, we deduce the timezone
-# by comparing the localtime result on a known GMT value.
-#
-if test "`uname -s`" = "AIX" ; then
-    AC_CHECK_LIB(bsd, gettimeofday, libbsd=yes)
-    if test $libbsd = yes ; then
-	AC_DEFINE(USE_DELTA_FOR_TZ)
-    fi      
-fi
-
-#
-# Some systems require a -lcrypt
-#
-if test "$have_libcrypt" = yes ; then
-    EXTRA_LIBS="$EXTRA_LIBS -lcrypt"
-fi
-AC_SUBST(EXTRA_LIBS)
-
 ############################################################################
 dnl Get names of text files
 AC_MSG_CHECKING([Names of generated text files])
@@ -906,7 +950,7 @@ cd \$argv
 source defs.tcl
 proc variable {v} {
     global languages
-    foreach l \$languages { puts -nonewline "text_\${v}_[lindex \$l 0].tcl " }
+    foreach l \$languages { puts -nonewline ".messages/text_\${v}_[lindex \$l 0].tcl " }
 }
 proc label {a} {}
 foreach l \$languages { proc [lindex \$l 0] m {} }
@@ -921,12 +965,14 @@ AC_SUBST(TEXTFILES)
 
 ############################################################################
 dnl Generate output
-AC_OUTPUT(Makefile tkrat/Makefile tkrat/tkrat lib/Makefile misc/Makefile
-	util/Makefile doc/Makefile test/run)
-chmod +x tkrat/tkrat
-chmod +x test/run
+AC_CONFIG_FILES(Makefile tkrat/Makefile lib/Makefile misc/Makefile
+	        util/Makefile doc/Makefile)
+AC_CONFIG_FILES(test/run, [chmod +x test/run])
+AC_CONFIG_FILES(tkrat/tkrat, [chmod +x tkrat/tkrat])
 
 if test "$error" = 1 ; then
     AC_MSG_WARN([    Encountered errors while configuring. You might])
     AC_MSG_WARN([    have to modify lib/Makefile by hand.])
 fi
+
+AC_OUTPUT

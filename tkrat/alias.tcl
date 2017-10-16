@@ -2,7 +2,7 @@
 #
 # Code which handles aliases.
 #
-#  TkRat software and its included text is Copyright 1996-2002 by
+#  TkRat software and its included text is Copyright 1996-2004 by
 #  Martin Forssén.
 #
 #  The full text of the legal notice is contained in the file called
@@ -11,11 +11,9 @@
 # List of alias windows
 set aliasWindows {}
 
-# True if the aliases have been modified
-set aliasMod 0
-
 # True if the address books have been modified
 set bookMod 0
+
 
 # Aliases --
 #
@@ -29,17 +27,43 @@ proc Aliases {} {
     # Create identifier
     set id al[incr idCnt]
     set w .$id
-    upvar #0 $id hd
+    upvar \#0 $id hd
 
     # Create toplevel
     toplevel $w -class TkRat
-    wm title $w $t(aliases)
+    wm title $w $t(addressbook)
     set hd(w) $w
     set hd(old,default_book) $option(default_book)
+    set hd(ignore_changes) 1
 
     # The menus
     frame $w.mbar -relief raised -bd 1
-    FindAccelerators a {show addrbooks import}
+    FindAccelerators a {file edit show addrbooks}
+
+    set m $w.mbar.file.m
+    menubutton $w.mbar.file -text $t(file) -menu $m -underline $a(file)
+    menu $m
+    $m add command -label $t(new)... -command "AliasNew $id"
+    set hd(new_menu) [list $m [$m index end]]
+    $m add separator
+    $m add command -label $t(reread_addresses) -command AliasRead
+    set b($m,[$m index end]) reread_addresses
+    set hd(read_menu) [list $m [$m index end]]
+    $m add command -label $t(import_addresses) -command ScanAliases
+    set hd(scan_menu) [list $m [$m index end]]
+    set b($m,[$m index end]) import_aliases
+    $m add separator
+    $m add command -label $t(close) -command "AliasClose $id"
+    set hd(close_menu) [list $m [$m index end]]
+
+    set m $w.mbar.edit.m
+    menubutton $w.mbar.edit -text $t(edit) -menu $m -underline $a(edit)
+    menu $w.mbar.edit.m
+    $m add command -label $t(edit) -command "AliasEdit $id"
+    set hd(edit_menu) [list $m [$m index end]]
+    $m add command -label $t(delete) -command "AliasDelete $id"
+    set hd(delete_menu) [list $m [$m index end]]
+
     menubutton $w.mbar.show -text $t(show) -menu $w.mbar.show.m \
 	    -underline $a(show)
     menu $w.mbar.show.m
@@ -63,17 +87,13 @@ proc Aliases {} {
     menu $m.sd
     set hd(defaultmenu) $m.sd
 
-    set m $w.mbar.import.m
-    menubutton $w.mbar.import -text $t(import) -menu $m -underline $a(import)
-    set b($w.mbar.import) import_aliases_from_pgm
-    menu $m
-    $m add command -label mail -command "AddrbookImport mail"
-    $m add command -label elm -command "AddrbookImport elm"
-    $m add command -label pine -command "AddrbookImport pine"
+    pack $w.mbar.file \
+	 $w.mbar.edit \
+	 $w.mbar.show \
+	 $w.mbar.book -side left -padx 5
 
-    pack $w.mbar.show \
-	 $w.mbar.book \
-	 $w.mbar.import -side left -padx 5
+    RatBindMenus $w $id alias {new_menu read_menu close_menu
+        delete_menu edit_menu}
 
     # List of aliases
     frame $w.l
@@ -88,42 +108,26 @@ proc Aliases {} {
 	    -bd 1 \
 	    -exportselection false \
 	    -highlightthickness 0 \
-	    -selectmode extended
-    Size $w.l.list aliasList
+	    -selectmode extended \
+            -setgrid true
     set hd(listbox) $w.l.list
     pack $w.l.scroll -side right -fill y
     pack $w.l.list -expand 1 -fill both
-    bind $w.l.list <ButtonRelease-1> "SetAliasesState $id"
-    bind $w.l.list <KeyRelease> "SetAliasesState $id"
-    bind $w.l.list <Double-1> "AliasDetail $id edit \$${id}(current)"
     set b($w.l.list) alias_list
 
     # Buttons
     frame $w.b
-    button $w.b.new -text $t(new)... -command "AliasDetail $id new"
-    set b($w.b.new) new_alias
-    button $w.b.edit -text $t(edit) -state disabled \
-	    -command "AliasDetail $id edit \$${id}(current)"
-    set b($w.b.edit) edit_alias
-    button $w.b.delete -text $t(delete) -state disabled \
-	    -command "AliasDelete $id"
-    set b($w.b.delete) delete_alias
-    menubutton $w.b.move -text $t(move_to) -state disabled -menu $w.b.move.m \
-	    -indicatoron 1 -relief raised
-    set b($w.b.move) move_alias
-    menu $w.b.move.m
-    set hd(movemenu) $w.b.move.m
-    button $w.b.close -text $t(close) -command "AliasClose $id"
-    set b($w.b.close) dismiss
-    pack $w.b.new \
-	 $w.b.edit \
-	 $w.b.delete \
-	 $w.b.move \
-	 $w.b.close -side left -expand 1 -pady 5
+    button $w.b.new -text $t(new)... -command "AliasNew $id"
+    button $w.b.edit -text $t(edit)... -command "AliasEdit $id"
+    button $w.b.delete -text $t(delete) -command "AliasDelete $id"
+    button $w.b.close -text $t(close) -command "destroy $w"
+    pack $w.b.new $w.b.edit $w.b.delete $w.b.close -side left -padx 20 -pady 5
+    set hd(edit_button) $w.b.edit
+    set hd(delete_button) $w.b.delete
 
     # Pack it all
     pack $w.mbar -side top -fill x
-    pack $w.b -side bottom -fill x
+    pack $w.b -side bottom -anchor center
     pack $w.l -expand 1 -fill both
 
     # Create the booklist
@@ -132,21 +136,372 @@ proc Aliases {} {
     # Populate list
     AliasesPopulate $id
 
-    # Place window
-    Place $w aliases
+    # Track list slections
+    bind $hd(listbox) <<ListboxSelect>> "AliasUpdateState $id"
+    bind $hd(listbox) <Double-1> "AliasEdit $id"
+
+    ::tkrat::winctl::SetGeometry alias $w $hd(listbox)
     lappend aliasWindows $id
 
-    wm protocol $w WM_DELETE_WINDOW "AliasClose $id"
+    bind $hd(listbox) <Destroy> "AliasClose $id"
 
     # Set up traces
     trace variable option(use_system_aliases) w "AliasesUpdateBooklist {}"
     trace variable option(addrbooks) w "AliasesUpdateBooklist {}"
 }
 
+# AliasUpdateState --
+#
+# Update the enabled/disabled state of edit and delete buttons
+#
+# Arguments:
+# handler - The handler of the alias window
+
+proc AliasUpdateState {handler} {
+    upvar \#0 $handler hd
+    global aliasBook
+
+    # Edit is possible if exactly one element is selected
+    set edit_state disabled
+    if {[llength [$hd(listbox) curselection]] == 1} {
+        set id [lindex $hd(aliasIds) [$hd(listbox) curselection]]
+        set def [RatAlias get $id]
+        if {$aliasBook(writable,[lindex $def 0])} {
+            set edit_state normal
+        }
+    }
+    $hd(edit_button) configure -state $edit_state
+    [lindex $hd(edit_menu) 0] entryconfigure [lindex $hd(edit_menu) 1] \
+        -state $edit_state
+
+    # Delete is possible if at least one element is selected
+    if {[llength [$hd(listbox) curselection]] > 0} {
+        set delete_state normal
+    } else {
+        set delete_state disabled
+    }
+    $hd(delete_button) configure -state $delete_state
+    [lindex $hd(delete_menu) 0] entryconfigure [lindex $hd(delete_menu) 1] \
+        -state $delete_state
+}
+
+
+# AliasNew --
+#
+# Create a new alias and select it for editing.
+#
+# Arguments:
+# handler -	The handler identifying the window
+
+proc AliasNew {handler} {
+    upvar \#0 $handler hd
+    global t option aliasBook
+
+    set result [AliasEditPanel $handler "" \
+                    [list [lindex [lindex $option(addrbooks) 0] 0] \
+                         "" "" {} {} {}]]
+    if {[llength $result] != 7} {
+        return
+    }
+    eval "RatAlias add $result"
+    set aliasBook(changed,[lindex $result 0]) 1
+
+    # Find out where it should be inserted
+    set id [lindex $result 1]
+    set hd(aliasIds) [lsort [concat $hd(aliasIds) $id]]
+    set i [lsearch -exact $hd(aliasIds) $id]
+
+    # Update entry in list of addresses
+    set ne [AliasFormat $id [list \
+                                 [lindex $result 0] \
+                                 [lindex $result 2] \
+                                 [lindex $result 3] \
+                                 [lindex $result 4] \
+                                 [lindex $result 5] \
+                                 [lindex $result 6]]]
+    set old_top \
+	[expr int([lindex [$hd(listbox) yview] 0] * [llength $hd(aliasIds)])]
+    $hd(listbox) insert $i $ne
+    $hd(listbox) yview $old_top
+    $hd(listbox) see $i
+}
+
+# AliasEdit --
+#
+# Handle editing of aliases
+#
+# Arguments:
+# handler - The handler of the alias window
+
+proc AliasEdit {handler} {
+    upvar \#0 $handler hd
+    global aliasBook
+
+    # Only one element may be selected
+    if {[llength [$hd(listbox) curselection]] != 1} {
+        return
+    }
+
+    set id [lindex $hd(aliasIds) [$hd(listbox) curselection]]
+    set def [RatAlias get $id]
+    if {!$aliasBook(writable,[lindex $def 0])} {
+        return
+    }
+
+    set result [AliasEditPanel $handler $id $def]
+    if {[llength $result] != 7} {
+        return
+    }
+    RatAlias delete $id
+    eval "RatAlias add $result"
+
+    set book_old [lindex $def 0]
+    set book_new [lindex $result 0]
+    if {$book_old != $book_new} {
+	set aliasBook(changed,$book_old) 1
+    }
+    set aliasBook(changed,$book_new) 1
+
+    # Possibly resort list of addresses
+    set id_new [lindex $result 1]
+    set d [lsearch -exact $hd(aliasIds) $id]
+    if {$id != $id_new} {
+	set hd(aliasIds) [lsort [lreplace $hd(aliasIds) $d $d $id_new]]
+	set i [lsearch -exact $hd(aliasIds) $id_new]
+    } else {
+	set i $d
+    }
+    # Update entry in list of addresses
+    set ne [AliasFormat $id_new [list \
+                                     [lindex $result 0] \
+                                     [lindex $result 2] \
+                                     [lindex $result 3] \
+                                     [lindex $result 4] \
+                                     [lindex $result 5] \
+                                     [lindex $result 6]]]
+    set old_top \
+	[expr int([lindex [$hd(listbox) yview] 0] * [llength $hd(aliasIds)])]
+    $hd(listbox) delete $d
+    $hd(listbox) insert $i $ne
+    $hd(listbox) yview $old_top
+    $hd(listbox) selection set $i
+    $hd(listbox) see $i
+}
+
+# AliasEditPanel --
+#
+# Show alias edit window
+#
+# Arguments:
+# handler - The handler of the alias window
+# name    - Name of address book entry
+# def     - Definition of address book entry
+
+proc AliasEditPanel {handler name def} {
+    upvar \#0 $handler hd
+    global t aliasBook idCnt tk_version
+
+    # Create toplevel
+    set w .al[incr idCnt]
+    toplevel $w -class TkRat -bd 2 -relief flat
+    wm title $w $t(edit_address)
+
+    # The alias fields
+    label $w.alias_lab -text $t(alias): -anchor e
+    entry $w.alias -textvariable ${handler}(alias)
+    set b($w.alias) alias_alias
+    set hd(alias_focus) $w.alias
+    label $w.fullname_lab -text $t(fullname): -anchor e
+    entry $w.fullname -textvariable ${handler}(fullname)
+    set b($w.fullname) alias_fullname
+    label $w.email_lab -text $t(email_address): -anchor e
+    text $w.email -height 3
+    set b($w.email) alias_content
+    set hd(email_address_text) $w.email
+    label $w.comment_lab -text $t(comment): -anchor e
+    text $w.comment -height 3
+    set b($w.comment) alias_comment
+    set hd(comment_text) $w.comment
+    label $w.addrbook_lab -text $t(addressbook): -anchor e
+    set m $w.addrbook.m
+    menubutton $w.addrbook -textvariable ${handler}(addrbook) \
+	-indicatoron 1 -menu $m -bd 2 -relief raised -anchor w -justify left
+    set b($w.addrbook) alias_adr_book
+    menu $m -postcommand "PopulateAddrbookMenu $m ${handler}(addrbook)"
+    label $w.pgp_actions_lab -text $t(pgp_actions): -anchor e
+    set m $w.pgp_actions.m
+    menubutton $w.pgp_actions -textvariable ${handler}(pgp_actions_t) \
+	-indicatoron 1 -menu $m -bd 2 -relief raised -anchor w -justify left
+    set b($w.pgp_actions) alias_pgp_actions
+    menu $m
+    foreach v {none sign encrypt sign_encrypt} {
+	$m add command -label $t($v) \
+	    -command "[list set ${handler}(pgp_actions) $v]; \
+                            UpdatePGPState $handler"
+    }
+    label $w.pgp_key_lab -text $t(pgp_key): -anchor e
+    frame $w.pgp_key
+    set m $w.pgp_key.mb.m
+    menubutton $w.pgp_key.mb -textvariable ${handler}(pgp_key_t) \
+        -indicatoron 1 -menu $m -bd 2 -relief raised -anchor w -justify left
+    set b($w.pgp_key.mb) alias_pgp_key
+    menu $m -postcommand "PopulatePGPKeyMenu $m ${handler}"
+    place $w.pgp_key.mb -relwidth 1.0
+    set hd(infowidgets) [list $w.alias $w.fullname $w.email \
+			     $w.comment  $w.pgp_actions $w.pgp_key.mb]
+    set hd(addrbookwidget) $w.addrbook
+
+    OkButtons $w $t(ok) $t(cancel) "set ${handler}(done)"
+    set hd(ok_button) $w.buttons.ok
+
+    grid $w.alias_lab $w.alias -sticky ew -padx 2 -pady 2
+    grid $w.fullname_lab $w.fullname -sticky ew -padx 2 -pady 2
+    grid $w.email_lab $w.email -sticky ewn -padx 2 -pady 2
+    grid rowconfigure $w [expr [lindex [grid size $w] 1] - 1] -weight 1
+    grid $w.comment_lab $w.comment -sticky ewn -padx 2 -pady 2
+    grid rowconfigure $w [expr [lindex [grid size $w] 1] - 1] -weight 1
+    grid $w.addrbook_lab $w.addrbook -sticky ew -padx 2 -pady 2
+    grid $w.pgp_actions_lab $w.pgp_actions -sticky ew -padx 2 -pady 2
+    grid $w.pgp_key_lab $w.pgp_key -sticky nsew -padx 2 -pady 2
+    grid $w.buttons - -sticky ew
+
+    grid configure $w.email -sticky nsew
+    grid configure $w.comment -sticky nsew
+    grid columnconfigure $w 1 -weight 1
+
+    # Initialize values
+    set hd(alias) $name
+    set hd(addrbook) [lindex $def 0]
+    set hd(fullname) [lindex $def 1]
+    $hd(email_address_text) insert end [lindex $def 2]
+    $hd(comment_text) insert end [lindex $def 3]
+    set sign [expr [lsearch -exact [lindex $def 5] pgp_sign] != -1]
+    set encrypt [expr [lsearch -exact [lindex $def 5] pgp_encrypt] != -1]
+    if {$sign & $encrypt} {
+        set hd(pgp_actions) sign_encrypt
+    } elseif {$sign} {
+        set hd(pgp_actions) sign
+    } elseif {$encrypt} {
+        set hd(pgp_actions) encrypt
+    } else {
+        set hd(pgp_actions) none
+    }
+    set hd(pgp_key) {}
+    trace variable hd(pgp_key) w [list UpdatePGPState $handler]
+    set hd(pgp_key) [lindex $def 4]
+
+    # Handle ok button
+    trace variable hd(alias) w [list AliasWinUpdateOk $handler]
+    bind $hd(email_address_text) <KeyRelease> [list AliasWinUpdateOk $handler]
+    bind $hd(email_address_text) <<Paste>> [list AliasWinUpdateOk $handler]
+    bind $hd(email_address_text) <<Cut>> [list AliasWinUpdateOk $handler]
+    AliasWinUpdateOk $handler
+
+    # Show and wait for window
+    wm protocol $w WM_DELETE_WINDOW "set ${handler}(done) 0"
+    ::tkrat::winctl::SetGeometry aliasDetail $w
+    after idle $hd(alias_focus) selection range 0 end
+    focus $hd(alias_focus)
+    tkwait variable ${handler}(done)
+    trace vdelete hd(alias) w [list AliasWinUpdateOk $handler]
+    trace vdelete hd(pgp_key) w [list UpdatePGPState $handler]
+
+    if {$hd(done)} {
+        set flags {}
+        switch $hd(pgp_actions) {
+            sign_encrypt {
+                lappend flags pgp_sign
+                lappend flags pgp_encrypt
+            }
+            sign {
+                lappend flags pgp_sign
+            }
+            encrypt {
+                lappend flags pgp_encrypt
+            }
+        }
+        set content [string trim [$hd(email_address_text) get 1.0 end]]
+        set comment [string trim [$hd(comment_text) get 1.0 end]]
+        set r [list $hd(addrbook) $hd(alias) $hd(fullname) $content $comment \
+                   $hd(pgp_key) $flags]
+    } else {
+        set r {}
+    }
+    destroy $w
+    return $r
+}
+
+# AliasWinUpdateOk --
+#
+# Update state of ok button
+#
+# Arguments:
+# handler - The handler of the alias window
+# args    - Extra trace arguments
+
+proc AliasWinUpdateOk {handler args} {
+    upvar \#0 $handler hd
+    global tk_version
+
+    set content [string trim [$hd(email_address_text) get 1.0 end]]
+    if {"" == $hd(alias) || "" == $content} {
+        $hd(ok_button) configure -state disabled
+    } else {
+        $hd(ok_button) configure -state normal
+    }
+}
+
+# PopulateAddrbookMenu --
+#
+# Populate the address book menu
+#
+# Arguments:
+# m   - Menu to populate
+# var - Variable to store selections in
+
+proc PopulateAddrbookMenu {m var} {
+    global aliasBook
+
+    $m delete 0 end
+    foreach book [array names aliasBook writable,*] {
+	regsub writable, $book {} name
+	$m add command -label $name -command [list set $var $name]
+	if {!$aliasBook(writable,$name)} {
+	    $m entryconfigure end -state disabled
+	}
+    }
+}
+
+# PopulatePGPKeyMenu --
+#
+# Populate the pgp key menu.
+#
+# Arguments:
+# m       - Menu to populate
+# handler - The handler of the alias window
+
+proc PopulatePGPKeyMenu {m handler} {
+    global t
+
+    $m delete 0 end
+    foreach k [lindex [RatPGP listkeys] 1] {
+	if {[lindex $k 5]} {
+	    set desc "[join [lindex $k 3] {, }]; [lindex $k 2]"
+	    set id($desc) [lindex $k 0]
+	}
+    }
+    $m add command -label "- $t(auto) -" \
+	-command [list set ${handler}(pgp_key) {}]
+    foreach d [lsort [array names id]] {
+	$m add command -label "$d" \
+	    -command [list set ${handler}(pgp_key) [list $id($d) $d]]
+    }
+    FixMenu $m
+}
+
 # AliasesUpdateBooklist --
 #
 # Update the list of known books for an alias window
-#
 # Arguments:
 # handler - The handler of the alias window
 
@@ -160,10 +515,9 @@ proc AliasesUpdateBooklist {handler args} {
     }
 
     foreach handler $hds {
-	upvar #0 $handler hd
+	upvar \#0 $handler hd
 
 	$hd(showmenu) delete 0 end
-	$hd(movemenu) delete 0 end
 	$hd(defaultmenu) delete 0 end
 
 	foreach a $option(addrbooks) {
@@ -187,8 +541,6 @@ proc AliasesUpdateBooklist {handler args} {
 		    -variable ${handler}(show,$name) \
 		    -command "AliasesPopulate $handler"
 	    if {$aliasBook(writable,$name)} {
-		$hd(movemenu) add command -label $name \
-			-command [list AliasMoveTo move $handler $name]
 		$hd(defaultmenu) add radiobutton -label $name \
 			-variable option(default_book) -value $name \
 			-command {set bookMod 1}
@@ -197,9 +549,21 @@ proc AliasesUpdateBooklist {handler args} {
     }
 }
 
+# AliasesFormat --
+#
+# Format a single alias for the list
+#
+# Arguments:
+# a  - Name of alias
+# ac - Alias content to format
+
+proc AliasFormat {a ac} {
+    return [format "%-13s  %-20s  %s" $a [lindex $ac 1] [lindex $ac 2]]
+}
+
 # AliasesPopulate --
 #
-# Populate the aliases window
+# Populate the list of addresses
 #
 # Arguments:
 # handler - The handler of the alias window
@@ -214,76 +578,49 @@ proc AliasesPopulate {{handler {}}} {
     }
 
     foreach handler $hds {
-	upvar #0 $handler hd
+	upvar \#0 $handler hd
 
-	set old {}
-	foreach sel [$hd(listbox) curselection] {
-	    lappend old $sel
-	}
+	set old [$hd(listbox) curselection]
 	RatAlias list alias
 	set top [lindex [$hd(listbox) yview] 0]
 	$hd(listbox) delete 0 end
-	set hd(aliasIds) ""
+	set hd(aliasIds) {}
 	foreach a [lsort [array names alias]] {
 	    set book [lindex $alias($a) 0]
 	    if {$hd(show,$book)} {
 		lappend hd(aliasIds) $a
-		$hd(listbox) insert end [format "%-10s  %-10s  %-20s  %s" \
-			$book $a [lindex $alias($a) 1] \
-			[lindex $alias($a) 2]]
+		$hd(listbox) insert end [AliasFormat $a $alias($a)]
 	    }
 	}
 	$hd(listbox) yview moveto $top
-	foreach o $old {
-	    set i [lsearch -exact $hd(aliasIds) $o]
+	if {"" != $old} {
+	    set i [lsearch -exact $hd(aliasIds) $old]
 	    if { -1 != $i } {
 		$hd(listbox) selection set $i
 		$hd(listbox) see $i
 	    }
 	}
-	SetAliasesState $handler
+        AliasUpdateState $handler
     }
 }
 
-# SetAliasesState --
+# UpdatePGPState --
 #
-# Update the status of the buttons
+# Update the pgp state in address view
 #
 # Arguments:
-# handler	- The id of this window
+# handler - The handler of the alias window
 
-proc SetAliasesState {handler} {
-    upvar #0 $handler hd
-    global aliasBook
+proc UpdatePGPState {handler args} {
+    upvar \#0 $handler hd
+    global t
 
-    set writable 1
-    foreach selected [$hd(listbox) curselection] {
-	set a [RatAlias get [lindex $hd(aliasIds) $selected]]
-	if {!$aliasBook(writable,[lindex $a 0])} {
-	    set writable 0
-	    break
-	}
+    set hd(pgp_actions_t) $t($hd(pgp_actions))
+    if {0 < [llength $hd(pgp_key)]} {
+	set hd(pgp_key_t) [lindex $hd(pgp_key) 1]
+    } else {
+	set hd(pgp_key_t) "- $t(auto) -"
     }
-    set editState disabled
-    set moveState disabled
-    set deleteState disabled
-    set l [llength [$hd(listbox) curselection]]
-    set hd(current) {}
-    if {$writable} {
-	if {$l == 1} {
-	    set hd(current) [lindex $hd(aliasIds) [$hd(listbox) curselection]]
-	    set editState normal
-	    set deleteState normal
-	    set moveState normal
-	} elseif {$l > 0} {
-	    set deleteState normal
-	    set moveState normal
-	}
-	
-    }
-    $hd(w).b.edit configure -state $editState
-    $hd(w).b.move configure -state $moveState
-    $hd(w).b.delete configure -state $deleteState
 }
 
 # AliasSave --
@@ -293,19 +630,16 @@ proc SetAliasesState {handler} {
 # Arguments:
 
 proc AliasSave {} {
-    global option aliasMod bookMod aliasBook
+    global option bookMod aliasBook
 
-    if {$aliasMod} {
-	set books $option(addrbooks)
-	if {$option(use_system_aliases)} {
-	    lappend books $option(system_aliases)
+    set books $option(addrbooks)
+    if {$option(use_system_aliases)} {
+	lappend books $option(system_aliases)
+    }
+    foreach book $books {
+	if {$aliasBook(changed,[lindex $book 0])} {
+	    RatAlias save [lindex $book 0] [lindex $book 2]
 	}
-	foreach book $books {
-	    if {$aliasBook(changed,[lindex $book 0])} {
-		RatAlias save [lindex $book 0] [lindex $book 2]
-	    }
-	}
-	set aliasMod 0
     }
 
     if {$bookMod} {
@@ -322,289 +656,38 @@ proc AliasSave {} {
 # handler - The handler of the alias window
     
 proc AliasClose {handler} {
-    global aliasWindows aliasMod b
-    upvar #0 $handler hd
+    global aliasWindows b
+    upvar \#0 $handler hd
     
+    bind $hd(listbox) <Destroy> {}
     set i [lsearch -exact $aliasWindows $handler]
     if {-1 != $i} {
 	set aliasWindows [lreplace $aliasWindows $i $i]
     }
-    RecordSize $hd(listbox) aliasList
-    RecordPos $hd(w) aliases
+    ::tkrat::winctl::RecordGeometry alias $hd(w) $hd(listbox)
     foreach bn [array names b $hd(w)*] {unset b($bn)}
     destroy $hd(w)
+    unset hd
     AliasSave
 }           
 
-# AliasDetail --
-#
-# Show the alias detail window
-#
-# Arguments:
-# handler	- The handler of the alias window
-# mode		- What to do on OK
-# template	- Template alias to use
-
-proc AliasDetail {handler mode {template {}}} {
-    global idCnt t b aliasBook option aliasDetail
-    upvar #0 $handler ahd
-
-    # Sanity check
-    if {"edit" == $mode && "" == $template} {
-	return
-    }
-
-    # Check if we have another window active first
-    if {[string length $template] && [info exists aliasDetail($template)]} {
-	wm deiconify $aliasDetail($template)
-	return
-    }
-
-    # Create identifier
-    set id al[incr idCnt]
-    set w .$id
-    upvar #0 $id hd
-    set hd(mode) $mode
-    set hd(handler) $handler
-
-    # Create toplevel
-    toplevel $w -class TkRat
-    wm title $w $t(alias)
-    set hd(w) $w
-
-    # Create fields
-    label $w.book_label -text $t(addrbook):
-    set hd(book) $option(default_book)
-    menubutton $w.book_but -textvariable ${id}(book) -relief raised \
-	    -menu $w.book_but.m
-    set b($w.book_but) alias_adr_book
-    menu $w.book_but.m
-    foreach book [array names aliasBook writable,*] {
-	if {!$aliasBook($book)} {
-	    continue
-	}
-	regsub writable, $book {} name
-	$w.book_but.m add radiobutton -label $name -value $name \
-		-variable ${id}(book)
-    }
-    grid $w.book_label -sticky e
-    grid $w.book_but -row 0 -column 1 -sticky ew -padx 2 -pady 2
-
-    set line 1
-    foreach f {alias fullname} {
-	label $w.${f}_label -text $t($f):
-	entry $w.${f}_entry -textvariable ${id}($f)
-	set b($w.${f}_entry) alias_$f
-	grid $w.${f}_label -sticky e
-	grid $w.${f}_entry -row $line -column 1 -sticky ew -padx 2 -pady 2
-	incr line
-    }
-    label $w.content_label -text $t(content):
-    text $w.content_text -wrap word -setgrid true
-    set b($w.content_text) alias_content
-    grid $w.content_label -sticky ne
-    grid $w.content_text -row $line -column 1 -sticky nsew  -padx 2 -pady 2
-    Size $w.content_text aliasText
-    set hd(content_text) $w.content_text
-    incr line
-    label $w.comment_label -text $t(comment):
-    text $w.comment_text -wrap word
-    set b($w.comment_text) alias_comment
-    grid $w.comment_label -sticky ne
-    grid $w.comment_text -row $line -column 1 -sticky nsew  -padx 2 -pady 2
-    Size $w.comment_text aliasText
-    set hd(comment_text) $w.comment_text
-
-    grid columnconfigure $w 1 -weight 1
-    grid rowconfigure $w 3 -weight 1
-
-    bind $w.alias_entry <space> {bell; break}
-    bindtags $w.content_text [list Text $w.content_text . all]
-    bind $w.content_text <Key-Return> {break}
-    bindtags $w.comment_text [list Text $w.comment_text . all]
-    bind $w.comment_text <Key-Return> {break}
-
-    # Buttons
-    OkButtons $w $t(ok) $t(cancel) "AliasDetailDone $id"
-    grid $w.buttons - -pady 5 -sticky ew
-
-    if {[string length $template]} {
-	set aliasDetail($template) $w
-	set hd(template) $template
-	set a [RatAlias get $template]
-	set hd(alias) $template
-	set hd(book) [lindex $a 0]
-	set hd(fullname) [lindex $a 1]
-	$hd(content_text) insert 1.0 [lindex $a 2]
-	$hd(comment_text) insert 1.0 [lindex $a 3]
-	set hd(old,book) $hd(book)
-    }
-    set hd(old,alias) $hd(alias)
-
-    set hd(oldfocus) [focus]
-    focus $w.alias_entry
-
-    Place $w aliasDetail
-}
-
-# AliasDetailDone --
-#
-# Script called when the alias detail window may be done
-#
-# Arguments:
-# handler -	The handler identifying the window
-# action  -	The action we should take
-
-proc AliasDetailDone {handler action} {
-    global t b aliasMod aliasBook aliasDetail
-    upvar #0 $handler hd
-
-    if {1 == $action} {
-	if {[regexp " |\t" $hd(alias)]} {
-	    Popup $t(alias_may_only_contain_chars) $hd(w)
-	    return
-	}
-	set hd(content) [string trim [$hd(content_text) get 1.0 end]]
-	set hd(comment) [string trim [$hd(comment_text) get 1.0 end]]
-	if { 0 == [string length $hd(alias)] || \
-		0 == [string length $hd(content)]} {
-	    Popup $t(need_alias_and_content) $hd(w)
-	    return
-	}
-	if {"edit" == $hd(mode)} {
-	    RatAlias delete $hd(old,alias)
-	    set aliasBook(changed,$hd(old,book)) 1
-	}
-	RatAlias add $hd(book) $hd(alias) $hd(fullname) $hd(content) \
-		$hd(comment) {}
-	set aliasMod 1
-	set aliasBook(changed,$hd(book)) 1
-	AliasesPopulate
-    }
-    RecordPos $hd(w) aliasDetail
-    RecordSize $hd(content_text) aliasText
-    foreach bn [array names b $hd(w)*] {unset b($bn)}
-    catch {focus $hd(oldfocus)}
-    destroy $hd(w)
-    if {[info exists hd(template)]} {
-	unset aliasDetail($hd(template))
-    }
-    unset hd
-}
-
 # AliasDelete --
 #
-# Deletes aliases from the alias list --
+# Deletes aliases from the alias list.
 #
 # Arguments:
 # handler -	The handler identifying the window
 
 proc AliasDelete {handler} {
-    upvar #0 $handler hd
-    global aliasBook aliasMod
+    upvar \#0 $handler hd
+    global aliasBook
 
     foreach a [$hd(listbox) curselection] {
 	set alias [lindex $hd(aliasIds) $a]
 	set aliasBook(changed,[lindex [RatAlias get $alias] 0]) 1
-	set aliasMod 1
 	RatAlias delete $alias
     }
     AliasesPopulate
-}
-
-# AddrbookImport --
-#
-# Import an address book in a different format
-#
-# Arguments:
-# format -	The format of the file
-
-proc AddrbookImport {format} {
-    global idCnt t b
-
-    # Create identifier
-    set id al[incr idCnt]
-    set w .$id
-    upvar #0 $id hd
-
-    # Create toplevel
-    toplevel $w -bd 5 -class TkRat
-    wm title $w $t(import)
-    set hd(w) $w
-    set hd(format) $format
-
-    label $w.n_label -text $t(name): -anchor e
-    entry $w.n_entry -textvariable ${id}(name)
-    set b($w.n_entry) name_of_adrbook
-    grid $w.n_label $w.n_entry -sticky ew
-
-    label $w.f_label -text $t(filename): -anchor e
-    entry $w.f_entry -textvariable ${id}(file) -width 40
-    set b($w.f_entry) name_of_adrbook_file
-    grid $w.f_label $w.f_entry -sticky ew
-
-    button $w.browse -text $t(browse) -command \
-	    "set ${id}(file) \[rat_fbox::run -parent $w -title $t(import) \
-	     -ok $t(ok) -mode open\]"
-    set b($w.browse) file_browse
-    grid x $w.browse -sticky e
-
-    grid columnconfigure $w 1 -weight 1
-    grid rowconfigure $w 1 -weight 1
-
-    # Buttons
-    OkButtons $w $t(ok) $t(cancel) "AddrbookImportDone $id"
-    grid $w.buttons - -pady 5 -sticky ew
-    bind $w <Return> {}
-
-    Place $w addrbookImport
-    update
-    set hd(oldfocus) [focus]
-    focus $w.n_entry
-}
-
-# AddrbookImportDone
-#
-# Called when an address book import window is done
-#
-# Arguments
-# handler - The handler of the import window
-# action  - What to do
-
-proc AddrbookImportDone {handler action} {
-    upvar #0 $handler hd
-    global option t b bookMod aliasBook
-
-    if {$action} {
-	if {![string length $hd(name)]} {
-	    Popup $t(need_name) $hd(w)
-	    return
-	}
-	if {[info exists aliasBook(writable,$hd(name))]} {
-	    Popup $t(book_already_exists) $hd(w)
-	    return
-	}
-	if {![file isfile $hd(file)] || ![file readable $hd(file)]} {
-	    Popup "$t(illegal_file_spec): $hd(file)" $hd(w)
-	    return
-	}
-	set aliasBook(writable,$hd(name)) 0
-	set aliasBook(changed,$hd(name)) 0
-	set bookMod 1
-	lappend option(addrbooks) [list $hd(name) $hd(format) $hd(file)]
-	switch $hd(format) {
-	    mail {ReadMailAliases $hd(file) $hd(name)}
-	    elm  {ReadElmAliases $hd(file) $hd(name)}
-	    pine {ReadPineAliases $hd(file) $hd(name)}
-	}
-	AliasesPopulate
-    }
-
-    RecordPos $hd(w) addrbookAdd
-    foreach bn [array names b $hd(w)*] {unset b($bn)}
-    catch {focus $hd(oldfocus)}
-    destroy $hd(w)
-    unset hd
 }
 
 # AddrbookAdd --
@@ -619,7 +702,7 @@ proc AddrbookAdd {} {
     # Create identifier
     set id al[incr idCnt]
     set w .$id
-    upvar #0 $id hd
+    upvar \#0 $id hd
 
     # Create toplevel
     toplevel $w -bd 5 -class TkRat
@@ -636,9 +719,7 @@ proc AddrbookAdd {} {
     set b($w.f_entry) name_of_adrbook_file
     grid $w.f_label $w.f_entry -sticky ew
 
-    button $w.browse -text $t(browse) -command \
-	    "set ${id}(file) \[rat_fbox::run -parent $w -title $t(new) \
-	     -ok $t(save) -mode save\]"
+    button $w.browse -text $t(browse) -command "AddrbookBrowse $id"
     set b($w.browse) file_browse
     grid x $w.browse -sticky e
 
@@ -648,12 +729,36 @@ proc AddrbookAdd {} {
     # Buttons
     OkButtons $w $t(ok) $t(cancel) "AddrbookAddDone $id"
     bind $w <Return> ""
+    bind $w.n_label <Destroy> "AddrbookAddDone $id 0"
     grid $w.buttons - -pady 5 -sticky ew
 
-    Place $w addrbookAdd
+    ::tkrat::winctl::SetGeometry addrbookAdd $hd(w)
     update
     set hd(oldfocus) [focus]
     focus $w.n_entry
+}
+
+# AddrbookBrowse --
+#
+# Browse for addrbook file
+#
+# Arguments:
+# handler - The handler of the add window
+
+proc AddrbookBrowse {handler} {
+    upvar \#0 $handler hd
+    global t option
+    
+    set hd(file) [rat_fbox::run \
+                      -parent $hd(w) \
+                      -title $t(new) \
+                      -initialdir $option(initialdir) \
+                      -ok $t(save) \
+                      -mode save]
+    if {"" != $hd(file) && $option(initialdir) != [file dirname $hd(file)]} {
+        set option(initialdir) [file dirname $hd(file)]
+        SaveOptions
+    }
 }
 
 # AddrbookAddDone
@@ -665,7 +770,7 @@ proc AddrbookAdd {} {
 # action  - What to do
 
 proc AddrbookAddDone {handler action} {
-    upvar #0 $handler hd
+    upvar \#0 $handler hd
     global option t b bookMod aliasBook env
 
     if {$action} {
@@ -697,11 +802,13 @@ proc AddrbookAddDone {handler action} {
 	set bookMod 1
 	lappend option(addrbooks) [list $hd(name) tkrat $hd(file)]
 	if {[file exists $hd(file)]} {
-	    RatAlias read $hd(file)
+	    RatAlias read $hd(name) $hd(file)
+            AliasesPopulate
 	}
     }
 
-    RecordPos $hd(w) addrbookAdd
+    bind $hd(w).n_label <Destroy> {}
+    ::tkrat::winctl::RecordGeometry addrbookAdd $hd(w)
     foreach bn [array names b $hd(w)*] {unset b($bn)}
     catch {focus $hd(oldfocus)}
     destroy $hd(w)
@@ -739,7 +846,6 @@ proc AddrbookDelete {} {
 	    -exportselection false \
 	    -highlightthickness 0 \
 	    -selectmode extended
-    Size $w.l.list bookList
     set hd(listbox) $w.l.list
     pack $w.l.scroll -side right -fill y
     pack $w.l.list -expand 1 -fill both
@@ -757,7 +863,8 @@ proc AddrbookDelete {} {
 	$hd(listbox) insert end [lindex $book 0]
     }
 
-    Place $w addrBookDelete
+    bind $hd(listbox) <Destroy> "AddrbookDeleteDone $id 0"
+    ::tkrat::winctl::SetGeometry addrBookDelete $w $w.l.list
 }
 
 # AddrbookDeleteDone
@@ -818,35 +925,11 @@ proc AddrbookDeleteDone {handler action} {
 	set bookMod 1
     }
 
-    RecordPos $hd(w) addrBookDelete
+    bind $hd(listbox) <Destroy> {}
+    ::tkrat::::winctl::RecordGeometry addrBookDelete $hd(w) $hd(listbox)
     foreach bn [array names b $hd(w)*] {unset b($bn)}
     destroy $hd(w)
     unset hd
-}
-
-# AliasMoveTo --
-#
-# Move selected aliases to address book
-#
-# Arguments:
-# op	  - Which operation to perform
-# handler - The handler of the alias window
-# dest    - Name of destination folder
-
-proc AliasMoveTo {op handler dest} {
-    upvar #0 $handler hd
-    global aliasMod aliasBook
-
-    foreach i [$hd(listbox) curselection] {
-	set a [lindex $hd(aliasIds) $i]
-	set alias [RatAlias get $a]
-	RatAlias delete $a
-	eval RatAlias add [lreplace $alias 0 0 $dest $a]
-	set aliasBook(changed,[lindex $alias 0]) 1
-	set aliasBook(changed,$dest) 1
-    }
-    AliasesPopulate
-    incr aliasMod
 }
 
 # AliasExtract --
@@ -855,27 +938,41 @@ proc AliasMoveTo {op handler dest} {
 #
 # Arguments:
 # handler - The handler of the folder window
+# msgs    - Messages to extract from
 
-proc AliasExtract {handler} {
+proc AliasExtract {handler msgs} {
     global idCnt t b aliasBook option
-    upvar #0 $handler fh
+    upvar \#0 $handler fh
+
+    # Get list of known addresses
+    RatAlias list alias
+    foreach a [array names alias] {
+	foreach adr [split [lindex $alias($a) 2]] {
+	    set present([string tolower $adr]) 1
+	}
+    }
 
     # Extract the addresses
     set adrlist {}
-    foreach a [$fh(current) get from reply_to sender cc bcc to] {
-	if {[$a isMe]} {
-	    continue
-	}
-	set good 1
-	foreach a2 $adrlist {
-	    if {![$a compare $a2]} {
-		set good 0
-		break
-	    }
-	}
-	if {$good} {
-	    lappend adrlist $a
-	}
+    foreach msg $msgs {
+        foreach a [$msg get from reply_to sender cc bcc to] {
+            if {[$a isMe]} {
+                continue
+            }
+            set good 1
+            foreach a2 $adrlist {
+                if {![$a compare $a2]} {
+                    set good 0
+                    break
+                }
+            }
+            if {[info exists present([string tolower [$a get mail]])]} {
+                set good 0
+            }
+            if {$good} {
+                lappend adrlist $a
+            }
+        }
     }
 
     # Check that we found something
@@ -884,17 +981,10 @@ proc AliasExtract {handler} {
 	return
     }
 
-    RatAlias list alias
-    foreach a [array names alias] {
-	foreach adr [split [lindex $alias($a) 2]] {
-	    set present($adr) 1
-	}
-    }
-
     # Create identifier
     set id al[incr idCnt]
     set w .$id
-    upvar #0 $id hd
+    upvar \#0 $id hd
 
     # Create toplevel
     toplevel $w -class TkRat
@@ -935,12 +1025,9 @@ proc AliasExtract {handler} {
     set totlist ""
     foreach a $adrlist {
 	if {[string length $totlist]} {
-	    set totlist "$totlist,\n[$a get mail]"
+	    set totlist "$totlist,\n[string tolower [$a get mail]]"
 	} else {
-	    set totlist [$a get mail]
-	}
-	if {[info exists present([$a get mail])]} {
-	    continue
+	    set totlist [string tolower [$a get mail]]
 	}
 	incr idCnt
 	set hd($idCnt,use) 1
@@ -960,7 +1047,7 @@ proc AliasExtract {handler} {
 	set alias($name) ""
 	set hd($idCnt,name) $name
 	set hd($idCnt,fname) [$a get name]
-	set hd($idCnt,content) [$a get mail]
+	set hd($idCnt,content) [string tolower [$a get mail]]
 	checkbutton $f.c$idCnt -variable ${id}($idCnt,use)
 	entry $f.en$idCnt -textvariable ${id}($idCnt,name) -width 8
 	bind $f.en$idCnt <space> {bell; break}
@@ -978,12 +1065,6 @@ proc AliasExtract {handler} {
 	     $f.ec$idCnt \
 	     $f.ek$idCnt -sticky we
 	set idw $idCnt
-    }
-    if {![info exists idw]} {
-	Popup $t(could_not_find_adr) $fh(toplevel)
-	destroy $w
-	unset hd
-	return
     }
     set num [llength $adrlist]
     if {$num > 1} {
@@ -1045,10 +1126,22 @@ proc AliasExtract {handler} {
     pack $w.f -side top -fill both
 
     # Create buttons
-    OkButtons $w $t(add_aliases) $t(cancel) "AliasExtractDone $id"
+    frame $w.buttons
+    button $w.buttons.add -text $t(add_aliases) \
+	-command "AliasExtractDone $id 1" -default active
+    button $w.buttons.unmark -text $t(clear_selection) \
+	-command "AliasExtractClearSelection $id"
+    button $w.buttons.cancel -text $t(cancel) \
+	-command "AliasExtractDone $id 0"
+    pack $w.buttons.add \
+	$w.buttons.unmark \
+	$w.buttons.cancel -side left -expand 1
+    bind $w <Return> "AliasExtractDone $id 1"
+
     pack $w.buttons -side bottom -pady 5 -fill x
 
-    Place $w extractAlias
+    bind $w.buttons.add <Destroy> "AliasExtractDone $id 0"
+    ::tkrat::winctl::SetGeometry extractAlias $w
 }
 
 # AliasExtractDone --
@@ -1061,7 +1154,7 @@ proc AliasExtract {handler} {
 
 proc AliasExtractDone {handler action} {
     upvar #0 $handler hd
-    global aliasMod t b aliasBook
+    global t b aliasBook
 
     # Find which entries we should use
     set ids {}
@@ -1083,19 +1176,34 @@ proc AliasExtractDone {handler action} {
 	    }
 	    RatAlias add $hd(book) $hd($id,name) $hd($id,fname) \
 		    $hd($id,content) $hd($id,comment) {}
-	    set aliasMod 1
 	    set aliasBook(changed,$hd(book)) 1
 	}
-	if { 1 == $aliasMod } {
+	if {0 < [llength $ids]} {
 	    AliasesPopulate
 	}
 	AliasSave
     }
 
-    RecordPos $hd(w) extractAlias
+    bind $hd(w).buttons.add <Destroy> {}
+    ::tkrat::winctl::RecordGeometry extractAlias $hd(w)
     foreach bn [array names b $hd(w)*] {unset b($bn)}
     destroy $hd(w)
     unset hd
+}
+
+# AliasExtractClearSelection --
+#
+# Unmarks all aliases in the alias extract list
+#
+# Arguments:
+# handler - The handler of the extract window
+
+proc AliasExtractClearSelection {handler} {
+    upvar #0 $handler hd
+
+    foreach i [array names hd *,use] {
+	set hd($i) 0
+    }
 }
 
 # AliasChooser --
@@ -1141,7 +1249,7 @@ proc AliasChooser {master} {
 	    -highlightthickness 0 \
 	    -selectmode single
     set b($w.list) alias_chooser
-    Size $w.list aliasChooser
+    ::tkrat::winctl::Size aliasChooser $w.list
     pack $w.scroll -side right -fill y
     pack $w.list -expand 1 -fill both
     set hd(list) $w.list
@@ -1165,11 +1273,11 @@ proc AliasChooser {master} {
     }
     $hd(list) selection set 0
 
-    ModalGrab $w
+    ::tkrat::winctl::ModalGrab $w
 
     # Wait for action
     tkwait variable ${id}(done)
-    RecordSize $w.list aliasChooser
+    ::tkrat::winctl::RecordSize aliasChooser $w.list
     if {1 == $hd(done)} {
 	set ret [lindex $hd(aliasIds) [$hd(list) curselection]]
     } else {

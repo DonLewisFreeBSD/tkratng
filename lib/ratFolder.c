@@ -6,7 +6,7 @@
  *      a folder handler, which when invoked calls the RatFolderCmd()
  *      procedure with a pointer to a RatFolderInfo structure as clientData.
  *
- * TkRat software and its included text is Copyright 1996-2002 by
+ * TkRat software and its included text is Copyright 1996-2004 by
  * Martin Forssén
  *
  * The full text of the legal notices is contained in the file called
@@ -97,7 +97,15 @@ static char *cClientFlags[] = {
 };
 #endif /* HAVE_OPENSSL */
 
-static Tcl_ObjCmdProc RatOpenFolder;
+/*
+ * Fluff to remove when canonalizing headers (case insensitive)
+ */
+static char *subjectFluff[] = {
+    "re: ", "re ", "fwd: ", "fwd ", "ans: ", "ans ", "sv: ", "sv ", NULL
+};
+
+static Tcl_ObjCmdProc RatOpenFolderCmd;
+static Tcl_ObjCmdProc RatGetOpenHandlerCmd;
 static Tcl_ObjCmdProc RatFolderCmd;
 static void RatFolderSort(Tcl_Interp *interp, RatFolderInfo *infoPtr);
 static int RatFolderSortCompareDate(const void *arg1, const void *arg2);
@@ -107,8 +115,7 @@ static int RatFolderSortCompareSender(const void *arg1, const void *arg2);
 static int IsChild(SortData *dataPtr, int child, int parent);
 static int RatFolderSortLinearize(int *p, int n, SortData *dataPtr, int first,
 	int depth);
-static Tcl_TimerProc RatFolderUpdateTime;
-static Tcl_ObjCmdProc RatManageFolder;
+static Tcl_ObjCmdProc RatCreateFolderCmd;
 static RatFlag RatFlagNameToInt(const char *name);
 static char *RatGetIdentDef(Tcl_Interp *interp, Tcl_Obj *defPtr);
 
@@ -145,15 +152,25 @@ RatFolderInit(Tcl_Interp *interp)
     if (TCL_OK != RatDisFolderInit(interp)) {
 	return TCL_ERROR;
     }
-    Tcl_CreateObjCommand(interp, "RatOpenFolder", RatOpenFolder,
-	    (ClientData) NULL, (Tcl_CmdDeleteProc *) NULL);
+    Tcl_CreateObjCommand(interp, "RatOpenFolder", RatOpenFolderCmd,
+			 NULL, NULL);
+    Tcl_CreateObjCommand(interp, "RatGetOpenHandler", RatGetOpenHandlerCmd,
+			 NULL, NULL);
     Tcl_CreateObjCommand(interp, "RatParseExp", RatParseExpCmd, NULL, NULL);
     Tcl_CreateObjCommand(interp, "RatGetExp", RatGetExpCmd, NULL, NULL);
     Tcl_CreateObjCommand(interp, "RatFreeExp", RatFreeExpCmd, NULL, NULL);
-    Tcl_CreateObjCommand(interp, "RatCreateFolder", RatManageFolder,
+    Tcl_CreateObjCommand(interp, "RatCreateFolder", RatCreateFolderCmd,
 			 (void*)RAT_MGMT_CREATE, NULL);
-    Tcl_CreateObjCommand(interp, "RatDeleteFolder", RatManageFolder,
+    Tcl_CreateObjCommand(interp, "RatCheckFolder", RatCreateFolderCmd,
+			 (void*)RAT_MGMT_CHECK, NULL);
+    Tcl_CreateObjCommand(interp, "RatDeleteFolder", RatCreateFolderCmd,
 			 (void*)RAT_MGMT_DELETE, NULL);
+    Tcl_CreateObjCommand(interp, "RatSubscribeFolder", RatCreateFolderCmd,
+			 (void*)RAT_MGMT_SUBSCRIBE, NULL);
+    Tcl_CreateObjCommand(interp, "RatUnSubscribeFolder", RatCreateFolderCmd,
+			 (void*)RAT_MGMT_UNSUBSCRIBE, NULL);
+
+    RatFolderUpdateTime((ClientData)interp);
     return TCL_OK;
 }
 
@@ -184,7 +201,7 @@ RatGetOpenFolder(Tcl_Interp *interp, Tcl_Obj *defPtr)
     char *def = RatGetIdentDef(interp, defPtr);
 
     for (infoPtr = ratFolderList;
-	 infoPtr && strcmp(infoPtr->definition, def);
+	 infoPtr && strcmp(infoPtr->ident_def, def);
 	 infoPtr = infoPtr->nextPtr);
     if (infoPtr) {
 	infoPtr->refCount++;
@@ -212,13 +229,10 @@ RatGetOpenFolder(Tcl_Interp *interp, Tcl_Obj *defPtr)
  */
 
 static int
-RatOpenFolder(ClientData clientData, Tcl_Interp *interp, int objc,
-	      Tcl_Obj *CONST objv[])
+RatOpenFolderCmd(ClientData clientData, Tcl_Interp *interp, int objc,
+		 Tcl_Obj *CONST objv[])
 {
     RatFolderInfo *infoPtr;
-    int i, fobjc, lobjc;
-    CONST84 char *sortName = NULL;
-    Tcl_Obj **fobjv, **lobjv, *role = NULL, *oPtr;
 
     if (objc != 2) {
 	Tcl_AppendResult(interp, "wrong # args: should be \"",
@@ -226,25 +240,60 @@ RatOpenFolder(ClientData clientData, Tcl_Interp *interp, int objc,
 	return TCL_ERROR;
     }
 
-    /*
-     * Check open folders
-     */
-    if ((infoPtr = RatGetOpenFolder(interp, objv[1]))) {
+    infoPtr = RatOpenFolder(interp, objv[1]);
+    if (NULL == infoPtr) {
+	Tcl_AppendResult(interp, ": Failed to create folder", NULL);
+	return TCL_ERROR;
+    } else {
 	Tcl_SetResult(interp, infoPtr->cmdName, TCL_VOLATILE);
 	return TCL_OK;
     }
-    Tcl_ListObjGetElements(interp, objv[1], &fobjc, &fobjv);
+}
+
+/*
+ *----------------------------------------------------------------------
+ *
+ * RatOpenFolder --
+ *
+ *      See the INTERFACE specification
+ *
+ * Results:
+ *      The return value is normally TCL_OK and a foilder handle is left
+ *	in the result area; if something goes wrong TCL_ERROR is returned
+ *	and an error message will be left in the result area.
+ *
+ * Side effects:
+ *	The folder creation commands are created in interp.
+ *
+ *
+ *----------------------------------------------------------------------
+ */
+
+RatFolderInfo*
+RatOpenFolder(Tcl_Interp *interp, Tcl_Obj *def)
+{
+    RatFolderInfo *infoPtr;
+    int i, fobjc, lobjc;
+    CONST84 char *sortName = NULL;
+    Tcl_Obj **fobjv, **lobjv, *role = NULL;
+
+    /*
+     * Check open folders
+     */
+    if ((infoPtr = RatGetOpenFolder(interp, def))) {
+	return infoPtr;
+    }
+    Tcl_ListObjGetElements(interp, def, &fobjc, &fobjv);
 
     if (!strcmp(Tcl_GetString(fobjv[1]), "dbase")) {
-	infoPtr = RatDbFolderCreate(interp, objv[1]);
+	infoPtr = RatDbFolderCreate(interp, def);
     } else if (!strcmp(Tcl_GetString(fobjv[1]), "dis")) {
-	infoPtr = RatDisFolderCreate(interp, objv[1]);
+	infoPtr = RatDisFolderCreate(interp, def);
     } else {
-	infoPtr = RatStdFolderCreate(interp, objv[1]);
+	infoPtr = RatStdFolderCreate(interp, def);
     }
     if (NULL == infoPtr) {
-	Tcl_AppendResult(interp, "Failed to create folder", NULL);
-	return TCL_ERROR;
+	return NULL;
     }
     Tcl_ListObjGetElements(interp, fobjv[2], &lobjc, &lobjv);
     for (i=0; i < lobjc; i+=2) {
@@ -255,17 +304,10 @@ RatOpenFolder(ClientData clientData, Tcl_Interp *interp, int objc,
 	    role = lobjv[i+1];
 	}
     }
-    infoPtr->definition = cpystr(RatGetIdentDef(interp, objv[1]));
+    infoPtr->ident_def = cpystr(RatGetIdentDef(interp, def));
     ckfree(infoPtr->name);
     infoPtr->name = cpystr(Tcl_GetString(fobjv[0]));
     infoPtr->refCount = 1;
-    oPtr = Tcl_GetVar2Ex(interp, "option", "watcher_time", TCL_GLOBAL_ONLY);
-    if (TCL_OK != Tcl_GetIntFromObj(interp, oPtr, &infoPtr->watcherInterval)) {
-	infoPtr->watcherInterval = 30;
-    }
-    if (infoPtr->watcherInterval > 1000000) {
-	infoPtr->watcherInterval = 1000000;
-    }
     if (!sortName || !strcmp("default", sortName)) {
 	sortName = Tcl_GetVar2(interp, "option","folder_sort",TCL_GLOBAL_ONLY);
     }
@@ -278,7 +320,7 @@ RatOpenFolder(ClientData clientData, Tcl_Interp *interp, int objc,
 	infoPtr->reverse = 0;
     }
     if (!role || !strcmp("default", Tcl_GetString(role))) {
-	role = Tcl_GetVar2Ex(interp, "option", "default_role",TCL_GLOBAL_ONLY);
+	role = Tcl_NewObj();
     }
     infoPtr->role = role;
     Tcl_IncrRefCount(infoPtr->role);
@@ -294,7 +336,6 @@ RatOpenFolder(ClientData clientData, Tcl_Interp *interp, int objc,
     }
     (*infoPtr->initProc)(infoPtr, interp, -1);
     infoPtr->presentationOrder = (int*)ckalloc(infoPtr->allocated*sizeof(int));
-    infoPtr->hidden = (int*) ckalloc(infoPtr->allocated*sizeof(int));
     infoPtr->flagsChanged = 0;
     infoPtr->nextPtr = ratFolderList;
     if (infoPtr->finalProc) {
@@ -306,22 +347,54 @@ RatOpenFolder(ClientData clientData, Tcl_Interp *interp, int objc,
     Tcl_CreateObjCommand(interp, infoPtr->cmdName, RatFolderCmd,
     	    (ClientData) infoPtr, (Tcl_CmdDeleteProc *) NULL);
     Tcl_SetVar2Ex(interp, "folderExists", infoPtr->cmdName,
-	    Tcl_NewIntObj(infoPtr->visible), TCL_GLOBAL_ONLY);
+	    Tcl_NewIntObj(infoPtr->number), TCL_GLOBAL_ONLY);
     Tcl_SetVar2Ex(interp, "folderRecent", infoPtr->cmdName,
 	    Tcl_NewIntObj(infoPtr->recent), TCL_GLOBAL_ONLY);
     Tcl_SetVar2Ex(interp, "folderUnseen", infoPtr->cmdName,
 	    Tcl_NewIntObj(infoPtr->unseen), TCL_GLOBAL_ONLY);
     Tcl_SetVar2Ex(interp, "folderChanged", infoPtr->cmdName,
 	    Tcl_NewIntObj(++folderChangeId), TCL_GLOBAL_ONLY);
-    Tcl_SetResult(interp, infoPtr->cmdName, TCL_VOLATILE);
-    if (infoPtr->watcherInterval) {
-	infoPtr->timerToken = Tcl_CreateTimerHandler(
-		infoPtr->watcherInterval*1000, RatFolderUpdateTime,
-		(ClientData)infoPtr);
+    return infoPtr;
+}
+
+/*
+ *----------------------------------------------------------------------
+ *
+ * RatGetOpenHandlerCmd --
+ *
+ *      See the INTERFACE specification
+ *
+ * Results:
+ *      The return value is normally TCL_OK. If there is an open folder
+ *      for the given definition then the handler to that folder is
+ *      stored in the result area. Otherwise an empty string is resturned.
+ *
+ * Side effects:
+ *	None.
+ *
+ *
+ *----------------------------------------------------------------------
+ */
+
+static int
+RatGetOpenHandlerCmd(ClientData clientData, Tcl_Interp *interp, int objc,
+		 Tcl_Obj *CONST objv[])
+{
+    RatFolderInfo *infoPtr;
+
+    if (objc != 2) {
+	Tcl_AppendResult(interp, "wrong # args: should be \"",
+		Tcl_GetString(objv[0]), " folderdef\"", (char *) NULL);
+	return TCL_ERROR;
+    }
+
+    if ((infoPtr = RatGetOpenFolder(interp, objv[1]))) {
+	Tcl_SetObjResult(interp, Tcl_NewStringObj(infoPtr->cmdName, -1));
+    } else {
+	Tcl_ResetResult(interp);
     }
     return TCL_OK;
 }
-
 
 /*
  *----------------------------------------------------------------------
@@ -349,6 +422,7 @@ RatFolderCmd(ClientData clientData, Tcl_Interp *interp, int objc,
 {
     RatFolderInfo *infoPtr = (RatFolderInfo*) clientData;
     Tcl_Obj *oPtr;
+    int r;
 
     if (objc < 2) goto usage;
 
@@ -380,7 +454,8 @@ RatFolderCmd(ClientData clientData, Tcl_Interp *interp, int objc,
 		 || TCL_OK != Tcl_GetBooleanFromObj(interp,objv[2],&force))) {
 	    goto usage;
 	}
-	return RatFolderClose(interp, infoPtr, force);
+	r = RatFolderClose(interp, infoPtr, force);
+	return r;
 
     } else if (!strcmp(Tcl_GetString(objv[1]), "setName")) {
 	if (objc != 3) goto usage;
@@ -396,7 +471,7 @@ RatFolderCmd(ClientData clientData, Tcl_Interp *interp, int objc,
 	char *list;
 
 	if (objc != 2) goto usage;
-	sprintf(numberBuf, "%d", infoPtr->visible);
+	sprintf(numberBuf, "%d", infoPtr->number);
 	sprintf(sizeBuf, "%d", infoPtr->size);
 	infoArgv[0] = infoPtr->name;
 	infoArgv[1] = numberBuf;
@@ -412,13 +487,13 @@ RatFolderCmd(ClientData clientData, Tcl_Interp *interp, int objc,
 	int i;
 
 	if (objc != 3) goto usage;
-	if (NULL == (exprPtr = RatParseList(Tcl_GetString(objv[2])))) {
+	if (NULL == (exprPtr = RatParseList(Tcl_GetString(objv[2]), NULL))) {
 	    Tcl_SetResult(interp, "Illegal list format", TCL_STATIC);
-	    return TCL_ERROR;
+	    goto error;
 	}
 
 	rPtr = Tcl_NewObj();
-	for (i=0; i < infoPtr->visible; i++) {
+	for (i=0; i < infoPtr->number; i++) {
 	    oPtr = RatDoList(interp, exprPtr, infoPtr->infoProc,
 		    (ClientData)infoPtr, infoPtr->presentationOrder[i]);
 	    Tcl_ListObjAppendElement(interp, rPtr, oPtr);
@@ -429,64 +504,50 @@ RatFolderCmd(ClientData clientData, Tcl_Interp *interp, int objc,
 
     } else if (!strcmp(Tcl_GetString(objv[1]), "get")) {
 	int index;
+	char *name;
 
 	if (objc != 3
 	    || TCL_OK != Tcl_GetIntFromObj(interp, objv[2],&index)) goto usage;
-	if (index < 0 || index >= infoPtr->visible) {
+	if (index < 0 || index >= infoPtr->number) {
 	    Tcl_SetResult(interp, "Index is out of bounds", TCL_STATIC);
-	    return TCL_ERROR;
+	    goto error;
 	}
-	if (NULL == infoPtr->msgCmdPtr[infoPtr->presentationOrder[index]]) {
-	    infoPtr->msgCmdPtr[infoPtr->presentationOrder[index]] =
-		    (*infoPtr->createProc)(infoPtr, interp,
-		    infoPtr->presentationOrder[index]);
-	}
-	Tcl_SetResult(interp,
-		infoPtr->msgCmdPtr[infoPtr->presentationOrder[index]],
-		TCL_VOLATILE);
+	name = RatFolderCmdGet(interp, infoPtr, index);
+	Tcl_SetResult(interp, name, TCL_VOLATILE);
 	return TCL_OK;
 
     } else if (!strcmp(Tcl_GetString(objv[1]), "setFlag")) {
-	int index, value, unseen, recent;
+	int *ilist, value, i, ic;
 	RatFlag flag;
+	Tcl_Obj **iv;
 
 	if (objc != 5
-	    || TCL_OK != Tcl_GetIntFromObj(interp, objv[2],&index)
 	    || TCL_OK != Tcl_GetBooleanFromObj(interp, objv[4], &value)) {
 	    goto usage;
 	}
-	if (index < 0 || index >= infoPtr->visible) {
-	    Tcl_SetResult(interp, "Index is out of bounds", TCL_STATIC);
-	    return TCL_ERROR;
+	Tcl_ListObjGetElements(interp, objv[2], &ic, &iv);
+	ilist = (int*)ckalloc(ic*sizeof(int));
+	for (i=0; i<ic; i++) {
+	    if (TCL_OK != Tcl_GetIntFromObj(interp, iv[i], &ilist[i])
+		|| ilist[i] < 0 || ilist[i] >= infoPtr->number) {
+		Tcl_SetResult(interp, "Bad index", TCL_STATIC);
+		ckfree(ilist);
+		goto error;
+	    }
 	}
 	flag = RatFlagNameToInt(Tcl_GetString(objv[3]));
-	if (value != (*infoPtr->getFlagProc)(infoPtr, interp,
-		infoPtr->presentationOrder[index], flag)) {
-	    recent = infoPtr->recent;
-	    unseen = infoPtr->unseen;
-	    (*infoPtr->setFlagProc)(infoPtr, interp,
-		    infoPtr->presentationOrder[index], flag, value);
-	    infoPtr->flagsChanged = 1;
-	    if (infoPtr->recent != recent) {
-		Tcl_SetVar2Ex(interp, "folderRecent", infoPtr->cmdName,
-			Tcl_NewIntObj(infoPtr->recent), TCL_GLOBAL_ONLY);
-	    }
-	    if (infoPtr->unseen != unseen) {
-		oPtr = Tcl_SetVar2Ex(interp, "folderUnseen", infoPtr->cmdName,
-			Tcl_NewIntObj(infoPtr->unseen), TCL_GLOBAL_ONLY);
-	    }
-	}
+	RatFolderCmdSetFlag(interp, infoPtr, ilist, ic, flag, value);
 	return TCL_OK;
-
+	
     } else if (!strcmp(Tcl_GetString(objv[1]), "getFlag")) {
 	int index;
 	RatFlag flag;
 
 	if (objc != 4
 	    || TCL_OK != Tcl_GetIntFromObj(interp, objv[2],&index)) goto usage;
-	if (index < 0 || index >= infoPtr->visible) {
+	if (index < 0 || index >= infoPtr->number) {
 	    Tcl_SetResult(interp, "Index is out of bounds", TCL_STATIC);
-	    return TCL_ERROR;
+	    goto error;
 	}
 	flag = RatFlagNameToInt(Tcl_GetString(objv[3]));
 	Tcl_SetObjResult(interp, Tcl_NewIntObj(
@@ -496,25 +557,26 @@ RatFolderCmd(ClientData clientData, Tcl_Interp *interp, int objc,
 
     } else if (!strcmp(Tcl_GetString(objv[1]), "flagged")) {
 	RatFlag flag;
-	char buf[64];
-	int i;
+	int i, v;
 
-	if (objc != 3) goto usage;
+	if (objc != 4
+	    || TCL_OK != Tcl_GetIntFromObj(interp, objv[3], &v)) goto usage;
 	flag = RatFlagNameToInt(Tcl_GetString(objv[2]));
+	oPtr = Tcl_NewObj();
 	Tcl_ResetResult(interp);
-	for (i=0; i<infoPtr->visible; i++) {
+	for (i=0; i<infoPtr->number; i++) {
 	    if ((*infoPtr->getFlagProc)(infoPtr, interp,
-		    infoPtr->presentationOrder[i], flag)) {
-		sprintf(buf, "%d", i);
-		Tcl_AppendElement(interp, buf);
+		    infoPtr->presentationOrder[i], flag) == v) {
+		Tcl_ListObjAppendElement(interp, oPtr, Tcl_NewIntObj(i));
 	    }
 	}
+	Tcl_SetObjResult(interp, oPtr);
 	return TCL_OK;
 
     } else if (!strcmp(Tcl_GetString(objv[1]), "insert")) {
 	Tcl_CmdInfo cmdInfo;
 	char **msgv;
-	int i, ret;
+	int i;
 
 	if (objc < 3) goto usage;
 
@@ -523,7 +585,7 @@ RatFolderCmd(ClientData clientData, Tcl_Interp *interp, int objc,
 		    || NULL == cmdInfo.objClientData) {
 		Tcl_AppendResult(interp, "error \"", Tcl_GetString(objv[i]),
 			"\" is not a valid message command", (char *) NULL);
-		return TCL_ERROR;
+		goto error;
 	    }
 	}
 	msgv = (char**)ckalloc((objc-2)*sizeof(char*));
@@ -531,9 +593,9 @@ RatFolderCmd(ClientData clientData, Tcl_Interp *interp, int objc,
 	    msgv[i-2] = Tcl_GetString(objv[i]);
 	}
 
-	ret = RatFolderInsert(interp, infoPtr, objc-2, msgv);
+	r = RatFolderInsert(interp, infoPtr, objc-2, msgv);
 	ckfree(msgv);
-	return ret;
+	return r;
 
     } else if (!strcmp(Tcl_GetString(objv[1]), "type")) {
 	Tcl_SetResult(interp, infoPtr->type, TCL_STATIC);
@@ -601,7 +663,7 @@ RatFolderCmd(ClientData clientData, Tcl_Interp *interp, int objc,
 	    return TCL_OK;
 	} else {
 	    Tcl_SetResult(interp, "No such sort order", TCL_STATIC);
-	    return TCL_ERROR;
+	    goto error;
 	}
 
     } else if (!strcmp(Tcl_GetString(objv[1]), "getSortOrder")) {
@@ -619,9 +681,10 @@ RatFolderCmd(ClientData clientData, Tcl_Interp *interp, int objc,
 	if (!infoPtr->syncProc) {
 	    Tcl_AppendResult(interp, "Operation unsupported on this folder",
 		    (char *) NULL);
-	    return TCL_ERROR;
+	    goto error;
 	}
-	return (*infoPtr->syncProc)(infoPtr, interp);
+	r = (*infoPtr->syncProc)(infoPtr, interp);
+	return r;
 
     } else if (!strcmp(Tcl_GetString(objv[1]), "refcount")) {
 	Tcl_SetObjResult(interp, Tcl_NewIntObj(infoPtr->refCount));
@@ -635,7 +698,61 @@ RatFolderCmd(ClientData clientData, Tcl_Interp *interp, int objc,
  usage:
     Tcl_AppendResult(interp, "Illegal usage of \"", Tcl_GetString(objv[0]),
 		     "\"", (char *) NULL);
+ error:
     return TCL_ERROR;
+
+}
+
+/*
+ *----------------------------------------------------------------------
+ *
+ * RatFolderCmd* --
+ *
+ *      Implement various folder commands
+ *
+ * Results:
+ *	Varies
+ *
+ * Side effects:
+ *	Varies
+ *
+ *
+ *----------------------------------------------------------------------
+ */
+char*
+RatFolderCmdGet(Tcl_Interp *interp, RatFolderInfo *infoPtr, int index)
+{
+    if (NULL == infoPtr->msgCmdPtr[infoPtr->presentationOrder[index]]) {
+	infoPtr->msgCmdPtr[infoPtr->presentationOrder[index]] =
+	    (*infoPtr->createProc)(infoPtr, interp,
+				   infoPtr->presentationOrder[index]);
+    }
+    return infoPtr->msgCmdPtr[infoPtr->presentationOrder[index]];
+}
+
+void
+RatFolderCmdSetFlag(Tcl_Interp *interp, RatFolderInfo *infoPtr, int *ilist,
+		    int count, RatFlag flag, int value)
+{
+    int recent, unseen, i;
+
+    for (i=0; i<count; i++) {
+	ilist[i] = infoPtr->presentationOrder[ilist[i]];
+    }
+
+    recent = infoPtr->recent;
+    unseen = infoPtr->unseen;
+    (*infoPtr->setFlagProc)(infoPtr, interp, ilist, count, flag,value);
+    infoPtr->flagsChanged = 1;
+    if (infoPtr->recent != recent) {
+	Tcl_SetVar2Ex(interp, "folderRecent", infoPtr->cmdName,
+		      Tcl_NewIntObj(infoPtr->recent), TCL_GLOBAL_ONLY);
+    }
+    if (infoPtr->unseen != unseen) {
+	Tcl_SetVar2Ex(interp, "folderUnseen", infoPtr->cmdName,
+		      Tcl_NewIntObj(infoPtr->unseen),
+		      TCL_GLOBAL_ONLY);
+    }
 }
 
 /*
@@ -671,21 +788,19 @@ RatFolderCmd(ClientData clientData, Tcl_Interp *interp, int objc,
 static void
 RatFolderSort(Tcl_Interp *interp, RatFolderInfo *infoPtr)
 {
-    int i, j, k, pi, pj, snarf, numParm, seen, *tmpPtr, first, last,
+    int i, j, k, pi, pj, numParm, *tmpPtr, first, last,
 	*p=infoPtr->presentationOrder,
 	needDate=0, needSubject=0, needSender=0, needIds = 0, needSize = 0,
-	*uniqList, uniqListUsed, *subList, *lengthList;
+	*uniqList, uniqListUsed, *subList, *lengthList, newEntry;
+    Tcl_HashTable uniqTable;
+    Tcl_HashEntry *uniqEntry;
     SortData *dataPtr, *dPtr;
-    Tcl_Obj *oPtr, *o2Ptr;
+    Tcl_Obj *oPtr;
 
     if (0 == infoPtr->number) {
-	infoPtr->visible = 0;
 	return;
     }
-
-    oPtr = Tcl_GetVar2Ex(interp, "option","dsn_snarf_reports",TCL_GLOBAL_ONLY);
-    Tcl_GetBooleanFromObj(interp, oPtr, &snarf);
-
+    
     switch(infoPtr->sortOrder) {
         case SORT_NONE:
 	    break;
@@ -719,7 +834,6 @@ RatFolderSort(Tcl_Interp *interp, RatFolderInfo *infoPtr)
     dataPtr = (SortData*)ckalloc(infoPtr->number*sizeof(*dataPtr));
     infoPtr->size = 0;
     for (i=0; i<infoPtr->number; i++) {
-	infoPtr->hidden[i] = 0;
 	infoPtr->presentationOrder[i] = i;
 	oPtr = (*infoPtr->infoProc)(interp, (ClientData)infoPtr,
 				    RAT_FOLDER_TYPE, i);
@@ -730,45 +844,11 @@ RatFolderSort(Tcl_Interp *interp, RatFolderInfo *infoPtr)
 		continue;
 	    }
 	    Tcl_ListObjLength(interp, oPtr, &numParm);
-	    for (j=0; j<numParm; j++) {
-		Tcl_ListObjIndex(interp, oPtr, j, &o2Ptr);
-		if (!strcasecmp(Tcl_GetString(o2Ptr),
-			"report-type delivery-status")) {
-		    /*
-		     * This is a DSN; call the proper authorities
-		     */
-		    seen=(*infoPtr->getFlagProc)(infoPtr, interp, i, RAT_SEEN);
-		    if (0 == seen) {
-			(*infoPtr->setFlagProc)(infoPtr, interp, i,
-						RAT_SEEN, 1);
-		    }
-		    if (!infoPtr->msgCmdPtr[i]) {
-			infoPtr->msgCmdPtr[i] =
-				(*infoPtr->createProc)(infoPtr, interp, i);
-		    }
-		    if (RatDSNHandle(interp, infoPtr->msgCmdPtr[i]) && snarf) {
-			if ((*infoPtr->getFlagProc)(
-				infoPtr, interp, i, RAT_RECENT)){
-			    infoPtr->recent--;
-			}
-			infoPtr->hidden[i] = 1;
-			(*infoPtr->setFlagProc)(infoPtr, interp, i,
-						RAT_DELETED, 1);
-		    } else {
-			(*infoPtr->setFlagProc)(infoPtr, interp, i,
-						RAT_SEEN, seen);
-		    }
-		    break;
-		}
-	    }
 	}
-	if (!infoPtr->hidden[i]) {
-	    oPtr = (*infoPtr->infoProc)(interp, (ClientData)infoPtr,
-					RAT_FOLDER_SIZE,i) ;
-	    if (oPtr) {
-		Tcl_GetIntFromObj(interp, oPtr, &j);
-		infoPtr->size += j;
-	    }
+	if ((oPtr = (*infoPtr->infoProc)(interp, (ClientData)infoPtr,
+					RAT_FOLDER_SIZE,i))) {
+	    Tcl_GetIntFromObj(interp, oPtr, &j);
+	    infoPtr->size += j;
 	}
 	if (needSubject) {
 	    oPtr = (*infoPtr->infoProc)(interp, (ClientData)infoPtr,
@@ -777,10 +857,10 @@ RatFolderSort(Tcl_Interp *interp, RatFolderInfo *infoPtr)
 	}
 	if (needSender) {
 	    oPtr = (*infoPtr->infoProc)(interp,(ClientData)infoPtr,
-		    RAT_FOLDER_NAME, i);
+		    RAT_FOLDER_ANAME, i);
 	    dataPtr[i].sender = Tcl_GetString(oPtr);
 	    dataPtr[i].sender = cpystr(dataPtr[i].sender);
-	    lcase(dataPtr[i].sender);
+	    lcase((unsigned char*)dataPtr[i].sender);
 	}
 	if (needDate) {
 	    long myLong;
@@ -997,24 +1077,25 @@ RatFolderSort(Tcl_Interp *interp, RatFolderInfo *infoPtr)
 	 * - Finally we build to result array.
 	 */
 	uniqList = (int*)ckalloc(2*infoPtr->number*sizeof(*uniqList));
+	Tcl_InitHashTable(&uniqTable, TCL_STRING_KEYS);
 	subList = &uniqList[infoPtr->number];
 	lengthList = &uniqList[2*infoPtr->number];
 	for (i=uniqListUsed=0; i<infoPtr->number; i++) {
-	    for (j=0; j<uniqListUsed; j++) {
-		if (infoPtr->sortOrder == SORT_SUBJDATE ?
-			!strcmp(dataPtr[i].subject,
-			dataPtr[uniqList[j]].subject) : !strcmp(
-			dataPtr[i].sender, dataPtr[uniqList[j]].sender)) {
-		    dataPtr[i].nextPtr = dataPtr[uniqList[j]].nextPtr;
-		    dataPtr[uniqList[j]].nextPtr = &dataPtr[i];
-		    break;
-		}
-	    }
-	    if (j == uniqListUsed) {
+	    uniqEntry = Tcl_CreateHashEntry(&uniqTable,
+				          infoPtr->sortOrder == SORT_SUBJDATE ?
+					  dataPtr[i].subject :
+					  dataPtr[i].sender, &newEntry);
+	    if (newEntry) {
 		dataPtr[i].nextPtr = NULL;
 		uniqList[uniqListUsed++] = i;
+		Tcl_SetHashValue(uniqEntry, &dataPtr[i]);
+	    } else {
+		dPtr = Tcl_GetHashValue(uniqEntry);
+		dataPtr[i].nextPtr = dPtr->nextPtr;
+		dPtr->nextPtr = &dataPtr[i];
 	    }
 	}
+	Tcl_DeleteHashTable(&uniqTable);
 	for (i=0; i<uniqListUsed; i++) {
 	    if (NULL != dataPtr[uniqList[i]].nextPtr) {
 		for (j = 0, dPtr = &dataPtr[uniqList[i]]; dPtr;
@@ -1067,20 +1148,15 @@ RatFolderSort(Tcl_Interp *interp, RatFolderInfo *infoPtr)
     if (infoPtr->reverse) {
 	tmpPtr = (int*)ckalloc(infoPtr->number*sizeof(int));
 	for (i=infoPtr->number-1, j=0; i >= 0; i--) {
-	    if (!infoPtr->hidden[p[i]]) {
-		tmpPtr[j++] = p[i];
-	    }
+	    tmpPtr[j++] = p[i];
 	}
 	memcpy(p, tmpPtr, j*sizeof(int));
 	ckfree(tmpPtr);
     } else {
 	for (i=j=0; i < infoPtr->number; i++) {
-	    if (!infoPtr->hidden[p[i]]) {
-		p[j++] = p[i];
-	    }
+	    p[j++] = p[i];
 	}
     }
-    infoPtr->visible = j;
 
     /*
      * Cleanup dataPtr
@@ -1161,45 +1237,42 @@ RatFolderSortCompareSize(const void *arg1, const void *arg2)
  */
 
 Tcl_Obj*
-RatFolderCanonalizeSubject (const char *s)
+RatFolderCanonalizeSubject(const char *s)
 {
+    Tcl_Obj *nPtr = Tcl_NewStringObj("", 0);
     const char *e;
-    Tcl_Obj *nPtr;
-    int len;
+    int i, len;
 
     if (s) {
 	/*
-	 * We first try to find the start of the actual text (i.e. without any
-	 * leading Re:'s and whitespaces. Then we find how long the text is
-	 * (ignore trailing whitespaces).
+	 * We first try to find the start of the actual text, i.e. without any
+	 * leading fluff (Re: etc) and whitespaces. If the text starts with
+         * [sometext] then also look for fluff immediately after it.
+         * Then we find how long the text is (ignore trailing whitespaces)
 	 */
-	len = strlen(s);
-	e = s+len-1;
+	e = s+strlen(s)-1;
 	while (*s) {
-	    while (*s && s < e && isspace((unsigned char)*s)) s++, len--;
-	    if (!strncasecmp(s, "re", 2) && (':' == s[2]
-		    || isspace((unsigned char)s[2]))) {
-		s += 2;
-		len -= 2;
-		if (*s == ':') {
-		    s++;
-		    len--;
-		}
-	    } else {
-		break;
-	    }
+	    while (*s && isspace((int)*s)) s++;
+            for (i=0; subjectFluff[i]; i++) {
+                if (!strncasecmp(subjectFluff[i], s, strlen(subjectFluff[i]))){
+                    break;
+                }
+            }
+            if (subjectFluff[i]) {
+                s += strlen(subjectFluff[i]);
+            } else if (*s == '[' && (e = strchr(s+1, ']'))) {
+                Tcl_AppendToObj(nPtr, (CONST84 char*)s, e-s+1);
+                s = e+1;
+            } else {
+                break;
+            }
 	}
-	while (isspace((unsigned char)*e) && e > s) {
-	    e--;
-	    len--;
-	}
-	nPtr = Tcl_NewStringObj(s, len);
+        for (len = strlen(s)-1; len > 0 && isspace((int)s[len]); len--);
+	Tcl_AppendToObj(nPtr, (CONST84 char*)s, len+1);
 	len = Tcl_UtfToLower(Tcl_GetString(nPtr));
 	Tcl_SetObjLength(nPtr, len);
-	return nPtr;
-    } else {
-	return Tcl_NewStringObj("", 0);
     }
+    return nPtr;
 }
 
 /*
@@ -1299,6 +1372,7 @@ RatFolderSortLinearize(int *p, int n, SortData *dataPtr, int first, int depth)
  *  RAT_FOLDER_SUBJECT		-	needed	-	-	-
  *  RAT_FOLDER_CANONSUBJECT	-	needed	-	-	-
  *  RAT_FOLDER_NAME		needed	needed	-	-	-
+ *  RAT_FOLDER_ANAME		needed	needed	-	-	-
  *  RAT_FOLDER_MAIL_REAL	-	needed	-	-	-
  *  RAT_FOLDER_MAIL		needed	needed	-	-	-
  *  RAT_FOLDER_NAME_RECIPIENT	needed	needed	-	-	-
@@ -1307,6 +1381,7 @@ RatFolderSortLinearize(int *p, int n, SortData *dataPtr, int first, int depth)
  *  RAT_FOLDER_SIZE_F		-	-	-	-	needed
  *  RAT_FOLDER_DATE_F		-	needed	-	needed	-
  *  RAT_FOLDER_DATE_N		-	needed	-	needed	-
+ *  RAT_FOLDER_DATE_IMAP4	-	-	-	needed	-
  *  RAT_FOLDER_STATUS		    [not supported ]
  *  RAT_FOLDER_TYPE		-	-	needed	-	-
  *  RAT_FOLDER_PARAMETERS	-	-	needed	-	-
@@ -1316,6 +1391,7 @@ RatFolderSortLinearize(int *p, int n, SortData *dataPtr, int first, int depth)
  *  RAT_FOLDER_REF		-	needed	-	-	-
  *  RAT_FOLDER_INDEX		    [not supported ]
  *  RAT_FOLDER_THREADING	    [not supported ]
+ *  RAT_FOLDER_UID       	    [not supported ]
  *
  * Results:
  *	A pointer to a string which is valid at least until the next call
@@ -1337,7 +1413,7 @@ RatGetMsgInfo(Tcl_Interp *interp, RatFolderInfoType type, MessageInfo *msgPtr,
     MESSAGECACHE dateElt, *dateEltPtr;
     PARAMETER *parmPtr;
     ADDRESS *adrPtr;
-    struct tm tm;
+    struct tm tm, *tm2;
     char buf[1024], *s;
 
     switch (type) {
@@ -1361,14 +1437,14 @@ RatGetMsgInfo(Tcl_Interp *interp, RatFolderInfoType type, MessageInfo *msgPtr,
 		oPtr = Tcl_NewStringObj(RatAddressMail(adrPtr), -1);
 	    }
 	    break;
+        case RAT_FOLDER_ANAME: /* fallthrough */
 	case RAT_FOLDER_NAME:
 	    if (!envPtr->from) {
 		oPtr = Tcl_NewObj();
-		break;
-	    }
-	    if (RAT_ISME_YES == msgPtr->fromMe
-		    || (RAT_ISME_UNKOWN == msgPtr->fromMe
-			&& RatAddressIsMe(interp, envPtr->from, 1))) {
+	    } else if (type != RAT_FOLDER_ANAME
+                       && (RAT_ISME_YES == msgPtr->fromMe
+                           || (RAT_ISME_UNKOWN == msgPtr->fromMe
+                               && RatAddressIsMe(interp, envPtr->from, 1)))) {
 		msgPtr->fromMe = RAT_ISME_YES;
 		if (envPtr->to && envPtr->to->personal) {
 		    oPtr = Tcl_GetVar2Ex(interp, "t", "to", TCL_GLOBAL_ONLY);
@@ -1383,7 +1459,9 @@ RatGetMsgInfo(Tcl_Interp *interp, RatFolderInfoType type, MessageInfo *msgPtr,
 		    break;
 		}
 	    } else {
-		msgPtr->fromMe = RAT_ISME_NO;
+                if (type != RAT_FOLDER_ANAME) {
+                    msgPtr->fromMe = RAT_ISME_NO;
+                }
 		if (envPtr->from->personal) {
 		    oPtr = Tcl_NewStringObj(RatDecodeHeader(interp,
 			    envPtr->from->personal, 0), -1);
@@ -1393,16 +1471,19 @@ RatGetMsgInfo(Tcl_Interp *interp, RatFolderInfoType type, MessageInfo *msgPtr,
 	    /* fallthrough */
 	case RAT_FOLDER_MAIL:
 	    oPtr = Tcl_NewObj();
-	    if (RAT_ISME_YES == msgPtr->fromMe
+	    if (type != RAT_FOLDER_ANAME
+                && (RAT_ISME_YES == msgPtr->fromMe
 		    || (RAT_ISME_UNKOWN == msgPtr->fromMe
-			&& RatAddressIsMe(interp, envPtr->from, 1))) {
+			&& RatAddressIsMe(interp, envPtr->from, 1)))) {
 		msgPtr->fromMe = RAT_ISME_YES;
 		adrPtr = envPtr->to;
 		Tcl_AppendObjToObj(oPtr, Tcl_GetVar2Ex(interp, "t", "to",
 			TCL_GLOBAL_ONLY));
 		Tcl_AppendToObj(oPtr, ": ", 2);
 	    } else {
-		msgPtr->fromMe = RAT_ISME_NO;
+                if (type != RAT_FOLDER_ANAME) {
+                    msgPtr->fromMe = RAT_ISME_NO;
+                }
 		adrPtr = envPtr->from;
 	    }
 	    for (; adrPtr; adrPtr = adrPtr->next) {
@@ -1411,6 +1492,7 @@ RatGetMsgInfo(Tcl_Interp *interp, RatFolderInfoType type, MessageInfo *msgPtr,
 		}
 	    }
 	    if (!adrPtr) {
+		Tcl_IncrRefCount(oPtr);
 		Tcl_DecrRefCount(oPtr);
 		oPtr = Tcl_NewObj();
 	    } else {
@@ -1438,6 +1520,7 @@ RatGetMsgInfo(Tcl_Interp *interp, RatFolderInfoType type, MessageInfo *msgPtr,
 		}
 	    }
 	    if (!adrPtr) {
+		Tcl_IncrRefCount(oPtr);
 		Tcl_DecrRefCount(oPtr);
 		oPtr = Tcl_NewObj();
 	    } else {
@@ -1451,13 +1534,7 @@ RatGetMsgInfo(Tcl_Interp *interp, RatFolderInfoType type, MessageInfo *msgPtr,
 	    oPtr = RatMangleNumber(size);
 	    break;
 	case RAT_FOLDER_DATE_F:
-	    if (envPtr->date && T == mail_parse_date(&dateElt, envPtr->date)) {
-		dateEltPtr = &dateElt;
-	    } else {
-		dateEltPtr = eltPtr;
-	    }
-	    oPtr = RatFormatDate(interp, dateEltPtr->month-1, dateEltPtr->day);
-	    break;
+            /* fallthrough */
 	case RAT_FOLDER_DATE_N:
 	    if (envPtr->date && T == mail_parse_date(&dateElt, envPtr->date)) {
 		dateEltPtr = &dateElt;
@@ -1473,21 +1550,27 @@ RatGetMsgInfo(Tcl_Interp *interp, RatFolderInfoType type, MessageInfo *msgPtr,
 	    tm.tm_wday = 0;
 	    tm.tm_yday = 0;
 	    tm.tm_isdst = -1;
-	    time = mktime(&tm);
-	    zonediff = (dateEltPtr->zhours*60+dateEltPtr->zminutes)*60;
-	    if (!dateEltPtr->zoccident) {
-		zonediff *= -1;
-	    }
-	    time += zonediff;
-	    oPtr = Tcl_NewObj();
-	    Tcl_SetLongObj(oPtr, time);
+            /* time represents the time teh message was sent, without
+             * the time zone factor. So when rendered in gmt it gives
+             * correct date/time. */
+            time = mktime(&tm);
+            if (RAT_FOLDER_DATE_F == type) {
+                tm2 = gmtime(&time);
+                oPtr = RatFormatDate(interp, tm2);
+            } else {
+                /* To get the real time of sending we must add the
+                 * time zone offset. */
+                zonediff = (dateEltPtr->zhours*60+dateEltPtr->zminutes)*60;
+                if (!dateEltPtr->zoccident) {
+                    zonediff *= -1;
+                }
+                time += zonediff;
+                oPtr = Tcl_NewObj();
+                Tcl_SetLongObj(oPtr, time);
+            }
 	    break;
 	case RAT_FOLDER_DATE_IMAP4:
-	    if (envPtr->date && T == mail_parse_date(&dateElt, envPtr->date)) {
-		dateEltPtr = &dateElt;
-	    } else {
-		dateEltPtr = eltPtr;
-	    }
+            dateEltPtr = eltPtr;
 	    mail_date(buf, dateEltPtr); 
 	    oPtr = Tcl_NewStringObj(buf, -1);
 	    break;
@@ -1569,6 +1652,7 @@ RatGetMsgInfo(Tcl_Interp *interp, RatFolderInfoType type, MessageInfo *msgPtr,
 	case RAT_FOLDER_STATUS:	   /*fallthrough */
 	case RAT_FOLDER_INDEX:	   /*fallthrough */
 	case RAT_FOLDER_THREADING: /*fallthrough */
+	case RAT_FOLDER_UID:       /*fallthrough */
 	case RAT_FOLDER_END:
 	    oPtr = Tcl_NewObj();
 	    break;
@@ -1746,9 +1830,8 @@ RatParseFrom(const char *from)
 int
 RatUpdateFolder(Tcl_Interp *interp, RatFolderInfo *infoPtr, RatUpdateType mode)
 {
-    int i, numNew, oldNumber, oldVisible, delta;
+    int i, numNew, oldNumber, delta;
 
-    oldVisible = infoPtr->visible;
     oldNumber = infoPtr->number;
     numNew = (*infoPtr->updateProc)(infoPtr, interp, mode);
     if (numNew < 0) {
@@ -1765,8 +1848,6 @@ RatUpdateFolder(Tcl_Interp *interp, RatFolderInfo *infoPtr, RatUpdateType mode)
 	    infoPtr->presentationOrder = (int *) ckrealloc(
 		    infoPtr->presentationOrder,
 		    infoPtr->allocated*sizeof(int));
-	    infoPtr->hidden = (int *) ckrealloc(infoPtr->hidden,
-		    infoPtr->allocated*sizeof(int));
 	}
 	for (i=infoPtr->number-numNew; i<infoPtr->number; i++) {
 	    infoPtr->msgCmdPtr[i] = (char *) NULL;
@@ -1776,11 +1857,11 @@ RatUpdateFolder(Tcl_Interp *interp, RatFolderInfo *infoPtr, RatUpdateType mode)
 	RatFolderSort(interp, infoPtr);
 	infoPtr->sortOrderChanged = 0;
     }
-    delta = infoPtr->visible - oldVisible;
+    delta = infoPtr->number - oldNumber;
     Tcl_SetObjResult(interp, Tcl_NewIntObj((delta>0 ? delta : 0)));
     if (delta) {
 	Tcl_SetVar2Ex(interp, "folderExists", infoPtr->cmdName,
-		Tcl_NewIntObj(infoPtr->visible), TCL_GLOBAL_ONLY);
+		Tcl_NewIntObj(infoPtr->number), TCL_GLOBAL_ONLY);
 	Tcl_SetVar2Ex(interp, "folderRecent", infoPtr->cmdName,
 		Tcl_NewIntObj(infoPtr->recent), TCL_GLOBAL_ONLY);
 	Tcl_SetVar2Ex(interp, "folderUnseen", infoPtr->cmdName,
@@ -1810,22 +1891,34 @@ RatUpdateFolder(Tcl_Interp *interp, RatFolderInfo *infoPtr, RatUpdateType mode)
  *----------------------------------------------------------------------
  */
 
-static void
+void
 RatFolderUpdateTime(ClientData clientData)
 {
-    RatFolderInfo *infoPtr = (RatFolderInfo*)clientData;
+    static Tcl_TimerToken timer_token = NULL;
+    Tcl_Interp *interp = (Tcl_Interp*)clientData;
+    RatFolderInfo *infoPtr, *nextPtr;
+    Tcl_Obj *oPtr;
+    int interval;
+
+    if (timer_token) {
+	Tcl_DeleteTimerHandler(timer_token);
+    }
 
     RatSetBusy(timerInterp);
-    if (TCL_OK == RatUpdateFolder(timerInterp, infoPtr, RAT_UPDATE)) {
-	infoPtr->timerToken = Tcl_CreateTimerHandler(
-		infoPtr->watcherInterval*1000, RatFolderUpdateTime,
-		(ClientData)infoPtr);
-    } else {
-	char *err = cpystr(Tcl_GetStringResult(timerInterp));
-	RatLog(timerInterp, RAT_ERROR, err, RATLOG_EXPLICIT);
-	ckfree(err);
+    for (infoPtr = ratFolderList; infoPtr; infoPtr = nextPtr) {
+        nextPtr = infoPtr->nextPtr;
+	RatUpdateFolder(interp, infoPtr, RAT_UPDATE);
     }
-    RatClearBusy(timerInterp);
+    RatClearBusy(interp);
+
+    oPtr = Tcl_GetVar2Ex(interp, "option", "watcher_time", TCL_GLOBAL_ONLY);
+    if (!oPtr || TCL_OK != Tcl_GetIntFromObj(interp, oPtr, &interval)) {
+	interval = 30;
+    } else if (interval > 1000000) {
+	interval = 1000000;
+    }
+    timer_token = Tcl_CreateTimerHandler(interval*1000, RatFolderUpdateTime,
+					 (ClientData)interp);
 }
 
 
@@ -1851,6 +1944,7 @@ RatFolderClose(Tcl_Interp *interp, RatFolderInfo *infoPtr, int force)
 {
     RatFolderInfo **rfiPtrPtr;
     int i, ret, expunge;
+    char buf[1024];
     Tcl_Obj *oPtr;
 
     oPtr = Tcl_GetVar2Ex(interp, "option", "expunge_on_close",TCL_GLOBAL_ONLY);
@@ -1862,11 +1956,20 @@ RatFolderClose(Tcl_Interp *interp, RatFolderInfo *infoPtr, int force)
 	}
 	return TCL_OK;
     }
+
+    snprintf(buf, sizeof(buf),
+             "foreach f [array names folderWindowList] {"
+             "    if {$folderWindowList($f) == \"%s\"} {"
+             "        FolderWindowClear $f"
+             "    }"
+             "}", infoPtr->cmdName);
+    Tcl_GlobalEval(interp, buf);
+
     for (rfiPtrPtr = &ratFolderList; infoPtr != *rfiPtrPtr;
 	    rfiPtrPtr = &(*rfiPtrPtr)->nextPtr);
     *rfiPtrPtr = infoPtr->nextPtr;
     ckfree(infoPtr->name);
-    ckfree(infoPtr->definition);
+    ckfree(infoPtr->ident_def);
 
     ret = (*infoPtr->closeProc)(infoPtr, interp, expunge);
     for(i=0; i < infoPtr->number; i++) {
@@ -1874,9 +1977,6 @@ RatFolderClose(Tcl_Interp *interp, RatFolderInfo *infoPtr, int force)
 	    (void)RatMessageDelete(interp, infoPtr->msgCmdPtr[i]);
 	    infoPtr->msgCmdPtr[i] = 0;
 	}
-    }
-    if (infoPtr->watcherInterval) {
-	Tcl_DeleteTimerHandler(infoPtr->timerToken);
     }
     Tcl_UnsetVar2(interp, "folderExists", infoPtr->cmdName,TCL_GLOBAL_ONLY);
     Tcl_UnsetVar2(interp, "folderUnseen", infoPtr->cmdName,TCL_GLOBAL_ONLY);
@@ -1888,7 +1988,6 @@ RatFolderClose(Tcl_Interp *interp, RatFolderInfo *infoPtr, int force)
     ckfree(infoPtr->msgCmdPtr);
     ckfree(infoPtr->privatePtr);
     ckfree(infoPtr->presentationOrder);
-    ckfree(infoPtr->hidden);
     ckfree(infoPtr);
     return ret;
 }
@@ -1941,11 +2040,11 @@ RatFolderInsert(Tcl_Interp *interp, RatFolderInfo *infoPtr,int num,char **msgs)
 char*
 RatGetFolderSpec(Tcl_Interp *interp, Tcl_Obj *def)
 {
-    static Tcl_DString ds, tmpDS;
+    static Tcl_DString ds;
     static int initialized = 0;
     Tcl_Obj *oPtr, **objv, **fobjv, **mobjv, **sobjv;
     int objc, fobjc, mobjc, sobjc, port, i, j;
-    char buf[64], *type, *file, *c;
+    char buf[64], *type, *c, *file;
 
     if (0 == initialized) {
 	Tcl_DStringInit(&ds);
@@ -1959,13 +2058,12 @@ RatGetFolderSpec(Tcl_Interp *interp, Tcl_Obj *def)
     }
     type = Tcl_GetString(objv[1]);
     if (!strcmp(type, "file")) {
-	file = Tcl_TranslateFileName(interp, Tcl_GetString(objv[3]), &tmpDS);
+	file = cpystr(RatTranslateFileName(interp, Tcl_GetString(objv[3])));
 	if (NULL == file) {
 	    Tcl_DStringAppend(&ds, "invalid_file_specified", -1);
 	} else {
-	    RatDecodeQP(file);
+	    RatDecodeQP((unsigned char*)file);
 	    Tcl_DStringAppend(&ds, file, -1);
-	    Tcl_DStringFree(&tmpDS);
 	    c = Tcl_GetString(objv[3]);
 	    if ('/' == c[strlen(c)-1]) {
 		Tcl_DStringAppend(&ds, "/", 1);
@@ -1974,7 +2072,7 @@ RatGetFolderSpec(Tcl_Interp *interp, Tcl_Obj *def)
     } else if (!strcmp(type, "mh")) {
 	Tcl_DStringAppend(&ds, "#mh/", 4);
 	file = cpystr(Tcl_GetString(objv[3]));
-	RatDecodeQP(file);
+	RatDecodeQP((unsigned char*)file);
 	Tcl_DStringAppend(&ds, file, -1);
 	ckfree(file);
     } else if (!strcmp(type, "dbase")) {
@@ -2040,7 +2138,7 @@ RatGetFolderSpec(Tcl_Interp *interp, Tcl_Obj *def)
 	Tcl_DStringAppend(&ds, "}", 1);
 	if (strcmp(type, "pop3")) {
 	    file = cpystr(Tcl_GetString(objv[4]));
-	    RatDecodeQP(file);
+	    RatDecodeQP((unsigned char*)file);
 	    Tcl_DStringAppend(&ds, file, -1);
 	    ckfree(file);
 	}
@@ -2051,7 +2149,7 @@ RatGetFolderSpec(Tcl_Interp *interp, Tcl_Obj *def)
 /*
  *----------------------------------------------------------------------
  *
- * RatManageFolder --
+ * RatCreateFolderCmd --
  *
  *      See the INTERFACE specification for RatCreateFolder and
  *	RatDeleteFolder
@@ -2067,21 +2165,29 @@ RatGetFolderSpec(Tcl_Interp *interp, Tcl_Obj *def)
  */
 
 static int
-RatManageFolder(ClientData op, Tcl_Interp *interp, int objc,
-	      Tcl_Obj *CONST objv[])
+RatCreateFolderCmd(ClientData op, Tcl_Interp *interp, int objc,
+		   Tcl_Obj *CONST objv[])
 {
-    int fobjc;
+    int fobjc, def, mbx;
     Tcl_Obj **fobjv;
 
-    if (objc != 2) {
+    if ((objc != 2 && objc != 3)
+	|| (objc == 3 && strcmp("-mbx", Tcl_GetString(objv[1])))) {
 	Tcl_AppendResult(interp, "wrong # args: should be \"",
-		Tcl_GetString(objv[0]), " folderdef\"", (char *) NULL);
+		Tcl_GetString(objv[0]), " ?-mbx? folderdef\"", (char *) NULL);
 	return TCL_ERROR;
     }
 
-    Tcl_ListObjGetElements(interp, objv[1], &fobjc, &fobjv);
+    if (3 == objc) {
+	mbx = 1;
+	def = 2;
+    } else {
+	mbx = 0;
+	def = 1;
+    }
+    Tcl_ListObjGetElements(interp, objv[def], &fobjc, &fobjv);
     if (fobjc < 4) {
-	Tcl_AppendResult(interp, "Argument \"", Tcl_GetString(objv[1]),
+	Tcl_AppendResult(interp, "Argument \"", Tcl_GetString(objv[def]),
 			 "\" is not a valid vfolderdef.",
 			 (char*)NULL);
 	return TCL_ERROR;
@@ -2089,7 +2195,8 @@ RatManageFolder(ClientData op, Tcl_Interp *interp, int objc,
     if (!strcmp(Tcl_GetString(fobjv[1]), "dbase")) {
 	return TCL_OK;
     } else {
-	return RatStdManageFolder(interp, (RatManagementAction)op, objv[1]);
+	return RatStdManageFolder(interp, (RatManagementAction)op, mbx,
+				  objv[def]);
     }
 }
 
@@ -2210,6 +2317,7 @@ RatGetIdentDef(Tcl_Interp *interp, Tcl_Obj *defPtr)
 
     if (!initialized) {
 	Tcl_DStringInit(&ds);
+	initialized = 1;
     } else {
 	Tcl_DStringSetLength(&ds, 0);
     }

@@ -5,7 +5,7 @@
  *	use in wish and similar Tk-based applications.
  *
  *
- * TkRat software and its included text is Copyright 1996-2002 by
+ * TkRat software and its included text is Copyright 1996-2004 by
  * Martin Forssén
  *
  * The full text of the legal notice is contained in the file called
@@ -22,8 +22,8 @@
 /*
  * Version
  */
-#define LIBVERSION	"2.1"
-#define LIBDATE		"20020607"
+#define LIBVERSION	"2.2dev"
+#define LIBDATE		"20020719"
 
 /*
  * Length of status string
@@ -60,18 +60,23 @@ typedef struct RatBgInfo {
 #define DEAD_INTERVAL 200
 
 /*
+ * How often we should touch the file in the tmp directory (in milliseconds)
+ */
+#define TOUCH_INTERVAL (24*60*60*1000)
+
+/*
  * Names of days and months as per rfc822.
  */
 char *dayName[] = {"Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"};
-char *monthName[] = {"jan", "Feb", "Mar", "Apr", "May", "Jun",
+char *monthName[] = {"Jan", "Feb", "Mar", "Apr", "May", "Jun",
 		     "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"};
 
 
 /*
- * If we have the display or not. This is used by forked processes so
- * they do not inadvertly tries to use the display.
+ * This is used by the sender child process to indicate that logging should
+ * be done though its own special function
  */
-static int hasDisplay = 1;
+int is_sender_child = 0;
 
 /*
  * Buffer for delayed output
@@ -79,34 +84,9 @@ static int hasDisplay = 1;
 static char ratDelayBuffer[3];
 
 /*
- * Communication with the child
- */
-static FILE *toSender = NULL;
-static int fromSender;
-static int sendSequence = 0;
-
-static Tcl_FileProc RatHandleSender;
-static int RatCreateSender(Tcl_Interp *interp);
-
-/*
  * KOD-handler (Kiss Of Death)
  */
 static Tcl_AsyncHandler kodhandler;
-
-/*
- * Directory of sent messages
- */
-static char *deferredDir = NULL;
-
-/*
- * List of sent messages
- */
-typedef struct SentMsg {
-    int id;
-    char *handler;
-    struct SentMsg *nextPtr;
-} SentMsg;
-static SentMsg *sentMsg = NULL;
 
 /*
  * Interpreter for timer procedures
@@ -117,29 +97,27 @@ Tcl_Interp *timerInterp;
  * Local functions
  */
 static Tcl_TimerProc RatChildHandler;
+static Tcl_TimerProc RatTmpdirToucher;
 static Tcl_VarTraceProc RatReject;
 static Tcl_AppInitProc RatAppInit;
 static Tcl_VarTraceProc RatOptionWatcher;
 static Tcl_ObjCmdProc RatGetCurrentCmd;
-static Tcl_ObjCmdProc RatBgExec;
-static Tcl_ObjCmdProc RatSend;
-static int RatSendDeferred(Tcl_Interp *interp);
-static Tcl_ObjCmdProc RatGetCTE;
-static Tcl_ObjCmdProc RatCleanup;
-static Tcl_ObjCmdProc RatTildeSubst;
-static Tcl_ObjCmdProc RatTime;
-static Tcl_ObjCmdProc RatLock;
-static Tcl_ObjCmdProc RatIsLocked;
-static Tcl_ObjCmdProc RatType;
-static Tcl_ObjCmdProc RatEncoding;
-static Tcl_ObjCmdProc RatDSE;
-static Tcl_ObjCmdProc RatExpire;
-static Tcl_ObjCmdProc RatLL;
-static Tcl_ObjCmdProc RatGen;
-static Tcl_ObjCmdProc RatWrapCited;
-static Tcl_ObjCmdProc RatDbaseCheck;
+static Tcl_ObjCmdProc RatBgExecCmd;
+static Tcl_ObjCmdProc RatGetCTECmd;
+static Tcl_ObjCmdProc RatCleanupCmd;
+static Tcl_ObjCmdProc RatTildeSubstCmd;
+static Tcl_ObjCmdProc RatTimeCmd;
+static Tcl_ObjCmdProc RatLockCmd;
+static Tcl_ObjCmdProc RatIsLockedCmd;
+static Tcl_ObjCmdProc RatTypeCmd;
+static Tcl_ObjCmdProc RatEncodingCmd;
+static Tcl_ObjCmdProc RatDSECmd;
+static Tcl_ObjCmdProc RatExpireCmd;
+static Tcl_ObjCmdProc RatLLCmd;
+static Tcl_ObjCmdProc RatGenCmd;
+static Tcl_ObjCmdProc RatWrapCitedCmd;
+static Tcl_ObjCmdProc RatDbaseCheckCmd;
 static Tcl_ObjCmdProc RatMangleNumberCmd;
-static Tcl_ObjCmdProc RatFormatDateCmd;
 static void KodHandlerSig(int s);
 static Tcl_AsyncProc KodHandlerAsync;
 static Tcl_IdleProc KodHandlerIdle;
@@ -149,6 +127,10 @@ static Tcl_ExitProc RatExit;
 static Tcl_ObjCmdProc RatEncodeMutf7Cmd;
 static Tcl_ObjCmdProc RatLibSetOnlineModeCmd;
 static Tcl_ObjCmdProc RatTestCmd;
+static Tcl_ObjCmdProc RatNudgeSenderCmd;
+static Tcl_ObjCmdProc RatExtractAddressesCmd;
+static Tcl_ObjCmdProc RatGenerateDateCmd;
+static Tcl_ObjCmdProc RatGenerateMsgIdCmd;
 
 #ifdef MEM_DEBUG
 static char **mem_months = NULL;
@@ -188,15 +170,17 @@ int Ratatosk_SafeInit(Tcl_Interp *interp)
 static int
 RatAppInit(Tcl_Interp *interp)
 {
-    struct passwd *pwPtr;
+    struct passwd *pwPtr = NULL;
     double tcl_version;
     Tcl_Obj *oPtr;
     char *c, tmp[1024];
     CONST84 char *v;
     int i;
 
+    setlocale(LC_TIME, "");
     setlocale(LC_CTYPE, "");
     setlocale(LC_COLLATE, "");
+    timerInterp = interp;
 
     /*
      * Check tcl version
@@ -204,9 +188,9 @@ RatAppInit(Tcl_Interp *interp)
      */
     oPtr = Tcl_GetVar2Ex(interp, "tcl_version", NULL, TCL_GLOBAL_ONLY);
     if (TCL_OK == Tcl_GetDoubleFromObj(interp, oPtr, &tcl_version)
-	&& tcl_version < 8.1) {
+	&& tcl_version < 8.3) {
 	fprintf(stderr,
-		"TkRat requires tcl/tk 8.1 or later (detected %4.1f)\n",
+		"TkRat requires tcl/tk 8.3 or later (detected %4.1f)\n",
 		tcl_version);
 	exit(1);
     }
@@ -223,7 +207,7 @@ RatAppInit(Tcl_Interp *interp)
 	    break;
 	}
 	if (EEXIST != errno) {
-	    fprintf(stderr, "Faield to create tmp-directory '%s': %s\n", tmp,
+	    fprintf(stderr, "Failed to create tmp-directory '%s': %s\n", tmp,
 		    strerror(errno));
 	    exit(1);
 	}
@@ -233,7 +217,8 @@ RatAppInit(Tcl_Interp *interp)
     }
     Tcl_SetVar(interp, "rat_tmp", tmp, TCL_GLOBAL_ONLY);
     RatReleaseWatchdog(tmp);
-    
+    Tcl_CreateTimerHandler(TOUCH_INTERVAL, RatTmpdirToucher, NULL);
+
     /*
      * Initialize some variables
      */
@@ -244,7 +229,6 @@ RatAppInit(Tcl_Interp *interp)
 	    TCL_GLOBAL_ONLY);
     Tcl_TraceVar2(interp, "ratCurrent", "charset",
 	    TCL_TRACE_WRITES | TCL_GLOBAL_ONLY, RatSetCharset, NULL);
-    timerInterp = interp;
     Tcl_SetVar2(interp, "rat_lib", "version", LIBVERSION, TCL_GLOBAL_ONLY);
     Tcl_SetVar2(interp, "rat_lib", "date", LIBDATE, TCL_GLOBAL_ONLY);
 #ifdef HAVE_OPENSSL
@@ -268,6 +252,8 @@ RatAppInit(Tcl_Interp *interp)
     if (oPtr && TCL_OK == Tcl_GetIntFromObj(interp, oPtr, &i) && i != 0) {
 	tcp_parameters(SET_SSHTIMEOUT, (void*)i);
     }
+    i = 1;
+    mail_parameters(NIL, SET_USERHASNOLIFE, (void*)i);
 
     /*
      * Initialize async handlers and setup signal handler
@@ -286,11 +272,15 @@ RatAppInit(Tcl_Interp *interp)
      * If not then we initialize them.
      */
     if (!Tcl_GetVar2(interp, "env", "USER", TCL_GLOBAL_ONLY)) {
-	pwPtr = getpwuid(getuid());
+	if (pwPtr == NULL) {
+	    pwPtr = getpwuid(getuid());
+	}
 	Tcl_SetVar2(interp, "env", "USER", pwPtr->pw_name, TCL_GLOBAL_ONLY);
     }
     if (!Tcl_GetVar2(interp, "env", "GECOS", TCL_GLOBAL_ONLY)) {
-	pwPtr = getpwuid(getuid());
+	if (pwPtr == NULL) {
+	    pwPtr = getpwuid(getuid());
+	}
 	strlcpy(tmp, pwPtr->pw_gecos, sizeof(tmp));
 	if ((c = strchr(tmp, ','))) {
 	    *c = '\0';
@@ -298,13 +288,17 @@ RatAppInit(Tcl_Interp *interp)
 	Tcl_SetVar2(interp, "env", "GECOS", tmp, TCL_GLOBAL_ONLY);
     }
     if (!Tcl_GetVar2(interp, "env", "HOME", TCL_GLOBAL_ONLY)) {
-	pwPtr = getpwuid(getuid());
+	if (pwPtr == NULL) {
+	    pwPtr = getpwuid(getuid());
+	}
 	Tcl_SetVar2(interp, "env", "HOME", pwPtr->pw_dir, TCL_GLOBAL_ONLY);
     }
     if (!Tcl_GetVar2(interp, "env", "MAIL", TCL_GLOBAL_ONLY)) {
 	char buf[1024];
 
-	pwPtr = getpwuid(getuid());
+	if (pwPtr == NULL) {
+	    pwPtr = getpwuid(getuid());
+	}
 	snprintf(buf, sizeof(buf), "/var/spool/mail/%s", pwPtr->pw_name);
 	Tcl_SetVar2(interp, "env", "MAIL", buf, TCL_GLOBAL_ONLY);
     }
@@ -322,65 +316,67 @@ RatAppInit(Tcl_Interp *interp)
     if (RatFolderInit(interp) == TCL_ERROR) {
 	return TCL_ERROR;
     }
-    if (RatDSNInit(interp) == TCL_ERROR) {
-	return TCL_ERROR;
-    }
 
-    Tcl_InitHashTable(&aliasTable, TCL_STRING_KEYS);
-
+    RatInitAddressHandling(interp);
+    
     /*
      * Call Tcl_CreateObjCommand for application-specific commands, if
      * they weren't already created by the init procedures called above.
      */
     Tcl_CreateObjCommand(interp, "RatGetCurrent", RatGetCurrentCmd, NULL,NULL);
-    Tcl_CreateObjCommand(interp, "RatBgExec", RatBgExec, NULL, NULL);
-    Tcl_CreateObjCommand(interp, "RatGenId", RatGenId, NULL, NULL);
-    Tcl_CreateObjCommand(interp, "RatSend", RatSend, NULL, NULL);
-    Tcl_CreateObjCommand(interp, "RatGetCTE", RatGetCTE, NULL, NULL);
-    Tcl_CreateObjCommand(interp, "RatCleanup", RatCleanup, NULL, NULL);
-    Tcl_CreateObjCommand(interp, "RatTildeSubst", RatTildeSubst, NULL, NULL);
-    Tcl_CreateObjCommand(interp, "RatTime", RatTime, NULL, NULL);
-    Tcl_CreateObjCommand(interp, "RatLock", RatLock, NULL, NULL);
-    Tcl_CreateObjCommand(interp, "RatIsLocked", RatIsLocked, NULL, NULL);
-    Tcl_CreateObjCommand(interp, "RatHold", RatHold, NULL, NULL);
-    Tcl_CreateObjCommand(interp, "RatAlias", RatAliasCmd, NULL, NULL);
-    Tcl_CreateObjCommand(interp, "RatType2", RatType, NULL, NULL);
-    Tcl_CreateObjCommand(interp, "RatDaysSinceExpire", RatDSE, NULL, NULL);
-    Tcl_CreateObjCommand(interp, "RatExpire", RatExpire, NULL, NULL);
-    Tcl_CreateObjCommand(interp, "RatSMTPSupportDSN", RatSMTPSupportDSN,
-			 NULL, NULL);
-    Tcl_CreateObjCommand(interp, "RatLL", RatLL, NULL, NULL);
-    Tcl_CreateObjCommand(interp, "RatGen", RatGen, NULL, NULL);
-    Tcl_CreateObjCommand(interp, "RatWrapCited", RatWrapCited, NULL, NULL);
-    Tcl_CreateObjCommand(interp, "RatDbaseCheck", RatDbaseCheck, NULL, NULL);
-    Tcl_CreateObjCommand(interp, "RatSplitAdr", RatSplitAddresses, NULL, NULL);
-    Tcl_CreateObjCommand(interp, "RatMailcapReload", RatMailcapReload,
+    Tcl_CreateObjCommand(interp, "RatBgExec", RatBgExecCmd, NULL, NULL);
+    Tcl_CreateObjCommand(interp, "RatGenId", RatGenIdCmd, NULL, NULL);
+    Tcl_CreateObjCommand(interp, "RatGetCTE", RatGetCTECmd, NULL, NULL);
+    Tcl_CreateObjCommand(interp, "RatCleanup", RatCleanupCmd, NULL, NULL);
+    Tcl_CreateObjCommand(interp, "RatTildeSubst", RatTildeSubstCmd, NULL,NULL);
+    Tcl_CreateObjCommand(interp, "RatTime", RatTimeCmd, NULL, NULL);
+    Tcl_CreateObjCommand(interp, "RatLock", RatLockCmd, NULL, NULL);
+    Tcl_CreateObjCommand(interp, "RatIsLocked", RatIsLockedCmd, NULL, NULL);
+    Tcl_CreateObjCommand(interp, "RatType2", RatTypeCmd, NULL, NULL);
+    Tcl_CreateObjCommand(interp, "RatDaysSinceExpire", RatDSECmd, NULL, NULL);
+    Tcl_CreateObjCommand(interp, "RatExpire", RatExpireCmd, NULL, NULL);
+    Tcl_CreateObjCommand(interp, "RatLL", RatLLCmd, NULL, NULL);
+    Tcl_CreateObjCommand(interp, "RatGen", RatGenCmd, NULL, NULL);
+    Tcl_CreateObjCommand(interp, "RatWrapCited", RatWrapCitedCmd, NULL, NULL);
+    Tcl_CreateObjCommand(interp, "RatDbaseCheck", RatDbaseCheckCmd, NULL,NULL);
+    Tcl_CreateObjCommand(interp, "RatMailcapReload", RatMailcapReloadCmd,
 			 NULL, NULL);
     Tcl_CreateObjCommand(interp, "RatPGP", RatPGPCmd, NULL, NULL);
     Tcl_CreateObjCommand(interp, "RatMangleNumber", RatMangleNumberCmd,
 			 NULL, NULL);
-    Tcl_CreateObjCommand(interp, "RatFormatDate", RatFormatDateCmd,
-			 NULL, NULL);
     Tcl_CreateObjCommand(interp, "RatCheckEncodings", RatCheckEncodingsCmd,
-			 NULL, NULL);
-    Tcl_CreateObjCommand(interp, "RatCreateAddress", RatCreateAddressCmd,
 			 NULL, NULL);
     Tcl_CreateObjCommand(interp, "RatPurgePwChache", RatPasswdCachePurgeCmd,
 			 NULL, NULL);
-    Tcl_CreateObjCommand(interp, "RatPrettyPrintMsg", RatPrettyPrintMsg,
+    Tcl_CreateObjCommand(interp, "RatPrettyPrintMsg", RatPrettyPrintMsgCmd,
 			 NULL, NULL);
     Tcl_CreateObjCommand(interp, "RatEncodeMutf7", RatEncodeMutf7Cmd,
 			 NULL, NULL);
     Tcl_CreateObjCommand(interp, "RatLibSetOnlineMode", RatLibSetOnlineModeCmd,
 			 NULL, NULL);
-    Tcl_CreateObjCommand(interp, "RatEncoding", RatEncoding,
+    Tcl_CreateObjCommand(interp, "RatEncoding", RatEncodingCmd,
 			 NULL, NULL);
     Tcl_CreateObjCommand(interp, "RatBusy", RatBusyCmd, NULL, NULL);
-    Tcl_CreateObjCommand(interp, "RatGenerateAddresses",
-			 RatGenerateAddressesCmd, NULL, NULL);
     Tcl_CreateObjCommand(interp, "RatTest", RatTestCmd, NULL, NULL);
     Tcl_CreateObjCommand(interp, "RatEncodeQP", RatEncodeQPCmd, NULL, NULL);
     Tcl_CreateObjCommand(interp, "RatDecodeQP", RatDecodeQPCmd, NULL, NULL);
+    Tcl_CreateObjCommand(interp, "RatCreateMessage", RatCreateMessageCmd,
+			 NULL, NULL);
+    Tcl_CreateObjCommand(interp, "RatNudgeSender",RatNudgeSenderCmd,NULL,NULL);
+    Tcl_CreateObjCommand(interp, "RatExtractAddresses", RatExtractAddressesCmd,
+			 NULL, NULL);
+    Tcl_CreateObjCommand(interp, "RatGenerateDate", RatGenerateDateCmd,
+			 NULL, NULL);
+    Tcl_CreateObjCommand(interp, "RatDbaseInfo", RatDbaseInfoCmd, NULL,NULL);
+    Tcl_CreateObjCommand(interp, "RatGetMatchingAddrsImpl",
+                         RatGetMatchingAddrsImplCmd, NULL,NULL);
+    Tcl_CreateObjCommand(interp, "RatGenerateMsgId", RatGenerateMsgIdCmd,
+			 NULL, NULL);
+    Tcl_CreateObjCommand(interp, "RatCreateSequence", RatCreateSequenceCmd,
+			 NULL, NULL);
+    Tcl_CreateObjCommand(interp, "RatCheckListFormat", RatCheckListFormatCmd,
+			 NULL, NULL);
+
     Tcl_CreateExitHandler(RatExit, NULL);
 
     return TCL_OK;
@@ -395,7 +391,7 @@ RatAppInit(Tcl_Interp *interp)
  *	Get current host, domain, mailbox and personal values.
  *	These values depends on the current role.
  *	The algorithm for building host is:
- *	  if option($role,from) is set and contains a domian then
+ *	  if option($role,from) is set and contains a domain then
  *	     use that domain
  *	  else
  *	      if gethostname() returns a name with a dot in it then
@@ -419,11 +415,10 @@ RatAppInit(Tcl_Interp *interp)
 char*
 RatGetCurrent(Tcl_Interp *interp, RatCurrentType what, const char *role)
 {
-    struct passwd *passwdPtr;
     ADDRESS *address = NULL;
     static char buf[1024];
-    char *result = NULL, *personal, hostbuf[1024], *c;
-    CONST84 char *host, *from, *uqdom, *helo;
+    char *result = NULL, *personal, hostbuf[1024];
+    CONST84 char *host, *from, *uqdom, *helo, *mailbox;
     Tcl_Obj *oPtr;
 
     host = Tcl_GetHostName();
@@ -445,7 +440,6 @@ RatGetCurrent(Tcl_Interp *interp, RatCurrentType what, const char *role)
 	rfc822_parse_adrlist(&address, s, (char*)host);
 	ckfree(s);
     }
-    passwdPtr = getpwuid(getuid());
 
     switch (what) {
     case RAT_HOST:
@@ -465,27 +459,45 @@ RatGetCurrent(Tcl_Interp *interp, RatCurrentType what, const char *role)
     case RAT_MAILBOX:
 	if (address && address->mailbox) {
 	    strlcpy(buf, address->mailbox, sizeof(buf));
-	    result = buf;
 	} else {
-	    result = passwdPtr->pw_name;
+	    strlcpy(buf, Tcl_GetVar2(interp, "env", "USER", TCL_GLOBAL_ONLY),
+		    sizeof(buf));
 	}
+	result = buf;
 	break;
-	
+
+     case RAT_EMAILADDRESS:
+        if (address && address->host) {
+            host = address->host;
+        } else {
+            snprintf(buf, sizeof(buf), "%s,uqa_domain", role);
+            uqdom = Tcl_GetVar2(interp, "option", buf, TCL_GLOBAL_ONLY);
+            if (uqdom && 0 < strlen(uqdom)) {
+                host = uqdom;
+            } /* else use previous host value */
+        }
+        if (address && address->mailbox) {
+            mailbox = address->mailbox;
+        } else {
+            mailbox = Tcl_GetVar2(interp, "env", "USER", TCL_GLOBAL_ONLY);
+        }
+        snprintf(buf, sizeof(buf), "%s@%s", mailbox, host);
+        result = buf;
+        break;
+
     case RAT_PERSONAL:
-	if (address && address->personal) {
-	    strlcpy(buf, address->personal, sizeof(buf));
-	} else {
-	    strlcpy(buf, passwdPtr->pw_gecos, sizeof(buf));
-	    if ((c = strchr(buf, ','))) {
-		*c = '\0';
-	    }
-	}
-	oPtr = Tcl_NewStringObj(buf, -1);
+        if (address && address->personal) {
+            oPtr = Tcl_NewStringObj(address->personal, -1);
+        } else {
+            oPtr = Tcl_GetVar2Ex(interp, "env", "GECOS", TCL_GLOBAL_ONLY),
+            Tcl_IncrRefCount(oPtr);
+        }
 	personal = RatEncodeHeaderLine(interp, oPtr, 0);
 	Tcl_DecrRefCount(oPtr);
 	strlcpy(buf, personal, sizeof(buf));
 	result = buf;
 	break;
+	
     case RAT_HELO:
 	snprintf(buf, sizeof(buf), "%s,smtp_helo", role);
 	helo = Tcl_GetVar2(interp, "option", buf, TCL_GLOBAL_ONLY);
@@ -576,6 +588,8 @@ void
 RatLog(Tcl_Interp *interp, RatLogLevel level, CONST84 char *message,
        RatLogType type)
 {
+    static char *buf = NULL;
+    static int bufsize = 0;
     CONST84 char *argv = message;
     char *parsedMsg;
     char *typeStr;
@@ -598,18 +612,18 @@ RatLog(Tcl_Interp *interp, RatLogLevel level, CONST84 char *message,
     }
 
     parsedMsg = Tcl_Merge(1, (CONST84 char * CONST84 *)&argv);
-    if (hasDisplay) {
-        char *buf = (char*) ckalloc(16 + strlen(parsedMsg) + 9);
-        sprintf(buf, "RatLog %d %s %s", levelNumber, parsedMsg, typeStr);
+    if (bufsize < 16 + strlen(parsedMsg) + 9) {
+	bufsize = 1024 + strlen(parsedMsg);
+	buf = (char*)ckrealloc(buf, bufsize);
+    }
+    snprintf(buf, bufsize, "RatLog %d %s %s", levelNumber, parsedMsg, typeStr);
+    if (is_sender_child) {
+	RatSenderLog(buf);
+    } else {
         if (TCL_OK != Tcl_GlobalEval(interp, buf)) {
 	    Tcl_AppendResult(interp, "Error: '", Tcl_GetStringResult(interp),
 		    "'\nWhile executing '", buf, "'\n", NULL);
         }
-        ckfree(buf); 
-    } else {
-        fprintf(stdout, "STATUS %d %s %d", levelNumber, parsedMsg, type);
-        fputc('\0', stdout);
-        fflush(stdout);
     }
     ckfree(parsedMsg);
 }
@@ -699,7 +713,7 @@ RatMangleNumber(int number)
 /*
  *----------------------------------------------------------------------
  *
- * RatMangleNumberCmd --
+ * RatMangleNumberCmdCmd --
  *
  *	See ../doc/interface for a descriptions of arguments and result.
  *
@@ -732,7 +746,7 @@ RatMangleNumberCmd(ClientData dummy, Tcl_Interp *interp, int objc,
 /*
  *----------------------------------------------------------------------
  *
- * RatBgExec --
+ * RatBgExecCmd --
  *
  *	See ../doc/interface
  *
@@ -749,7 +763,8 @@ RatMangleNumberCmd(ClientData dummy, Tcl_Interp *interp, int objc,
  */
 
 static int
-RatBgExec(ClientData dummy, Tcl_Interp *interp, int objc,Tcl_Obj *CONST objv[])
+RatBgExecCmd(ClientData dummy, Tcl_Interp *interp, int objc,
+	     Tcl_Obj *CONST objv[])
 {
     static RatBgInfo *ratBgList = NULL;
     RatBgInfo *bgInfoPtr;
@@ -858,7 +873,77 @@ RatChildHandler(ClientData clientData)
 /*
  *----------------------------------------------------------------------
  *
- * RatGenId --
+ * RatTmpdirToucher --
+ *
+ *	This timer touches a file in the tmp-directory. This should
+ *      prevent the directory to be removed by and tmp-removal programs.
+ *
+ * Results:
+ *      None.
+ *
+ * Side effects:
+ *      None.
+ *
+ *
+ *----------------------------------------------------------------------
+ */
+
+void
+RatTmpdirToucher(ClientData clientData)
+{
+    char buf[1024];
+    const char *tmp = Tcl_GetVar(timerInterp, "rat_tmp", TCL_GLOBAL_ONLY);
+    int fd;
+
+    snprintf(buf, sizeof(buf), "%s/mark", tmp);
+    if (0 <= (fd = open(buf, O_RDWR|O_TRUNC|O_CREAT, 0644))) {
+	write(fd, "mark", 4);
+	lseek(fd, 0, SEEK_SET);
+	read(fd, buf, 4);
+	close(fd);
+    }
+    
+    Tcl_CreateTimerHandler(TOUCH_INTERVAL, RatTmpdirToucher, NULL);
+}
+
+/*
+ *----------------------------------------------------------------------
+ *
+ * RatGenIdCmd --
+ *
+ *	See ../doc/interface
+ *
+ * Results:
+ *      The return value is normally TCL_OK and the result can be found
+ *      in the result. If something goes wrong TCL_ERROR is returned
+ *      and an error message will be left in the result area.
+ *
+ * Side effects:
+ *      None.
+ *
+ *
+ *----------------------------------------------------------------------
+ */
+
+char*
+RatGenId()
+{
+    static long lastid = 0;
+    static char buf[64];
+
+    long t = time(NULL);
+    if (t <= lastid)
+        lastid++;
+    else
+        lastid = t;
+    snprintf(buf, sizeof(buf), "%lx.%x", lastid, (int)getpid());
+    return buf;
+}
+
+/*
+ *----------------------------------------------------------------------
+ *
+ * RatGenIdCmd --
  *
  *	See ../doc/interface
  *
@@ -875,537 +960,17 @@ RatChildHandler(ClientData clientData)
  */
 
 int
-RatGenId(ClientData dummy, Tcl_Interp *interp, int objc, Tcl_Obj *const objv[])
+RatGenIdCmd(ClientData dummy, Tcl_Interp *interp, int objc,
+	    Tcl_Obj *const objv[])
 {
-    static long lastid = 0;
-    char buf[64];
-
-    long t = time(NULL);
-    if (t <= lastid)
-        lastid++;
-    else
-        lastid = t;
-    sprintf(buf, "%lx.%x", lastid, (int)getpid());
-    Tcl_SetResult(interp, buf, TCL_VOLATILE);
+    Tcl_SetResult(interp, RatGenId(), TCL_VOLATILE);
     return TCL_OK;
 }
 
 /*
  *----------------------------------------------------------------------
  *
- * RatSend --
- *
- *	See ../doc/interface
- *
- *	This checks that we have something that looks like a good message.
- *	The actual sending is done by a subprocess called the sending
- *	process. We communicate with that process via the stdin and stdout
- *	channels. The follwing commands can be sent to the sender:
- *	    SEND id prefix 
- *	    QUIT
- *	The sender can send the following commands:
- *	    STATUS level status_text type
- *	    FAILED id prefix text
- *	    SAVE file save_to to from cc msgid ref subject flags date
- *	    SENT id 
- *	    PGP pgp_specific_data
- *	The server will respond to all PGP commands
- *
- * Results:
- *      The return value is normally TCL_OK and the result can be found
- *      in the result area. If something goes wrong TCL_ERROR is returned
- *      and an error message will be left in the result area.
- *
- * Side effects:
- *      A message is sent.
- *
- *
- *----------------------------------------------------------------------
- */
-
-static int
-RatSend(ClientData dummy, Tcl_Interp *interp, int objc, Tcl_Obj *CONST objv[])
-{
-    char *handler = NULL;
-    CONST84 char *tmp, *v;
-    SentMsg **smPtrPtr;
-    Tcl_Obj *oPtr;
-    int online;
-
-    if (objc != 2 && objc != 3) {
-	Tcl_AppendResult(interp, "wrong # args: should be \"",
-		Tcl_GetString(objv[0]), " action ?handler?\"", (char *) NULL);
-	return TCL_ERROR;
-    }
-
-    if (NULL == deferredDir) {
-	if (NULL == (v = RatGetPathOption(interp, "send_cache"))) {
-	    return TCL_ERROR;
-	}
-	deferredDir = cpystr(v);
-    }
-
-    if (!strcmp("kill", Tcl_GetString(objv[1]))) {
-	if (toSender) {
-	    fprintf(toSender, "QUIT\n");
-	    fflush(toSender);
-	}
-    } else if (!strcmp("init", Tcl_GetString(objv[1]))) {
-	RatHoldInitVars(interp);
-    } else if (!strcmp("sendDeferred", Tcl_GetString(objv[1]))) {
-	return RatSendDeferred(interp);
-    } else if (objc == 3) {
-	/*
-	 * The algorithm here is:
-	 *  - First we make sure that we got something that at least looks
-	 *	  like a letter.
-	 *	- Insert the message into the send cache.
-	 *	- If we do not have a child process then we create one.
-	 *	- Make the child process send the message.
-	 *  - Return.
-	 */
-	if (((NULL == (tmp = Tcl_GetVar2(interp, Tcl_GetString(objv[2]),
-					"to", TCL_GLOBAL_ONLY)))
-	     || RatIsEmpty(tmp))
-	    && ((NULL == (tmp = Tcl_GetVar2(interp, Tcl_GetString(objv[2]),
-					   "cc", TCL_GLOBAL_ONLY)))
-		|| RatIsEmpty(tmp))
-	    && ((NULL == (tmp = Tcl_GetVar2(interp, Tcl_GetString(objv[2]),
-					   "bcc", TCL_GLOBAL_ONLY)))
-		|| RatIsEmpty(tmp))) {
-	    Tcl_SetResult(interp, "RatSend needs at least one recipient",
-			  TCL_STATIC);
-	    goto error;
-	}
-
-	if (TCL_OK != RatHoldInsert(interp, deferredDir,
-				    Tcl_GetString(objv[2]), "")) {
-	    goto error;
-	}
-	handler = cpystr(Tcl_GetStringResult(interp));
-
-	oPtr = Tcl_GetVar2Ex(interp, "option", "online", TCL_GLOBAL_ONLY);
-	Tcl_GetIntFromObj(interp, oPtr, &online);
-
-	if (online) {
-	    if (TCL_OK != RatCreateSender(interp)) {
-		ckfree(handler);
-		goto error;
-	    }
-	    Tcl_SetVar(interp, "ratSenderSending", "1", TCL_GLOBAL_ONLY);
-	    for (smPtrPtr=&sentMsg;*smPtrPtr;smPtrPtr = &(*smPtrPtr)->nextPtr);
-	    *smPtrPtr = (SentMsg*)ckalloc(sizeof(SentMsg)+strlen(handler)+1);
-	    (*smPtrPtr)->id = sendSequence;
-	    (*smPtrPtr)->handler = (char*)*smPtrPtr+sizeof(SentMsg);
-	    strcpy((*smPtrPtr)->handler, handler);
-	    (*smPtrPtr)->nextPtr = NULL;
-	    fprintf(toSender, "SEND {%d %s}\n", sendSequence++, handler);
-	    fprintf(toSender, "RSET\n");
-	    fflush(toSender);
-	}
-	ckfree(handler);
-    }
-
-    return TCL_OK;
-
-error:
-    return TCL_ERROR;
-}
-
-/*
- *----------------------------------------------------------------------
- *
- * RatSendDeferred --
- *
- *	Send all defered messages
- *
- * Results:
- *	A standard TCL result
- *
- * Side effects:
- *      A new process may be created.
- *
- *
- *----------------------------------------------------------------------
- */
-
-static int
-RatSendDeferred(Tcl_Interp *interp)
-{
-    Tcl_DString cmd;
-    char buf[1024], *entity;
-    int listArgc, i, sent;
-    SentMsg **smPtrPtr;
-    Tcl_Obj *oPtr, *fileListPtr, **listArgv;
-    int online;
-
-    if (NULL == deferredDir) {
-	CONST84 char *v;
-	
-	if (NULL == (v = RatGetPathOption(interp, "send_cache"))) {
-	    return TCL_ERROR;
-	}
-	deferredDir = cpystr(v);
-    }
-
-    oPtr = Tcl_GetVar2Ex(interp, "option", "online", TCL_GLOBAL_ONLY);
-    Tcl_GetIntFromObj(interp, oPtr, &online);
-
-    fileListPtr = Tcl_NewObj();
-    if (TCL_OK != RatHoldList(interp, deferredDir, fileListPtr)
-	|| TCL_OK != Tcl_ListObjGetElements(interp, fileListPtr,
-					    &listArgc, &listArgv)) {
-	goto error;
-    }
-    if (0 == listArgc) {
-	goto done;
-    }
-
-    if (TCL_OK != RatCreateSender(interp)) {
-	goto error;
-    }
-    Tcl_SetVar(interp, "ratSenderSending", "1", TCL_GLOBAL_ONLY);
-    Tcl_DStringInit(&cmd);
-    Tcl_DStringAppendElement(&cmd, "SEND");
-    for (i=0, sent=0; i<listArgc; i++) {
-	entity = Tcl_GetString(listArgv[i]);
-	for (smPtrPtr=&sentMsg;
-	     *smPtrPtr && strcmp((*smPtrPtr)->handler, entity);
-	     smPtrPtr = &(*smPtrPtr)->nextPtr);
-	if (NULL != *smPtrPtr) continue;
-	*smPtrPtr =
-	    (SentMsg*)ckalloc(sizeof(SentMsg)+strlen(entity)+1);
-	(*smPtrPtr)->id = sendSequence;
-	(*smPtrPtr)->handler = (char*)*smPtrPtr+sizeof(SentMsg);
-	strcpy((*smPtrPtr)->handler, entity);
-	(*smPtrPtr)->nextPtr = NULL;
-	Tcl_DStringStartSublist(&cmd);
-	sprintf(buf, "%d", sendSequence++);
-	Tcl_DStringAppendElement(&cmd, buf);
-	snprintf(buf, sizeof(buf), "%s/%s", deferredDir, entity);
-	Tcl_DStringAppendElement(&cmd, buf);
-	Tcl_DStringEndSublist(&cmd);
-	sent++;
-    }
-    fprintf(toSender, "%s\n", Tcl_DStringValue(&cmd));
-    fprintf(toSender, "RSET\n");
-    fflush(toSender);
-    Tcl_DStringFree(&cmd);
-    sprintf(buf, "%d", sent);
-    Tcl_SetResult(interp, buf, TCL_VOLATILE);
-
- done:
-    Tcl_DecrRefCount(fileListPtr);
-    return TCL_OK;
-
- error:
-    Tcl_DecrRefCount(fileListPtr);
-    return TCL_ERROR;
-}
-
-/*
- *----------------------------------------------------------------------
- *
- * RatCreateSender --
- *
- *	Create the sender subprocess (if not already running).
- *
- * Results:
- *	A standard tcl result.
- *
- * Side effects:
- *      A new process may be created.
- *
- *
- *----------------------------------------------------------------------
- */
-
-static int
-RatCreateSender(Tcl_Interp *interp)
-{
-    int toPipe[2], fromPipe[2], senderPid, i;
-    struct rlimit rlim;
-    Tcl_Pid tp[1];
-
-    if (toSender) {
-	return TCL_OK;
-    }
-
-    Tcl_ReapDetachedProcs();
-    /*
-     * Create the sender subprocess and create a handler on the from pipe.
-     */
-    pipe(toPipe);
-    pipe(fromPipe);
-    if (0 == (senderPid = fork())) {
-	getrlimit(RLIMIT_NOFILE, &rlim);	
-	for (i=0; i<rlim.rlim_cur; i++) {
-	    if (i != toPipe[0] && i != fromPipe[1] && 2 != i) {
-		close(i);
-	    }
-	}
-	dup2(toPipe[0], 0);
-	dup2(fromPipe[1], 1);
-	fcntl(0, F_SETFD, 0);
-	fcntl(1, F_SETFD, 0);
-	hasDisplay = 0;
-	RatSender(interp);
-	/* notreached */
-    }
-    if (-1 == senderPid) {
-	Tcl_SetResult(interp, "Failed to fork sender process", TCL_STATIC);
-	return TCL_ERROR;
-    }
-    close(toPipe[0]);
-    close(fromPipe[1]);
-    toSender = fdopen(toPipe[1], "w");
-    fromSender = fromPipe[0];
-    Tcl_CreateFileHandler(fromSender, TCL_READABLE, RatHandleSender,
-	    (ClientData)interp);
-    tp[0] = (Tcl_Pid)senderPid;
-    Tcl_DetachPids(1, tp);
-    return TCL_OK;
-}
-
-/*
- *----------------------------------------------------------------------
- *
- * RatHandleSender --
- *
- *	Handle events from the sender process.
- *
- * Results:
- *	None.
- *
- * Side effects:
- *      Whatever the sender dictates.
- *
- *
- *----------------------------------------------------------------------
- */
-
-static void
-RatHandleSender(ClientData clientData, int mask)
-{
-    RatFolderInfo *infoPtr;
-    static Tcl_DString *bufDS = NULL;
-    Tcl_Interp *interp = (Tcl_Interp*)clientData;
-    char buf[1024], *msg, *msgbuf, *tmp, c;
-    CONST84 char **argv, **destArgv;
-    int argc, destArgc, fd, id = 0, flags, hardError = 0;
-    Tcl_DString cmd;
-    struct stat sbuf;
-    SentMsg *smPtr, **smPtrPtr;
-
-    if (!bufDS) {
-	bufDS = (Tcl_DString*)ckalloc(sizeof(Tcl_DString));
-	Tcl_DStringInit(bufDS);
-    } else {
-	Tcl_DStringSetLength(bufDS, 0);
-    }
-    do {
-	if (1 != read(fromSender, &c, 1)) {
-	    Tcl_SetVar(interp, "ratSenderSending", "0", TCL_GLOBAL_ONLY);
-	    Tcl_DeleteFileHandler(fromSender);
-	    fclose(toSender);
-	    toSender = NULL;
-	    while (sentMsg) {
-		smPtr = sentMsg->nextPtr;
-		ckfree(sentMsg);
-		sentMsg = smPtr;
-	    }
-	    return;
-	}
-	if (c) {
-	    Tcl_DStringAppend(bufDS, &c, 1);
-	}
-    } while (c != '\0');
-
-    Tcl_SplitList(interp, Tcl_DStringValue(bufDS), &argc, &argv);
-
-    if (!strcmp(argv[0], "STATUS")) {
-	RatLog(interp, atoi(argv[1]), argv[2], atoi(argv[3]));
-
-    } else if (!strcmp(argv[0], "FAILED")) {
-	RatLog(interp, RAT_ERROR, argv[3], RATLOG_TIME);
-	hardError = atoi(argv[4]);
-	if (!hardError) {
-	    if (TCL_OK != RatHoldExtract(interp, argv[2], NULL, NULL)) {
-		return;
-	    }
-	    if (TCL_OK != Tcl_VarEval(interp, "ComposeExtracted ",
-		    Tcl_GetStringResult(interp), NULL)) {
-		RatLog(interp, RAT_ERROR, Tcl_GetStringResult(interp),
-			RATLOG_TIME);
-	    }
-	}
-	id = atoi(argv[1]);
-
-    } else if (!strcmp(argv[0], "SAVE")) {
-	Tcl_Obj *defPtr;
-	int i;
-
-	Tcl_SplitList(interp, argv[2], &destArgc, &destArgv);
-	defPtr = Tcl_NewObj();
-	for (i=0; i<destArgc; i++) {
-	    Tcl_ListObjAppendElement(interp, defPtr,
-				     Tcl_NewStringObj(destArgv[i], -1));
-	}
-	(void)stat(argv[1], &sbuf);
-	msgbuf = (char*)ckalloc(sbuf.st_size+STATUS_LENGTH);
-	msg = msgbuf + STATUS_LENGTH;
-	fd = open(argv[1], O_RDONLY);
-	read(fd, msg, sbuf.st_size);
-	close(fd);
-        infoPtr = RatGetOpenFolder(interp, defPtr);
-	if (infoPtr) {
-	    msg -= STATUS_LENGTH;
-	    memcpy(msg, STATUS_STRING, STATUS_LENGTH);
-	    tmp = RatFrMessageCreate(interp, msg, sbuf.st_size+STATUS_LENGTH,
-		    NULL);
-	    RatFolderInsert(interp, infoPtr, 1, &tmp);
-	    Tcl_DeleteCommand(interp, tmp);
-	    RatFolderClose(interp, infoPtr, 0);
-
-	} else if (!strcmp(destArgv[1], "file")) {
-	    Tcl_Channel channel;
-	    int perm;
-	    struct tm *tmPtr;
-	    time_t now;
-	    Tcl_Obj *oPtr;
-
-	    if (5 == destArgc) {
-		Tcl_GetInt(interp, destArgv[4], &perm);
-	    } else {
-		oPtr = Tcl_GetVar2Ex(interp, "option", "permissions",
-				     TCL_GLOBAL_ONLY);
-		Tcl_GetIntFromObj(interp, oPtr, &perm);
-	    }
-	    channel = Tcl_OpenFileChannel(interp,destArgv[3],"a", perm);
-	    if (NULL != channel) {
-		now = time(NULL);
-		tmPtr = gmtime(&now);
-		strlcpy(buf, "From ", sizeof(buf));
-		strlcat(buf, RatGetCurrent(interp,RAT_MAILBOX,""),sizeof(buf));
-		snprintf(buf+strlen(buf), sizeof(buf)-strlen(buf),
-			"@%s %s %s %2d %02d:%02d GMT %04d\n",
-			 RatGetCurrent(interp, RAT_HOST, ""),
-			 dayName[tmPtr->tm_wday], monthName[tmPtr->tm_mon],
-			 tmPtr->tm_mday, tmPtr->tm_hour, tmPtr->tm_min,
-			 tmPtr->tm_year+1900);
-		strlcat(buf, "Status: RO\n", sizeof(buf));
-		Tcl_Write(channel, buf, strlen(buf));
-		RatTranslateWrite(channel, msg, sbuf.st_size);
-		Tcl_Close(interp, channel);
-	    } else {
-		RatLogF(interp, RAT_ERROR, "outgoing_save_failed", RATLOG_TIME,
-			Tcl_PosixError(interp));
-	    }
-	} else if (!strcmp(destArgv[1], "dis")) {
-	    MAILSTREAM *stream;
-	    STRING string;
-
-	    stream = RatDisFolderOpenStream(interp, defPtr);
-	    INIT(&string, mail_string, msg, sbuf.st_size);
-	    if (!stream || !mail_append_full(stream, stream->mailbox, "\\Seen",
-					     NIL, &string)) {
-		RatLogF(interp, RAT_ERROR, "outgoing_save_failed", RATLOG_TIME,
-			"");
-	    }
-	    if (stream) {
-		CloseStdFolder(interp, stream);
-	    }
-	
-	} else if (!strcmp(destArgv[1], "dbase")) {
-	    struct tm *tmPtr;
-	    time_t now;
-
-	    now = time(NULL);
-	    tmPtr = gmtime(&now);
-	    strlcpy(buf, "From ", sizeof(buf));
-	    strlcat(buf, RatGetCurrent(interp,RAT_MAILBOX,""),sizeof(buf));
-	    snprintf(buf+strlen(buf), sizeof(buf)-strlen(buf),
-		     "@%s %s %s %2d %02d:%02d GMT %04d\n",
-		     RatGetCurrent(interp, RAT_HOST, ""),
-		     dayName[tmPtr->tm_wday], monthName[tmPtr->tm_mon],
-		     tmPtr->tm_mday, tmPtr->tm_hour, tmPtr->tm_min,
-		     tmPtr->tm_year+1900);
-
-	    if (TCL_OK != RatDbInsert(interp, argv[3], argv[4], argv[5],
-		    argv[6], argv[7], argv[8], time(NULL), "RO", destArgv[5],
-		    atol(destArgv[4]), destArgv[3], buf, msg, sbuf.st_size)) {
-		RatLogF(interp, RAT_ERROR, "outgoing_save_failed", RATLOG_TIME,
-			Tcl_GetStringResult(interp));
-	    }
-	} else if (!strcmp(destArgv[1], "imap")) {
-            char *spec;
-            
-            spec = RatGetFolderSpec(interp, defPtr);
-	    AppendToIMAP(interp, spec, argv[9], argv[10], msg, sbuf.st_size);
-	} else if (!strcmp(destArgv[1], "mh")) {
-	    RatLogF(interp, RAT_ERROR, "save_to_mh", RATLOG_TIME);
-	} else {
-	    RatLog(interp, RAT_ERROR,
-		    "Internal error: illegal save type in RatHandleSender",
-		    RATLOG_TIME);
-	}
-	unlink(argv[1]);
-	ckfree(msgbuf);
-	ckfree(destArgv);
-	Tcl_DecrRefCount(defPtr);
-    } else if (!strcmp(argv[0], "PGP")) {
-	if (!strcmp("getpass", argv[1])) {
-	    tmp = RatPGPPhrase(interp);
-	    if (tmp) {
-		Tcl_ScanElement(tmp, &flags);
-		Tcl_ConvertElement(tmp, buf, flags);
-		fprintf(toSender, "PGP PHRASE %s\n", buf);
-		memset(buf, '\0', strlen(buf));
-		memset(tmp, '\0', strlen(tmp));
-		ckfree(tmp);
-	    } else {
-		fprintf(toSender, "PGP NOPHRASE\n");
-	    }
-	    fflush(toSender);
-	} else if (!strcmp("error", argv[1])) {
-	    ClearPGPPass(NULL);
-	    Tcl_DStringInit(&cmd);
-	    Tcl_DStringAppend(&cmd, "RatPGPError", -1);
-	    Tcl_DStringAppendElement(&cmd, argv[2]);
-	    if (TCL_OK != Tcl_Eval(interp, Tcl_DStringValue(&cmd))) {
-		fprintf(toSender, "PGP ABORT\n");
-	    } else {
-		fprintf(toSender, "PGP %s\n", Tcl_GetStringResult(interp));
-	    }
-	    fflush(toSender);
-	    Tcl_DStringFree(&cmd);
-	}
-    } else if (!strcmp(argv[0], "SENT")) {
-	RatHoldUpdateVars(interp, deferredDir, -1);
-
-	id = atoi(argv[1]);
-    }
-    if (!strcmp(argv[0], "SENT") || !strcmp(argv[0], "FAILED")) {
-	if (id == sendSequence-1 || hardError) {
-	    Tcl_SetVar(interp, "ratSenderSending", "0", TCL_GLOBAL_ONLY);
-	}
-	for (smPtrPtr=&sentMsg; *smPtrPtr; ) {
-	    if ((*smPtrPtr)->id == id || hardError) {
-		smPtr = *smPtrPtr;
-		*smPtrPtr = smPtr->nextPtr;
-		ckfree(smPtr);
-	    } else {
-		smPtrPtr = &(*smPtrPtr)->nextPtr;
-	    }
-	}
-    }
-    ckfree(argv);
-}
-
-/*
- *----------------------------------------------------------------------
- *
- * RatGetCTE --
+ * RatGetCTECmd --
  *
  *	See ../doc/interface
  *
@@ -1422,10 +987,10 @@ RatHandleSender(ClientData clientData, int mask)
  */
 
 static int
-RatGetCTE(ClientData dummy, Tcl_Interp *interp, int objc,Tcl_Obj *CONST objv[])
+RatGetCTECmd(ClientData dummy, Tcl_Interp *interp, int objc,
+	     Tcl_Obj *CONST objv[])
 {
-    Tcl_DString ds;
-    char *fileName;
+    CONST84 char *fileName;
     FILE *fp;
     int seen8bit = 0;
     int seenZero = 0;
@@ -1437,15 +1002,13 @@ RatGetCTE(ClientData dummy, Tcl_Interp *interp, int objc,Tcl_Obj *CONST objv[])
 	return TCL_ERROR;
     }
 
-    fileName = Tcl_UtfToExternalDString(NULL, Tcl_GetString(objv[1]), -1, &ds);
+    fileName = RatTranslateFileName(interp, Tcl_GetString(objv[1]));
     if (NULL == (fp = fopen(fileName, "r"))) {
 	RatLogF(interp, RAT_ERROR, "failed_to_open_file", RATLOG_TIME,
 		Tcl_PosixError(interp));
 	Tcl_SetResult(interp, "binary", TCL_STATIC);
-	Tcl_DStringFree(&ds);
 	return TCL_OK;
     }
-    Tcl_DStringFree(&ds);
 
     while (c = getc(fp), !feof(fp)) {
 	if (0 == c) {
@@ -1485,7 +1048,8 @@ RatGetCTE(ClientData dummy, Tcl_Interp *interp, int objc,Tcl_Obj *CONST objv[])
  */
 
 static int
-RatCleanup(ClientData dummy, Tcl_Interp *interp,int objc,Tcl_Obj *CONST objv[])
+RatCleanupCmd(ClientData dummy, Tcl_Interp *interp,int objc,
+	      Tcl_Obj *CONST objv[])
 {
     RatDbClose();
     return TCL_OK;
@@ -1509,8 +1073,8 @@ RatCleanup(ClientData dummy, Tcl_Interp *interp,int objc,Tcl_Obj *CONST objv[])
  */
 
 static int
-RatTildeSubst(ClientData dummy, Tcl_Interp *interp, int objc,
-	Tcl_Obj *CONST objv[])
+RatTildeSubstCmd(ClientData dummy, Tcl_Interp *interp, int objc,
+		 Tcl_Obj *CONST objv[])
 {
     Tcl_DString buffer;
     char *expandedName;
@@ -1546,7 +1110,8 @@ RatTildeSubst(ClientData dummy, Tcl_Interp *interp, int objc,
  */
 
 static int
-RatTime(ClientData dummy, Tcl_Interp *interp, int objc, Tcl_Obj *CONST objv[])
+RatTimeCmd(ClientData dummy, Tcl_Interp *interp, int objc,
+	   Tcl_Obj *CONST objv[])
 {
     time_t goal;
 
@@ -1594,7 +1159,7 @@ RatSearch(char *searchFor, char *searchIn)
     for (s=d=0; searchFor[s];) {
 	if (d >= bufLength) {
 	    bufLength += 16;
-	    buf = ckrealloc(buf, bufLength);
+	    buf = (unsigned char*)ckrealloc(buf, bufLength);
 	}
 	if (!(0x80 & (unsigned char)searchFor[s]) &&
 		   isupper((unsigned char)searchFor[s])) {
@@ -1610,10 +1175,10 @@ RatSearch(char *searchFor, char *searchIn)
 	for (j=0; buf[j]; j++) {
 	    if (0x80 & buf[j]) {
 		if (!(0x80 & (unsigned char)searchIn[i+j])
-		    || Tcl_UtfNcasecmp(buf+j, searchIn+i+j, 1)) {
+		    || Tcl_UtfNcasecmp((char*)buf+j, searchIn+i+j, 1)) {
 		    break;
 		}
-		j = Tcl_UtfNext(buf+j)-(char*)buf-1;
+		j = Tcl_UtfNext((char*)buf+j)-(char*)buf-1;
 	    } else if (isupper((unsigned char)searchIn[i+j])) {
 		if (buf[j] != tolower((unsigned char)searchIn[i+j])) {
 		    break;
@@ -1647,7 +1212,8 @@ RatSearch(char *searchFor, char *searchIn)
  */
 
 static int
-RatLock(ClientData dummy, Tcl_Interp *interp, int objc, Tcl_Obj *CONST objv[])
+RatLockCmd(ClientData dummy, Tcl_Interp *interp, int objc,
+	   Tcl_Obj *CONST objv[])
 {
     Tcl_Obj *value;
     int i;
@@ -1687,7 +1253,7 @@ RatLock(ClientData dummy, Tcl_Interp *interp, int objc, Tcl_Obj *CONST objv[])
 
 static char*
 RatReject(ClientData clientData, Tcl_Interp *interp, CONST84 char *name1,
-	CONST84 char *name2, int flags)
+	  CONST84 char *name2, int flags)
 {
     Tcl_Obj *correct = (Tcl_Obj*)clientData;
 
@@ -1713,7 +1279,7 @@ RatReject(ClientData clientData, Tcl_Interp *interp, CONST84 char *name1,
 /*
  *----------------------------------------------------------------------
  *
- * RatIsLocked --
+ * RatIsLockedCmd --
  *
  *	See ../doc/interface
  *
@@ -1728,8 +1294,8 @@ RatReject(ClientData clientData, Tcl_Interp *interp, CONST84 char *name1,
  */
 
 static int
-RatIsLocked(ClientData dummy, Tcl_Interp *interp, int objc,
-	Tcl_Obj *CONST objv[])
+RatIsLockedCmd(ClientData dummy, Tcl_Interp *interp, int objc,
+	       Tcl_Obj *CONST objv[])
 {
     int b;
     
@@ -1747,7 +1313,7 @@ RatIsLocked(ClientData dummy, Tcl_Interp *interp, int objc,
 /*
  *----------------------------------------------------------------------
  *
- * RatEncoding --
+ * RatEncodingCmd --
  *
  *	See ../doc/interface for a descriptions of arguments and result.
  *
@@ -1764,14 +1330,14 @@ RatIsLocked(ClientData dummy, Tcl_Interp *interp, int objc,
  */
 
 static int
-RatEncoding(ClientData dummy, Tcl_Interp *interp, int objc,
-	    Tcl_Obj *CONST objv[])
+RatEncodingCmd(ClientData dummy, Tcl_Interp *interp, int objc,
+	       Tcl_Obj *CONST objv[])
 {
-    char *encodingName, *fileName;
+    char *encodingName;
+    CONST84 char *fileName;
     unsigned char c;
     int length, encoding;
     FILE *fp;
-    Tcl_DString ds;
 
     if (objc != 2) {
 	Tcl_AppendResult(interp, "wrong # args: should be \"",
@@ -1782,14 +1348,12 @@ RatEncoding(ClientData dummy, Tcl_Interp *interp, int objc,
     /*
      * Determine encoding
      */
-    fileName = Tcl_UtfToExternalDString(NULL, Tcl_GetString(objv[1]), -1, &ds);
+    fileName = RatTranslateFileName(interp, Tcl_GetString(objv[1]));
     if (NULL == (fp = fopen(fileName, "r"))) {
 	Tcl_AppendResult(interp, "error opening file \"", fileName, "\": ",
 			 Tcl_PosixError(interp), (char *) NULL);
-	Tcl_DStringFree(&ds);
 	return TCL_ERROR;
     }
-    Tcl_DStringFree(&ds);
     encoding = ENC7BIT;
     length = 0;
     while (c = (unsigned char)getc(fp), !feof(fp)) {
@@ -1826,7 +1390,7 @@ RatEncoding(ClientData dummy, Tcl_Interp *interp, int objc,
 /*
  *----------------------------------------------------------------------
  *
- * RatType --
+ * RatTypeCmd --
  *
  *	See ../doc/interface for a descriptions of arguments and result.
  *
@@ -1846,7 +1410,8 @@ RatEncoding(ClientData dummy, Tcl_Interp *interp, int objc,
  */
 
 static int
-RatType(ClientData dummy, Tcl_Interp *interp, int objc, Tcl_Obj *CONST objv[])
+RatTypeCmd(ClientData dummy, Tcl_Interp *interp, int objc,
+	   Tcl_Obj *CONST objv[])
 {
     int listArgc, elemArgc;
     Tcl_Obj *oPtr, **listArgv, **elemArgv, *robjv[2];
@@ -1931,72 +1496,6 @@ RatType(ClientData dummy, Tcl_Interp *interp, int objc, Tcl_Obj *CONST objv[])
     return TCL_OK;
 }
 
-/*
- *----------------------------------------------------------------------
- *
- * RatTclPuts --
- *
- *	A version of the unix puts which converts CRLF to the local
- *	newline convention.
- *
- * Results:
- *      Always returns 1L.
- *
- * Side effects:
- *      None.
- *
- *
- *----------------------------------------------------------------------
- */
-
-long
-RatTclPuts(void *stream_x, char *string)
-{
-    Tcl_Channel channel = (Tcl_Channel)stream_x;
-
-    if (-1 == Tcl_Write(channel, string, -1)) {
-	return 0;
-    }
-    return(1L);                                 /* T for c-client */
-}
-
-/*
- *----------------------------------------------------------------------
- *
- * RatStringPuts --
- *
- *	A version of the unix puts which converts CRLF to the local
- *	newline convention, and instead of storing into a file we
- *	append the data to an Tcl_DString.
- *
- * Results:
- *      Always returns 1L.
- *
- * Side effects:
- *      None.
- *
- *
- *----------------------------------------------------------------------
- */
-
-long
-RatStringPuts(void *stream_x, char *string)
-{
-    Tcl_DString *dsPtr = (Tcl_DString*)stream_x;
-    char *p;
-
-    for (p = string; *p; p++) {
-      if (*p=='\015' && *(p+1)=='\012') {
-	  Tcl_DStringAppend(dsPtr, "\n", 1);
-	  p++;
-      } else {
-	  Tcl_DStringAppend(dsPtr, p, 1);
-      }
-    }
-
-    return(1L);                                 /* T for c-client */
-}
-
 /* 
  *----------------------------------------------------------------------
  * 
@@ -2060,7 +1559,7 @@ RatTranslateWrite(Tcl_Channel channel, CONST84 char *b, int len)
 {
     int s, e, l;
 
-    for (s=e=l=0; e<len-1; e++) {
+    for (s=e=l=0; e<len; e++) {
         if (b[e] == '\015' && b[e+1] == '\012') {
 	    l += Tcl_Write(channel, &b[s], e-s);
 	    e++;
@@ -2164,7 +1663,7 @@ RatParseMsg(Tcl_Interp *interp, unsigned char *message)
 /*
  *----------------------------------------------------------------------
  *
- * RatDSE --
+ * RatDSECmd --
  *
  *	See ../doc/interface for a descriptions of arguments and result.
  *
@@ -2180,7 +1679,8 @@ RatParseMsg(Tcl_Interp *interp, unsigned char *message)
  */
 
 static int
-RatDSE(ClientData dummy, Tcl_Interp *interp, int objc, Tcl_Obj *const objv[])
+RatDSECmd(ClientData dummy, Tcl_Interp *interp, int objc,
+	  Tcl_Obj *const objv[])
 {
     Tcl_SetObjResult(interp, Tcl_NewIntObj(RatDbDaysSinceExpire(interp)));
     return TCL_OK;
@@ -2189,7 +1689,7 @@ RatDSE(ClientData dummy, Tcl_Interp *interp, int objc, Tcl_Obj *const objv[])
 /*
  *----------------------------------------------------------------------
  *
- * RatExpire --
+ * RatExpireCmd --
  *
  *	See ../doc/interface for a descriptions of arguments and result.
  *
@@ -2204,7 +1704,8 @@ RatDSE(ClientData dummy, Tcl_Interp *interp, int objc, Tcl_Obj *const objv[])
  */
 
 static int
-RatExpire(ClientData dummy, Tcl_Interp *interp, int objc,Tcl_Obj *const objv[])
+RatExpireCmd(ClientData dummy, Tcl_Interp *interp, int objc,
+	     Tcl_Obj *const objv[])
 {
     if (objc != 3) {
 	Tcl_AppendResult(interp, "wrong # args: should be \"",
@@ -2248,54 +1749,7 @@ RatIsEmpty (const char *string)
 /*
  *----------------------------------------------------------------------
  *
- * RatLindex --
- *
- *	Get a specific entry of a list.
- *
- * Results:
- *	A pointer to a static area which contains the requested item.
- *
- * Side effects:
- *      None.
- *
- *
- *----------------------------------------------------------------------
- */
-
-char*
-RatLindex(Tcl_Interp *interp, const char *list, int index)
-{
-    static char *item = NULL;
-    static int itemsize = 0;
-    CONST84 char **argv = NULL;
-    const char *act;
-    int argc;
-
-    if (TCL_OK != Tcl_SplitList(interp, list, &argc, &argv)) {
-	if (0 != index) {
-	    return NULL;
-	}
-	act = list;
-    } else {
-	if (index >= argc) {
-	    ckfree(argv);
-	    return NULL;
-	}
-	act = argv[index];
-    }
-    if (itemsize < (int)(strlen(act)+1)) {
-	itemsize = strlen(act)+1;
-	item = (char*)ckrealloc(item, itemsize);
-    }
-    strcpy(item, act);
-    ckfree(argv);
-    return item;
-}
-
-/*
- *----------------------------------------------------------------------
- *
- * RatLL --
+ * RatLLCmd --
  *
  *	See ../doc/interface for a descriptions of arguments and result.
  *
@@ -2310,7 +1764,7 @@ RatLindex(Tcl_Interp *interp, const char *list, int index)
  */
 
 static int
-RatLL(ClientData dummy, Tcl_Interp *interp, int objc, Tcl_Obj *const objv[])
+RatLLCmd(ClientData dummy, Tcl_Interp *interp, int objc, Tcl_Obj *const objv[])
 {
     CONST84 char *cPtr;
     int l;
@@ -2336,7 +1790,7 @@ RatLL(ClientData dummy, Tcl_Interp *interp, int objc, Tcl_Obj *const objv[])
 /*
  *----------------------------------------------------------------------
  *
- * RatGen --
+ * RatGenCmd --
  *
  *	See ../doc/interface for a descriptions of arguments and result.
  *
@@ -2351,7 +1805,8 @@ RatLL(ClientData dummy, Tcl_Interp *interp, int objc, Tcl_Obj *const objv[])
  */
 
 static int
-RatGen(ClientData dummy, Tcl_Interp *interp, int objc, Tcl_Obj *const objv[])
+RatGenCmd(ClientData dummy, Tcl_Interp *interp, int objc,
+	  Tcl_Obj *const objv[])
 {
     Tcl_Obj *s;
     int i, l;
@@ -2374,7 +1829,7 @@ RatGen(ClientData dummy, Tcl_Interp *interp, int objc, Tcl_Obj *const objv[])
 /*
  *----------------------------------------------------------------------
  *
- * RatWrapCited --
+ * RatWrapCitedCmd --
  *
  *	See ../doc/interface for a descriptions of arguments and result.
  *
@@ -2389,7 +1844,7 @@ RatGen(ClientData dummy, Tcl_Interp *interp, int objc, Tcl_Obj *const objv[])
  */
 
 static int
-RatWrapCited(ClientData dummy, Tcl_Interp *interp, int objc,
+RatWrapCitedCmd(ClientData dummy, Tcl_Interp *interp, int objc,
 	Tcl_Obj *const objv[])
 {
     if (2 != objc) {
@@ -2405,7 +1860,7 @@ RatWrapCited(ClientData dummy, Tcl_Interp *interp, int objc,
 /*
  *----------------------------------------------------------------------
  *
- * RatDbaseCheck --
+ * RatDbaseCheckCmd --
  *
  *	See ../doc/interface for a descriptions of arguments and result.
  *
@@ -2420,7 +1875,7 @@ RatWrapCited(ClientData dummy, Tcl_Interp *interp, int objc,
  */
 
 static int
-RatDbaseCheck(ClientData dummy, Tcl_Interp *interp, int objc,
+RatDbaseCheckCmd(ClientData dummy, Tcl_Interp *interp, int objc,
 	      Tcl_Obj *const objv[])
 {
     int fix;
@@ -2456,7 +1911,6 @@ static char*
 RatOptionWatcher(ClientData clientData, Tcl_Interp *interp,
 		 CONST84 char *name1, CONST84 char *name2, int flags)
 {
-    char buf[32];
     Tcl_Obj *oPtr;
     int i;
     CONST84 char *v, *cPtr;
@@ -2464,20 +1918,8 @@ RatOptionWatcher(ClientData clientData, Tcl_Interp *interp,
     if (NULL == (cPtr = strchr(name2, ','))) {
 	cPtr = name2;
     }
-    if (!strcmp(name2, "domain")
-	|| !strcmp(name2, "charset")
-	|| !strcmp(name2, "smtp_verbose")
-	|| !strcmp(name2, "smtp_timeout")
-	|| !strcmp(name2, "force_send")
-	|| !strcmp(name2, "pgp_version")
-	|| !strcmp(name2, "pgp_path")
-	|| !strcmp(name2, "pgp_args")
-	|| !strcmp(name2, "pgp_keyring")
-	|| NULL != strchr(name2, ',')) {
-	strlcpy(buf, "RatSend kill", sizeof(buf));
-	Tcl_Eval(interp, buf);
 
-    } else if (!strcmp(name2, "ssh_path")) {
+    if (!strcmp(name2, "ssh_path")) {
 	v = RatGetPathOption(interp, "ssh_path");
 	if (v && *v) {
 	    tcp_parameters(SET_SSHPATH, (void*)v);
@@ -2488,6 +1930,8 @@ RatOptionWatcher(ClientData clientData, Tcl_Interp *interp,
 	if (oPtr && TCL_OK == Tcl_GetIntFromObj(interp, oPtr, &i) && i) {
 	    tcp_parameters(SET_SSHTIMEOUT, (void*)i);
 	}
+    } else if (!strcmp(name2, "watcher_time")) {
+	RatFolderUpdateTime((ClientData)interp);
     }
 
     return NULL;
@@ -2544,42 +1988,6 @@ KodHandlerIdle(ClientData clientData)
 	    sizeof(buf));
     Tcl_GlobalEval(interp, buf);
 }
-
-
-/*
- *----------------------------------------------------------------------
- *
- * RatFormatDateCmd --
- *
- *	See ../doc/interface for a descriptions of arguments and result.
- *
- * Results:
- *      A list of strings to display to the user.
- *
- * Side effects:
- *      None.
- *
- *
- *----------------------------------------------------------------------
- */
-
-static int
-RatFormatDateCmd(ClientData dummy, Tcl_Interp *interp, int objc,
-		 Tcl_Obj *const objv[])
-{
-    int month, day;
-    
-    if (7 != objc
-	|| TCL_OK != Tcl_GetIntFromObj(interp, objv[2], &month)
-	|| TCL_OK != Tcl_GetIntFromObj(interp, objv[3], &day)) {
-	Tcl_AppendResult(interp, "Usage: ", Tcl_GetString(objv[0]), \
-		" year month day hour min sec", (char*) NULL);
-	return TCL_ERROR;
-    }
-    Tcl_SetObjResult(interp, RatFormatDate(interp, month-1, day));
-    return TCL_OK;
-}
-
 
 /*
  *----------------------------------------------------------------------
@@ -2599,25 +2007,13 @@ RatFormatDateCmd(ClientData dummy, Tcl_Interp *interp, int objc,
  */
 
 Tcl_Obj*
-RatFormatDate(Tcl_Interp *interp, int month, int day)
+RatFormatDate(Tcl_Interp *interp, struct tm *tm)
 {
-    static char *months[12];
-    static int initialized = 0;
-    char buf[8];
+    char buf[1024];
+    const char *format;
 
-    if (!initialized) {
-	int i, argc;
-	Tcl_Obj *oPtr, **argv;
-
-	oPtr = Tcl_GetVar2Ex(interp, "t", "months", TCL_GLOBAL_ONLY);
-	Tcl_ListObjGetElements(interp, oPtr, &argc, &argv);
-	for (i=0; i<12; i++) {
-	    months[i] = Tcl_GetString(argv[i]);
-	}
-	initialized = 1;
-    }
-
-    snprintf(buf, sizeof(buf), "%2d %s", day, months[month]);
+    format = Tcl_GetVar2(interp, "option", "date_format", TCL_GLOBAL_ONLY);
+    strftime(buf, sizeof(buf), format, tm);
     return Tcl_NewStringObj(buf, -1);
 }
 
@@ -2854,77 +2250,13 @@ RatDStringApendNoCRLF(Tcl_DString *ds, const char *s, int length)
 /*
  *----------------------------------------------------------------------
  *
- * RatReadFile --
- *
- *	Reads a file and stores it in a block of memeory. Optionally
- *	make sure that the stored data is CRLF-encoded.
- *
- * Results:
- *      A pointer to the block of memeory. It is the callers responsibility
- *	to later free this block of memory. If an error occurs it will
- *	return NULL and store an error message in the result.
- *
- * Side effects:
- *	none
- *
- *
- *----------------------------------------------------------------------
- */
-unsigned char*
-RatReadFile(Tcl_Interp *interp, const char *filename, unsigned long *length,
-	     int convert_to_crlf)
-{
-    unsigned char *data;
-    char buf[1024];
-    struct stat statbuf;
-    int allocated, ci;
-    unsigned long len;
-    FILE *fp;
-    
-    if (NULL == (fp = fopen(filename, "r"))) {
-	snprintf(buf, sizeof(buf), "Failed to open file \"%s\": %s",
-		 filename, Tcl_PosixError(interp));
-	Tcl_SetResult(interp, buf, TCL_VOLATILE);
-	return NULL;
-    }
-    fstat(fileno(fp), &statbuf);
-    allocated = statbuf.st_size/20 + statbuf.st_size + 1;
-    data = (unsigned char*)ckalloc(allocated);
-    len = 0;
-    if (convert_to_crlf) {
-	while (EOF != (ci = getc(fp))) {
-	    if (len >= allocated-2) {
-		allocated += 1024;
-		data = (unsigned char*)ckrealloc(data, allocated);
-	    }
-	    if (ci == '\n' && (0==len || '\r' != data[len-1])) {
-		data[len++] = '\r';
-	    }
-	    data[len++] = ci;
-	}
-    } else {
-	fread(data, statbuf.st_size, 1, fp);
-	len = statbuf.st_size;
-    }
-    data[len] = '\0';
-    fclose(fp);
-    
-    if (length) {
-	*length = len;
-    }
-    return data;
-}
-
-/*
- *----------------------------------------------------------------------
- *
  * RatGetPathOption --
  *
  *	Gets the value of an option and does ~-substitutions on it.
  *
  * Results:
  *      A pointer to the desired value (after expansion). The value is
- *	stored in a block of memeory managed by this module and the value
+ *	stored in a block of memory managed by this module and the value
  *	is valid until the next call to this procedure.
  *
  * Side effects:
@@ -2936,23 +2268,51 @@ RatReadFile(Tcl_Interp *interp, const char *filename, unsigned long *length,
 CONST84 char*
 RatGetPathOption(Tcl_Interp *interp, char *name)
 {
-    static Tcl_DString ds;
-    static int dsUsed = 0;
     CONST84 char *value;
     
     if (NULL == (value = Tcl_GetVar2(interp, "option",name,TCL_GLOBAL_ONLY))) {
 	return NULL;
     }
-    if (dsUsed) {
+    return RatTranslateFileName(interp, value);
+}
+
+/*
+ *----------------------------------------------------------------------
+ *
+ * RatTranslateFileName --
+ *
+ *	Translates a filename to local conventions (including charset).
+ *
+ * Results:
+ *      A pointer to the desired value (after expansion). The value is
+ *	stored in a block of memory managed by this module and the value
+ *	is valid until the next call to this procedure.
+ *
+ * Side effects:
+ *	none
+ *
+ *
+ *----------------------------------------------------------------------
+ */
+CONST84 char*
+RatTranslateFileName(Tcl_Interp *interp, CONST84 char *name)
+{
+    static Tcl_DString ds;
+    static int first = 1;
+    CONST84 char *tmp;
+    Tcl_DString tds;
+    
+    if (!first) {
 	Tcl_DStringFree(&ds);
     }
-    value = Tcl_TranslateFileName(interp, value, &ds);
-    if (value) {
-	dsUsed = 1;
-    } else {
-	dsUsed = 0;
+    tmp = Tcl_TranslateFileName(interp, name, &tds);
+    if (!tmp) {
+	return NULL;
     }
-    return value;
+    Tcl_UtfToExternalDString(NULL, tmp, -1, &ds);
+    Tcl_DStringFree(&tds);
+    first = 0;
+    return Tcl_DStringValue(&ds);
 }
 
 /*
@@ -3001,7 +2361,7 @@ RatEncodeMutf7Cmd(ClientData dummy, Tcl_Interp *interp, int objc,
  *      A standard tcl result
  *
  * Side effects:
- *      God online or offline
+ *      Goes online or offline
  *
  *
  *----------------------------------------------------------------------
@@ -3024,15 +2384,15 @@ RatLibSetOnlineModeCmd(ClientData dummy, Tcl_Interp *interp, int objc,
 	part1 = Tcl_NewStringObj("option", 6);
 	part2 = Tcl_NewStringObj("online", 6);
     }
-    Tcl_ObjSetVar2(interp, part1, part2, Tcl_NewBooleanObj(online),
-		   TCL_GLOBAL_ONLY);
     if (TCL_ERROR == RatDisOnOffTrans(interp, online)) {
 	Tcl_ObjSetVar2(interp, part1, part2, Tcl_NewBooleanObj(0),
 		       TCL_GLOBAL_ONLY);
 	return TCL_ERROR;
     }
+    Tcl_ObjSetVar2(interp, part1, part2, Tcl_NewBooleanObj(online),
+		   TCL_GLOBAL_ONLY);
     if (online) {
-	RatSendDeferred(interp);
+	RatNudgeSender(interp);
     }
     return TCL_OK;
 }
@@ -3075,9 +2435,305 @@ RatTestCmd(ClientData dummy, Tcl_Interp *interp, int objc,
 	s = RatDecodeHeader(interp, Tcl_GetString(objv[2]), 0);
 	Tcl_SetResult(interp, s, TCL_VOLATILE);
 	return TCL_OK;
-	
+
+    } else if (objc == 3
+	       && !strcmp("encode_parameters", Tcl_GetString(objv[1]))) {
+	/* RatTest encode_parameters {param list} */
+	PARAMETER *p, *f;
+	int i, plc, pc;
+	Tcl_Obj **plv, **pv, *oPtr, *ov[2];
+
+	Tcl_ListObjGetElements(interp, objv[2], &plc, &plv);
+	for (i=0, p = f = NULL; i<plc; i++) {
+	    Tcl_ListObjGetElements(interp, plv[i], &pc, &pv);
+	    if (p) {
+		p->next = mail_newbody_parameter();
+		p = p->next;
+	    } else {
+		f = p = mail_newbody_parameter();
+	    }
+	    p->attribute = (char*)ucase(
+                (unsigned char*)cpystr(Tcl_GetString(pv[0])));
+	    p->value = cpystr(Tcl_GetString(pv[1]));
+	}
+
+	RatEncodeParameters(interp, f);
+
+	oPtr = Tcl_NewObj();
+	for (p=f; p; p = p->next) {
+	    ov[0] = Tcl_NewStringObj(p->attribute, -1);
+	    ov[1] = Tcl_NewStringObj(p->value, -1);
+	    Tcl_ListObjAppendElement(interp, oPtr, Tcl_NewListObj(2, ov));
+	}
+
+	Tcl_SetObjResult(interp, oPtr);
+	return TCL_OK;
+
     } else {
  	Tcl_AppendResult(interp, "Bad usage", TCL_STATIC);
 	return TCL_ERROR;
     }
+}
+
+/*
+ *----------------------------------------------------------------------
+ *
+ * RatReadAndCanonify --
+ *
+ *	Read a file and canonalize the line endings, from system local
+ *      to CRLF.
+ *
+ * Results:
+ *      Returns a pointer to a memory area containing the data. It is
+ *      the callers responsibility to eventually free this data with
+ *      a call to ckfree().
+ *
+ * Side effects:
+ *      Various
+ *
+ *
+ *----------------------------------------------------------------------
+ */
+char*
+RatReadAndCanonify(Tcl_Interp *interp, char *filename_utf,
+		   unsigned long *size, int canonify)
+{
+    char *buf;
+    CONST84 char *filename;
+    struct stat sbuf;
+    FILE *fp;
+
+    Tcl_ResetResult(interp);
+    filename = RatTranslateFileName(interp, filename_utf);
+    fp = fopen(filename, "r");
+    if (NULL == fp) {
+	return NULL;
+	/* XXX Handle error better */
+    }
+    fstat(fileno(fp), &sbuf);
+    if (canonify) {
+	int c, allocated, used;
+
+	allocated = sbuf.st_size + sbuf.st_size/40;
+	used = 0;
+	buf = (char*)ckalloc(allocated+1);
+
+	while (c=fgetc(fp), !feof(fp)) {
+	    if (used >= allocated-1) {
+		allocated += 1024;
+		buf = (char*)ckrealloc(buf, allocated);
+	    }
+	    if ('\n' == c) {
+		buf[used++] = '\r';
+	    }
+	    buf[used++] = c;
+	}
+	buf[used] = '\0';
+	*size = used;
+    } else {
+	buf = (char*)ckalloc(sbuf.st_size+1);
+	fread(buf, sbuf.st_size, 1, fp);
+	buf[sbuf.st_size] = '\0';
+	*size = sbuf.st_size;
+    }
+    fclose(fp);
+    return buf;
+}
+
+/*
+ *----------------------------------------------------------------------
+ *
+ * RatCanonalize --
+ *
+ *	Canonalizes a give DString. That is it makes sure that every
+ *      newline is expressed as CRLF.
+ *
+ * Results:
+ *      Modifies the given DString.
+ *
+ * Side effects:
+ *      None.
+ *
+ *
+ *----------------------------------------------------------------------
+ */
+void
+RatCanonalize(Tcl_DString *ds)
+{
+    char *s, *c, *t = cpystr(Tcl_DStringValue(ds));
+
+    Tcl_DStringSetLength(ds, 0);
+    for (s=t; (c=strchr(s, '\n')); s=c+1) {
+	Tcl_DStringAppend(ds, s, c-s);
+	if ('\r' == c[-1]) {
+	    Tcl_DStringAppend(ds, "\n", 1);
+	} else {
+	    Tcl_DStringAppend(ds, "\r\n", 2);
+	}
+    }
+    Tcl_DStringAppend(ds, s, strlen(s));
+    ckfree(t);
+}
+
+/*
+ *----------------------------------------------------------------------
+ *
+ * RatNudgeSenderCmd --
+ *
+ *	Command used to nudge the sender
+ *
+ * Results:
+ *      A standard tcl result
+ *
+ * Side effects:
+ *      None
+ *
+ *
+ *----------------------------------------------------------------------
+ */
+
+static int
+RatNudgeSenderCmd(ClientData dummy, Tcl_Interp *interp, int objc,
+		  Tcl_Obj *const objv[])
+{
+    RatNudgeSender(interp);
+    return TCL_OK;
+}
+
+/*
+ *----------------------------------------------------------------------
+ *
+ * RatExtractAddressesCmd --
+ *
+ *	Se ../doc/interface
+ *
+ * Results:
+ *      A standard tcl result
+ *
+ * Side effects:
+ *      None
+ *
+ *
+ *----------------------------------------------------------------------
+ */
+
+static int
+RatExtractAddressesCmd(ClientData dummy, Tcl_Interp *interp, int objc,
+		       Tcl_Obj *const objv[])
+{
+    Tcl_Obj *oPtr = Tcl_NewObj();
+    ADDRESS *alist = NULL, *a;
+    char *host, buf[1024];
+    int i;
+
+    if (objc < 2) {
+ 	Tcl_AppendResult(interp, "Bad usage", TCL_STATIC);
+	return TCL_ERROR;
+    }
+    host = RatGetCurrent(interp, RAT_HOST, Tcl_GetString(objv[1]));
+    for (i=2; i<objc; i++) {
+	strlcpy(buf, Tcl_GetString(objv[i]), sizeof(buf));
+	rfc822_parse_adrlist(&alist, buf, host);
+	for (a = alist; a; a = a->next) {
+	    buf[0] = '\0';
+	    rfc822_address(buf, a);
+	    Tcl_ListObjAppendElement(interp, oPtr, Tcl_NewStringObj(buf, -1));
+	}
+	mail_free_address(&alist);
+    }
+    Tcl_SetObjResult(interp, oPtr);
+    return TCL_OK;
+}
+
+/*
+ *----------------------------------------------------------------------
+ *
+ * RatGenerateDateCmd --
+ *
+ *	Se ../doc/interface
+ *
+ * Results:
+ *      A standard tcl result
+ *
+ * Side effects:
+ *      None
+ *
+ *
+ *----------------------------------------------------------------------
+ */
+
+static int
+RatGenerateDateCmd(ClientData dummy, Tcl_Interp *interp, int objc,
+		   Tcl_Obj *const objv[])
+{
+    char buf[1024];
+
+    rfc822_date(buf);
+    Tcl_SetObjResult(interp, Tcl_NewStringObj(buf, -1));
+    return TCL_OK;
+}
+
+/*
+ * These are from auth_md5.c of c-client
+ */
+#define MD5BLKLEN 64		/* MD5 block length */
+#define MD5DIGLEN 16		/* MD5 digest length */
+typedef struct {
+  unsigned long chigh;		/* high 32bits of byte count */
+  unsigned long clow;		/* low 32bits of byte count */
+  unsigned long state[4];	/* state (ABCD) */
+  unsigned char buf[MD5BLKLEN];	/* input buffer */
+  unsigned char *ptr;		/* buffer position */
+} MD5CONTEXT;
+
+
+/* Prototypes */
+void md5_init (MD5CONTEXT *ctx);
+void md5_update (MD5CONTEXT *ctx,unsigned char *data,unsigned long len);
+void md5_final (unsigned char *digest,MD5CONTEXT *ctx);
+
+/*
+ *----------------------------------------------------------------------
+ *
+ * RatGenerateMsgIdCmd --
+ *
+ *	Se ../doc/interface
+ *
+ * Results:
+ *      A standard tcl result
+ *
+ * Side effects:
+ *      None
+ *
+ *
+ *----------------------------------------------------------------------
+ */
+
+static int
+RatGenerateMsgIdCmd(ClientData dummy, Tcl_Interp *interp, int objc,
+		   Tcl_Obj *const objv[])
+{
+    char *domain, digest_hex[MD5DIGLEN*2+1], buf[1024];
+    unsigned char digest[MD5DIGLEN];
+    int i;
+    MD5CONTEXT ctx;
+    
+    if (objc < 2) {
+ 	Tcl_AppendResult(interp, "Bad usage", TCL_STATIC);
+	return TCL_ERROR;
+    }
+
+    domain = RatGetCurrent(interp, RAT_HOST, Tcl_GetString(objv[1]));
+
+    snprintf(buf, sizeof(buf), "tkrat.%s.%ld.%d", domain, time(NULL),getpid());
+    md5_init(&ctx);
+    md5_update(&ctx, (unsigned char*)buf, strlen(buf));
+    md5_final(digest, &ctx);
+    for(i=0; i<MD5DIGLEN; i++) {
+        snprintf(digest_hex+i*2, MD5DIGLEN+1-i*2, "%02x", digest[i]);
+    }
+
+    snprintf(buf, sizeof(buf), "<tkrat.%s@%s>", digest_hex, domain);
+    Tcl_SetObjResult(interp, Tcl_NewStringObj(buf, -1));
+    return TCL_OK;
 }

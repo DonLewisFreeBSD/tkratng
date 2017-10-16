@@ -3,7 +3,7 @@
  *
  *	This file contains compatibility functions.
  *
- * TkRat software and its included text is Copyright 1996-2002 by
+ * TkRat software and its included text is Copyright 1996-2004 by
  * Martin Forssén
  *
  * The full text of the legal notice is contained in the file called
@@ -14,14 +14,9 @@
 #include "ratPGP.h"
 
 /*
- * Maximaum length of pass phrase (plus two)
- */
-#define MAXPASSLENGTH 1024
-
-/*
  * Cached pass phrase
  */
-static char pgpPass[MAXPASSLENGTH];
+volatile static char pgpPass[MAXPASSLENGTH];
 static int pgpPassValid = 0;
 static Tcl_TimerToken pgpPassToken;
 
@@ -46,7 +41,11 @@ static Tcl_TimerToken pgpPassToken;
 void
 ClearPGPPass(ClientData unused)
 {
-    memset(pgpPass, '\0', sizeof(pgpPass));
+    int i;
+
+    for (i=0; i<sizeof(pgpPass); i++) {
+	pgpPass[i] = '\0';
+    }
     pgpPassValid = 0;
 }
 
@@ -68,11 +67,11 @@ ClearPGPPass(ClientData unused)
  *----------------------------------------------------------------------
  */
 
-char*
-RatPGPPhrase(Tcl_Interp *interp)
+volatile char*
+RatPGPPhrase(Tcl_Interp *interp, volatile char *phrase, int phraseSize)
 {
-    char buf[32], *result;
-    int doCache, timeout, objc;
+    char buf[32];
+    int doCache, timeout, objc, i;
     Tcl_Obj *oPtr, **objv;
 
     oPtr = Tcl_GetVar2Ex(interp, "option","cache_pgp_timeout",TCL_GLOBAL_ONLY);
@@ -84,7 +83,11 @@ RatPGPPhrase(Tcl_Interp *interp)
 	    pgpPassToken = Tcl_CreateTimerHandler(timeout*1000, ClearPGPPass,
 		    NULL);
 	}
-	return cpystr(pgpPass);
+	for (i=0; i<strlen((char*)pgpPass) && i < phraseSize-1; i++) {
+	    phrase[i] = pgpPass[i];
+	}
+	phrase[i] = '\0';
+	return phrase;
     }
 
     strlcpy(buf, "RatGetPGPPassPhrase", sizeof(buf));
@@ -92,10 +95,17 @@ RatPGPPhrase(Tcl_Interp *interp)
     oPtr = Tcl_GetObjResult(interp);
     Tcl_ListObjGetElements(interp, oPtr, &objc, &objv);
     if (!strcmp("ok", Tcl_GetString(objv[0]))) {
+	volatile char *pass = Tcl_GetString(objv[1]);
+	for (i=0; pass[i] != '\0' && i < phraseSize-1; i++) {
+	    phrase[i] = pass[i];
+	    pass[i] = '\0';
+	}
+	phrase[i] = '\0';
+	
 	oPtr = Tcl_GetVar2Ex(interp, "option", "cache_pgp", TCL_GLOBAL_ONLY);
 	Tcl_GetBooleanFromObj(interp, oPtr, &doCache);
 	if (doCache) {
-	    strlcpy(pgpPass, Tcl_GetString(objv[1]), sizeof(pgpPass));
+	    strlcpy((char*)pgpPass, (char*)phrase, sizeof(pgpPass));
 	    pgpPassValid = 1;
 	    if (timeout) {
 		pgpPassToken = Tcl_CreateTimerHandler(timeout*1000,
@@ -104,51 +114,11 @@ RatPGPPhrase(Tcl_Interp *interp)
 		pgpPassToken = NULL;
 	    }
 	}
-	result = cpystr(Tcl_GetString(objv[1]));
-	return result;
+	return phrase;
     } else {
 	return NULL;
     }
 }
-
-
-
-/*
- *----------------------------------------------------------------------
- *
- * RatSenderPGPPhrase --
- *
- *      Get the pass phrase. This function may only be called from the
- *	sender process.
- *
- * Results:
- *	A pointer to a static buffer containing the pass phrase. It is up to
- *	the caller to overwrite this buffer with nulls.
- *
- * Side effects:
- *	None.
- *
- *
- *----------------------------------------------------------------------
- */
-
-char*
-RatSenderPGPPhrase(Tcl_Interp *interp)
-{
-    static CONST84 char **argv = NULL;
-    int argc;
-    char *result = RatSendPGPCommand("PGP getpass");
-
-    if (!strncmp("PHRASE ", result, 7)) {
-	ckfree(argv);
-	Tcl_SplitList(interp, result, &argc, &argv);
-	memset(result, '\0', strlen(result));
-	return (char*)argv[1];
-    } else {
-	return NULL;
-    }
-}
-
 
 /*
  *----------------------------------------------------------------------
@@ -173,7 +143,7 @@ RatPGPBodyCheck(Tcl_Interp *interp, MessageProcInfo *procInfo,
 		BodyInfo **bodyInfoPtrPtr)
 {
     PARAMETER *parPtr;
-    int prot, enc;
+    int enc;
     unsigned long length;
     char *text, *start, *end, *middle;
     const char *version;
@@ -205,19 +175,22 @@ RatPGPBodyCheck(Tcl_Interp *interp, MessageProcInfo *procInfo,
 
     } else if ((*bodyInfoPtrPtr)->bodyPtr->type == TYPEMULTIPART
 	    && !strcasecmp("signed", (*bodyInfoPtrPtr)->bodyPtr->subtype)) {
-	prot = 0;
-	for (parPtr = (*bodyInfoPtrPtr)->bodyPtr->parameter; parPtr;
-		parPtr = parPtr->next) {
-	    if (!strcasecmp(parPtr->attribute, "protocol")
-		    && !strcasecmp(parPtr->value,"application/pgp-signature")){
-		prot = 1;
-	    }
-	}
-	if (prot) {
+	for (parPtr = (*bodyInfoPtrPtr)->bodyPtr->parameter;
+	     parPtr && (strcasecmp(parPtr->attribute, "protocol")
+			|| strcasecmp(parPtr->value,
+				      "application/pgp-signature"));
+	     parPtr = parPtr->next);
+	if (parPtr) {
 	    BodyInfo *bodyInfoPtr;
 
 	    (*procInfo[(*bodyInfoPtrPtr)->type].makeChildrenProc)(interp,
 		    *bodyInfoPtrPtr);
+	    if (NULL == (*bodyInfoPtrPtr)->firstbornPtr) {
+		/*
+		 * Corrupt message
+		 */
+		return;
+	    }
 	    bodyInfoPtr = *bodyInfoPtrPtr;
 	    *bodyInfoPtrPtr = (*bodyInfoPtrPtr)->firstbornPtr;
 	    (*bodyInfoPtrPtr)->sigStatus = RAT_UNCHECKED;

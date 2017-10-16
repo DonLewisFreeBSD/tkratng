@@ -4,7 +4,7 @@
  *	This file contains support for reading & parsing mailcap files
  *	Mailcap files are defined in rfc1343
  *
- * TkRat software and its included text is Copyright 1996-2002 by
+ * TkRat software and its included text is Copyright 1996-2004 by
  * Martin Forssén
  *
  * The full text of the legal notices is contained in the file called
@@ -75,9 +75,10 @@ MailcapReload(Tcl_Interp *interp)
     static char **textBlock = NULL;
     static int numTextBlocks = 0;
     static int allocTextBlocks = 0;
-    Tcl_DString ds, bufDs;
+    Tcl_DString ds;
     struct stat sbuf;
-    char buf[1024], *s, *cPtr, **cPtrPtr, *dstPtr, *data, *tPtr, *pPtr;
+    char buf[1024], *cPtr, **cPtrPtr, *dstPtr, *data, *tPtr, *pPtr;
+    CONST84 char *s;
     int i, fd, line;
 
     /*
@@ -101,14 +102,12 @@ MailcapReload(Tcl_Interp *interp)
     /*
      * Check all files mentioned in the path
      */
-    Tcl_DStringInit(&bufDs);
     for (pPtr = Tcl_DStringValue(&ds); *pPtr; ) {
 	for (s=pPtr++; *pPtr && ':' != *pPtr; pPtr++);
 	if (*pPtr) {
 	    *pPtr++ = '\0';
 	}
-	Tcl_DStringSetLength(&bufDs, 0);
-	s = Tcl_TranslateFileName(interp, s, &bufDs);
+	s = RatTranslateFileName(interp, s);
 	if (stat(s, &sbuf) || !S_ISREG(sbuf.st_mode)) {
 	    /*
 	     * No such file
@@ -275,7 +274,6 @@ MailcapReload(Tcl_Interp *interp)
 	    tableSize++;
 	}
     }
-    Tcl_DStringFree(&bufDs);
     tableId++;
 }
 
@@ -343,7 +341,7 @@ ExpandString(Tcl_Interp *interp, BodyInfo *bodyInfoPtr, char *s,char **filePtr)
 	    if (filePtr) {
 		if (0 == Tcl_DStringLength(&file)) {
 		    Tcl_DStringAppend(&file, "/tmp/rat.", -1);
-		    RatGenId(NULL, interp, 0, NULL);
+		    RatGenIdCmd(NULL, interp, 0, NULL);
 		    Tcl_DStringAppend(&file, Tcl_GetStringResult(interp), -1);
 		    *filePtr = Tcl_DStringValue(&file);
 		}
@@ -434,8 +432,8 @@ RatMcapFindCmd(Tcl_Interp *interp, BodyInfo *bodyInfoPtr)
 {
     char *cmd, *file, *s;
     Tcl_Channel channel;
-    int i, perm;
-    Tcl_Obj *rPtr, *oPtr;
+    int i;
+    Tcl_Obj *rPtr;
 
     /*
      * We start by making sure that the mailcap files have been loaded
@@ -462,10 +460,7 @@ RatMcapFindCmd(Tcl_Interp *interp, BodyInfo *bodyInfoPtr)
 		continue;
 	    }
 	    if (file) {
-		oPtr = Tcl_GetVar2Ex(interp, "option", "permissions",
-				     TCL_GLOBAL_ONLY);
-		Tcl_GetIntFromObj(interp, oPtr, &perm);
-		channel = Tcl_OpenFileChannel(interp, file, "w", perm);
+		channel = Tcl_OpenFileChannel(interp, file, "w", 0666);
 		RatBodySave(interp, channel, bodyInfoPtr, 0, 1);
 		Tcl_Close(interp, channel);
 	    }
@@ -502,7 +497,7 @@ RatMcapFindCmd(Tcl_Interp *interp, BodyInfo *bodyInfoPtr)
 /*
  *----------------------------------------------------------------------
  *
- * RatMailcapReload --
+ * RatMailcapReloadCmd --
  *
  *      This is just a wrapper which calls MailcapReload
  *
@@ -517,8 +512,8 @@ RatMcapFindCmd(Tcl_Interp *interp, BodyInfo *bodyInfoPtr)
  */
 
 int
-RatMailcapReload(ClientData dummy, Tcl_Interp *interp, int objc,
-		 Tcl_Obj *const objv[])
+RatMailcapReloadCmd(ClientData dummy, Tcl_Interp *interp, int objc,
+		    Tcl_Obj *const objv[])
 {
     MailcapReload(interp);
     return TCL_OK;

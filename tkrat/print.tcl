@@ -3,7 +3,7 @@
 # Handles printing of a message
 #
 #
-#  TkRat software and its included text is Copyright 1996-2002 by
+#  TkRat software and its included text is Copyright 1996-2004 by
 #  Martin Forssén
 #
 #  The full text of the legal notices is contained in the file called
@@ -18,7 +18,7 @@
 # which	  -	Which messages that should be printed "group" or "selected"
 
 proc Print {handler which} {
-    global option idCnt t b propLightFont
+    global option idCnt t b
 
     set msgs [GetMsgSet $handler $which]
     if {0 == [llength $msgs]} {
@@ -51,7 +51,7 @@ proc Print {handler which} {
     label $w.f.hs_label -text $t(headers): -anchor e
     set m $w.f.hs_menu.m
     menubutton $w.f.hs_menu -indicatoron 1 -relief raised -menu $m -pady 1 \
-	    -textvariable ${id}(header_set) -width 12 -font $propLightFont
+	    -textvariable ${id}(header_set) -width 12
     menu $m -tearoff 0
     foreach i {none selected all} {
 	$m add command -label $t($i) \
@@ -83,8 +83,7 @@ proc Print {handler which} {
     wm protocol $w WM_DELETE_WINDOW "Print2 $id 0"
     bind $w <Return> "Print2 $id 1"
 
-    # Place and focus
-    Place $w print
+    ::tkrat::winctl::SetGeometry print $w
     focus $w
 
     set hd(msgs) $msgs
@@ -102,7 +101,7 @@ proc Print {handler which} {
 
 proc PrintAddBodyparts {handler w body indent} {
     upvar #0 $handler hd
-    global t b propLightFont
+    global t b
 
     set type [string tolower [$body type]]
     if {"multipart" == [lindex $type 0]} {
@@ -135,8 +134,7 @@ proc PrintAddBodyparts {handler w body indent} {
 	}
     }
     set hd($body) 1
-    checkbutton $w.b$body -variable ${handler}($body) -text "$indent$desc" \
-	    -font $propLightFont
+    checkbutton $w.b$body -variable ${handler}($body) -text "$indent$desc"
     grid $w.b$body - -sticky w
     set b($w.b$body) print_bodypart
     return $body
@@ -151,7 +149,7 @@ proc PrintAddBodyparts {handler w body indent} {
 # print   - True if we should print
 
 proc Print2 {handler print} {
-    upvar #0 $handler hd
+    upvar \#0 $handler hd
     global option b
 
     if {$print} {
@@ -184,6 +182,7 @@ proc Print2 {handler print} {
     }
     foreach bn [array names b $hd(w).*] {unset b($bn)}
     catch {focus $hd(oldfocus)}
+    ::tkrat::winctl::RecordGeometry print $hd(w)
     destroy $hd(w)
     unset hd
 }
@@ -232,15 +231,20 @@ proc DoPrintMsg {hs msg bodys} {
     } else {
 	set fileName $option(print_file)
     }
-    set tmpFH [open $fileName w]
-    if {$option(print_pretty)} {
-	RatPrettyPrintMsg $tmpFH $hs $msg $bodys
-    } else {
-	PlainPrintMsg $tmpFH $hs $msg $bodys
-    }
-    close $tmpFH
-    if {"printer" == $option(print_dest)} {
-	ExecPrintCommand $fileName
+    catch {
+        set tmpFH [open $fileName w]
+        if {$option(print_pretty)} {
+            RatPrettyPrintMsg $tmpFH $hs $msg $bodys
+        } else {
+            PlainPrintMsg $tmpFH $hs $msg $bodys
+        }
+        close $tmpFH
+        if {"printer" == $option(print_dest)} {
+            ExecPrintCommand $fileName
+        }
+    } err
+    if {$err != ""} {
+        Popup $err
     }
 }
 
@@ -339,7 +343,7 @@ proc PrintDone {name1 name2 op} {
 # Arguments:
 
 proc PrintSetup {} {
-    global t option b propLightFont
+    global t option b
 
     set w .ps
 
@@ -435,12 +439,12 @@ proc PrintSetup {} {
     set b($w.p.mfont) print_font
     label $w.p.fontsize -text $t(font_size): -anchor e
     entry $w.p.efsize -width 5 -textvariable ${id}(fontsize)
-    label $w.p.funit -text $t(points) -font $propLightFont -anchor w
+    label $w.p.funit -text $t(points) -anchor w
     grid $w.p.fontsize $w.p.efsize $w.p.funit -sticky ew
     set b($w.p.efsize) print_fontsize
     label $w.p.res -text $t(pic_res): -anchor e
     entry $w.p.eres -width 5 -textvariable ${id}(resolution)
-    label $w.p.runit -text $t(dpi) -font $propLightFont -anchor w
+    label $w.p.runit -text $t(dpi) -anchor w
     grid $w.p.res $w.p.eres $w.p.runit -sticky ew
     set b($w.p.eres) print_res
     grid columnconfigure $w.p 3 -weight 1
@@ -454,7 +458,7 @@ proc PrintSetup {} {
 	 $w.p \
 	 $w.buttons -side top -expand 1 -fill both 
 
-    Place $w printSetup
+    ::tkrat::winctl::SetGeometry printSetup $w
 
     bind $w <Return> "PrintSetup2 $id 1"
     rat_ed::enabledisable $hd(pretty) $w.p
@@ -506,5 +510,6 @@ proc PrintSetup2 {handler apply} {
 	    SaveOptions
 	}
     }
+    ::tkrat::winctl::RecordGeometry printSetup $hd(w)
     wm withdraw $hd(w)
 }

@@ -4,7 +4,7 @@
 #	It is loosely based on code by Jeffrey Hobbs
 #
 #
-#  TkRat software and its included text is Copyright 1996-2002 by
+#  TkRat software and its included text is Copyright 1996-2004 by
 #  Martin Forssén
 #
 #  The full text of the legal notice is contained in the file called
@@ -20,9 +20,11 @@ namespace eval rat_balloon {
     variable afterID {}
     variable enabled 1
     variable toplevel .__balloonHelp
+    variable toplevel_visible 0
     variable text ""
     variable winsVar ""
     variable textsVar ""
+    variable ignore 0
 
     option add *TkRat*ballonBackground #fefeb4 widgetDefault
     option add *TkRat*ballonForeground black widgetDefault
@@ -44,25 +46,14 @@ proc rat_balloon::Init {wins texts} {
     variable toplevel
 
     # Prepare bindings
-    bind all <Any-Motion> {+
-    if {$option(show_balhelp)} {
-	    rat_balloon::Hide
-	    if {"Menu" == [winfo class %W]} {
-		set rat_balloon::last -1
-		set cur [%W index active]
-		if {[info exists ${rat_balloon::winsVar}(%W,$cur)]} {
-		    set rat_balloon::afterID [after $option(balhelp_delay) \
-			    [list rat_balloon::Show %W $cur]]
-		}
-	    } elseif [info exists ${rat_balloon::winsVar}(%W)] {
-		set rat_balloon::afterID [after $option(balhelp_delay) \
-					      [list rat_balloon::Show %W]]
-	    }
-	}
-    }
-    bind all <Leave>		    {+rat_balloon::Hide }
-    bind Balloons <Any-KeyPress>    {+rat_balloon::Hide }
-    bind Balloons <Any-Button>      {+rat_balloon::Hide }
+    bind all <Any-Motion>           {+rat_balloon::Event %W %y}
+    bind all <Any-Button>           {+rat_balloon::Event %W %y}
+    bind all <Any-Key>              {+rat_balloon::Event %W %y}
+    bind all <Any-MouseWheel>       {+rat_balloon::Event %W %y}
+    bind all <Enter>                {+rat_balloon::Event %W %y}
+    bind all <Leave>		    {+rat_balloon::Hide}
+    bind Balloons <Any-Key>         {+rat_balloon::Hide}
+    bind Balloons <Any-Button>      {+rat_balloon::HideW}
 
     # Create the actual balloon
     toplevel $toplevel -bd 1 -class TkRat
@@ -78,6 +69,47 @@ proc rat_balloon::Init {wins texts} {
     pack $toplevel.l
 }
 
+
+# rat_balloon::Event --
+#
+#       Handles incoming events
+#
+# Arguments:
+#       w - window of event
+#       y - position of event
+#
+# Results:
+#       Resets the timers
+
+proc rat_balloon::Event {w y} {
+    variable winsVar
+    variable afterID
+    variable last
+    variable ignore
+    upvar #0 $winsVar wins
+    global option
+
+    if {$ignore} {
+	return
+    }
+
+    catch {
+	if {$option(show_balhelp)} {
+	    rat_balloon::Hide
+	    if {"Menu" == [winfo class $w]} {
+		set last -1
+		set cur [$w index @$y]
+		if {[info exists wins($w,$cur)]} {
+		    set afterID [after $option(balhelp_delay) \
+				     [list rat_balloon::Show $w $cur]]
+		}
+	    } elseif [info exists wins($w)] {
+		set afterID [after $option(balhelp_delay) \
+				 [list rat_balloon::Show $w]]
+	    }
+	}
+    }
+}
 
 # rat_balloon::Show --
 #
@@ -95,6 +127,7 @@ proc rat_balloon::Show {w {i {}}} {
 	    $w [eval winfo containing [winfo pointerxy $w]]]} return
 
     variable toplevel
+    variable toplevel_visible
     variable text
     variable last
     variable last_text
@@ -134,6 +167,7 @@ proc rat_balloon::Show {w {i {}}} {
     if {"" != $f && -1 == [lsearch [bindtags $f] Balloon]} {
 	bindtags $f [linsert [bindtags $f] end Balloon]
     }
+    set toplevel_visible 1
 }
 
 
@@ -149,7 +183,37 @@ proc rat_balloon::Show {w {i {}}} {
 proc rat_balloon::Hide {} {
     variable afterID
     variable toplevel
+    variable toplevel_visible
+    variable ignore
 
-    after cancel $afterID
-    catch {wm withdraw $toplevel}
+    if {$ignore} {
+	return
+    }
+    if {"" != $afterID} {
+	after cancel $afterID
+	set afterID ""
+    }
+    if {0 != $toplevel_visible} {
+	catch {wm withdraw $toplevel}
+	set toplevel_visible 0
+    }
+}
+
+# rat_balloon::SetIgnore --
+#
+#       Tells the ballon kit if it shoudl ignore events or not. This is useful
+#       if one wants to do stuff to the window system which do not affec the
+#       ballon kit.
+#
+# Arguments
+#       value = The ignore value (true means ignore events)
+
+proc rat_balloon::SetIgnore {value} {
+    variable ignore
+
+    if {$value} {
+	set ignore 1
+    } else {
+	after idle set rat_balloon::ignore 0
+    }
 }

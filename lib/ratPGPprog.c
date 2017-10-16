@@ -3,7 +3,7 @@
  *
  *	This file contains compatibility functions.
  *
- * TkRat software and its included text is Copyright 1996-2002 by
+ * TkRat software and its included text is Copyright 1996-2004 by
  * Martin Forssén
  *
  * The full text of the legal notice is contained in the file called
@@ -25,10 +25,11 @@
  */
 typedef struct {
     Tcl_Obj *keyid;
-    unsigned int addrCount;
-    Tcl_Obj **address;
+    Tcl_Obj *addresses;
+    Tcl_Obj *subjects;
     Tcl_Obj *descr;
-    Tcl_Obj *key;
+    Tcl_Obj *sign;
+    Tcl_Obj *encrypt;
 } RatPGPKey;  
 typedef struct {
     RatPGPKey *keys;
@@ -37,8 +38,15 @@ typedef struct {
     Tcl_Obj *title;
     char *name;
     time_t mtime;
+    int secring;
 } RatPGPKeyring;
 static RatPGPKeyring *keyring = NULL;
+
+/*
+ * Maximum number of accepted fields in pgp key list output. Extra
+ * fields will be ignored.
+ */
+#define MAX_FIELDS 20
 
 /*
  * Local functions
@@ -48,10 +56,18 @@ static int RatRunPGP(Tcl_Interp *interp, int nopass, char *cmd, char *args,
 static Tcl_DString *RatPGPRunOld(Tcl_Interp *interp, BodyInfo *bodyInfoPtr,
 				 char *text, char *start, char *end);
 static int RatUpdatePGPKeys(Tcl_Interp *interp, RatPGPKeyring *k);
-static void AddKey(RatPGPKeyring *k, Tcl_Obj **ids, unsigned int idNum,
-	Tcl_DString *descr);
+static void ParsePGPListFormat(Tcl_Interp *interp, FILE *fp, Tcl_RegExp exp_id,
+			       Tcl_RegExp axp_addr, int blankiscont,
+			       RatPGPKeyring *k);
+static void ParseGPGListFormat(Tcl_Interp *interp, FILE *fp, RatPGPKeyring *k);
+static void AddKey(Tcl_Interp *interp, RatPGPKeyring *k, Tcl_Obj *ids,
+		   Tcl_DString *descr);
+static void AddKeyNew(Tcl_Interp *interp, RatPGPKeyring *k, Tcl_Obj *id,
+		      Tcl_Obj *addresses, Tcl_Obj *subjects, Tcl_Obj *descr,
+		      Tcl_Obj *sign, Tcl_Obj *encrypt);
 static void RatPGPFreeKeyring(RatPGPKeyring *k);
-static RatPGPKeyring* RatPGPNewKeyring(const char *name);
+static RatPGPKeyring* RatPGPNewKeyring(Tcl_Interp *interp, const char *name,
+				       int secring);
 
 /*
  *----------------------------------------------------------------------
@@ -108,6 +124,7 @@ RatRunPGP(Tcl_Interp *interp, int nopass, char *command, char *args,
      * Open outfile and create the pgp subprocess.
      */
     tmp = Tcl_GetVar(interp, "rat_tmp", TCL_GLOBAL_ONLY);
+    tmp = RatTranslateFileName(interp, tmp);
     snprintf(name, sizeof(name), "%s/pgptmp.%d", tmp, getpid());
     if ( 0 > (out = open(name, O_WRONLY|O_CREAT|O_TRUNC, 0600))) {
 	return 0;
@@ -167,24 +184,26 @@ RatRunPGP(Tcl_Interp *interp, int nopass, char *command, char *args,
  *----------------------------------------------------------------------
  */
 
-BODY*
-RatPGPEncrypt(Tcl_Interp *interp, ENVELOPE *env, BODY *body, int sign)
+int
+RatPGPEncrypt(Tcl_Interp *interp, ENVELOPE *env, BODY **body,
+	      char *signer, Tcl_Obj *rcpts)
 {
-    int toPGP, fromPGP, errPGP, length, retry, pid, result, status, i, j;
-    char *passPhrase = NULL, *hdrPtr, *from, buf[MAILTMPLEN], *command;
+    int toPGP, fromPGP, errPGP, length, all_ok, pid, result, status, i, j,
+	objc;
+    char *hdrPtr, *from, buf[MAILTMPLEN], *command;
+    volatile char passPhrase[MAXPASSLENGTH];
     CONST84 char *version;
-    ADDRESS *adrPtr;
-    Tcl_DString cmdDS, encDS, ds;
+    Tcl_DString cmdDS, encDS;
     BODY *multiPtr;
     PARAMETER *parmPtr;
     PART *partPtr;
     char *recipSep;
+    Tcl_Obj **objv;
 
     Tcl_DStringInit(&cmdDS);
     Tcl_DStringInit(&encDS);
-    Tcl_DStringInit(&ds);
 
-    rfc822_encode_body_8bit(env, body);
+    rfc822_encode_body_8bit(env, *body);
     /*
      * Create command to run
      */
@@ -193,20 +212,20 @@ RatPGPEncrypt(Tcl_Interp *interp, ENVELOPE *env, BODY *body, int sign)
 	command = "gpg";
 	Tcl_DStringAppend(&cmdDS,
 		"-eatq --no-secmem-warning --passphrase-fd 0 --batch", -1);
-	if (sign) {
-	    Tcl_DStringAppend(&cmdDS," -s",-1);
+	if (signer) {
+	    Tcl_DStringAppend(&cmdDS, " -s ", -1);
 	}
 	recipSep = " -r ";
     } else if (!strcmp("2", version)) {
 	command = "pgp";
 	Tcl_DStringAppend(&cmdDS, "+BATCHMODE +VERBOSE=0 -eaf", -1);
-	if (sign) {
+	if (signer) {
 	    Tcl_DStringAppend(&cmdDS, "s", 1);
 	}
 	recipSep=" ";
     } else if (!strcmp("5", version)) {
 	command = "pgpe";
-	if (sign) {
+	if (signer) {
 	    Tcl_DStringAppend(&cmdDS, "-s ", -1);
 	}
 	Tcl_DStringAppend(&cmdDS, "-at -f +batchmode=1 -r", -1);
@@ -214,75 +233,51 @@ RatPGPEncrypt(Tcl_Interp *interp, ENVELOPE *env, BODY *body, int sign)
     } else if (!strcmp("6", version)) {
 	command = "pgp";
 	Tcl_DStringAppend(&cmdDS, "+BATCHMODE +VERBOSE=0 +force -eaf", -1);
-	if (sign) {
+	if (signer) {
 	    Tcl_DStringAppend(&cmdDS, "s", 1);
-	    if (RatAddressSize(env->from, 0) < sizeof(buf)) {
-		buf[0] = '\0';
-		rfc822_write_address_full(buf, env->from, NULL);
-		Tcl_DStringAppend(&cmdDS, " -u {", 5);
-		Tcl_DStringAppend(&cmdDS, buf, -1);
-		Tcl_DStringAppend(&cmdDS, "}", 1);
-	    }
 	}
 	recipSep=" ";
     } else {
 	Tcl_SetResult(interp, "Unkown pgp version", TCL_STATIC);
-	return NULL;
+	return TCL_ERROR;
     }
-    /* TODO, specify addresses elsewhere */
-    for (adrPtr = env->to; adrPtr; adrPtr = adrPtr->next) {
-	Tcl_DStringSetLength(&ds, RatAddressSize(adrPtr, 0));
-	Tcl_DStringValue(&ds)[0] = '\0';
-	rfc822_address(Tcl_DStringValue(&ds), adrPtr);
-	Tcl_DStringSetLength(&ds, strlen(Tcl_DStringValue(&ds)));
-	Tcl_DStringAppend(&cmdDS, recipSep, -1);
-	Tcl_DStringAppend(&cmdDS, Tcl_DStringValue(&ds), -1);
+    if (signer) {
+	Tcl_DStringAppend(&cmdDS, " -u ", 4);
+	Tcl_DStringAppendElement(&cmdDS, signer);
     }
-    for (adrPtr = env->cc; adrPtr; adrPtr = adrPtr->next) {
-	Tcl_DStringSetLength(&ds, RatAddressSize(adrPtr, 0));
-	Tcl_DStringValue(&ds)[0] = '\0';
-	rfc822_write_address_full(Tcl_DStringValue(&ds), adrPtr, NULL);
-	Tcl_DStringSetLength(&ds, strlen(Tcl_DStringValue(&ds)));
+    Tcl_ListObjGetElements(interp, rcpts, &objc, &objv);
+    for (i=0; i<objc; i++) {
 	Tcl_DStringAppend(&cmdDS, recipSep, -1);
-	Tcl_DStringAppend(&cmdDS, Tcl_DStringValue(&ds), -1);
-    }
-    for (adrPtr = env->bcc; adrPtr; adrPtr = adrPtr->next) {
-	Tcl_DStringSetLength(&ds, RatAddressSize(adrPtr, 0));
-	Tcl_DStringValue(&ds)[0] = '\0';
-	rfc822_write_address_full(Tcl_DStringValue(&ds), adrPtr, NULL);
-	Tcl_DStringSetLength(&ds, strlen(Tcl_DStringValue(&ds)));
-	Tcl_DStringAppend(&cmdDS, recipSep, -1);
-	Tcl_DStringAppend(&cmdDS, Tcl_DStringValue(&ds), -1);
+	Tcl_DStringAppend(&cmdDS, Tcl_GetString(objv[i]), -1);
     }
 
     /*
      * Run command
      */
     do {
-	if (sign) {
-	    passPhrase = RatSenderPGPPhrase(interp);
-	    if (NULL == passPhrase) {
+	if (signer) {
+	    if (NULL == RatPGPPhrase(interp, passPhrase, sizeof(passPhrase))) {
 		Tcl_DStringFree(&encDS);
 		Tcl_DStringFree(&cmdDS);
-		return NULL;
+		return TCL_ERROR;
 	    }
 	}
 	pid = RatRunPGP(interp, 0, command, Tcl_DStringValue(&cmdDS), &toPGP,
 			&from, &errPGP);
-	if (sign) {
-	    write(toPGP, passPhrase, strlen(passPhrase));
-	    memset(passPhrase, '\0', strlen(passPhrase));
+	if (signer) {
+	    write(toPGP, (char*)passPhrase, strlen((char*)passPhrase));
+	    for (i=0; i<strlen((char*)passPhrase); i++) passPhrase[i] = '\0';
 	}
-        if (strcmp("6", version) || sign) {
+        if (strcmp("6", version) || signer) {
 	    write(toPGP, "\n", 1);
 	}
 	hdrPtr = buf;
 	buf[0] = '\0';
-	rfc822_write_body_header(&hdrPtr, body);
+	rfc822_write_body_header(&hdrPtr, *body);
 	strlcat(buf, "\015\012", sizeof(buf));
 	write(toPGP, buf, strlen(buf));
 	RatInitDelayBuffer();
-	rfc822_output_body(body, RatDelaySoutr, (void*)toPGP);
+	rfc822_output_body(*body, RatDelaySoutr, (void*)toPGP);
 	close(toPGP);
 	do {
 	    result = waitpid(pid, &status, 0);
@@ -311,37 +306,29 @@ RatPGPEncrypt(Tcl_Interp *interp, ENVELOPE *env, BODY *body, int sign)
 	 * Check for errors
 	 */
 	if (pid != result || WEXITSTATUS(status)) {
-	    Tcl_DString error;
-	    char *reply;
-
-	    Tcl_DStringInit(&error);
-	    Tcl_DStringAppendElement(&error, "PGP");
-	    Tcl_DStringAppendElement(&error, "error");
-	    Tcl_DStringStartSublist(&error);
+	    Tcl_DStringSetLength(&cmdDS, 0);
+	    Tcl_DStringAppendElement(&cmdDS, "RatPGPError");
+	    Tcl_DStringStartSublist(&cmdDS);
 	    do {
-		if (0 < (length = length = read(errPGP, buf, sizeof(buf)))) {
-		    Tcl_DStringAppend(&error, buf, length);
+		if (0 < (length = read(errPGP, buf, sizeof(buf)))) {
+		    Tcl_DStringAppend(&cmdDS, buf, length);
 		}
 	    } while (length > 0);
-	    Tcl_DStringEndSublist(&error);
-
-	    reply = RatSendPGPCommand(Tcl_DStringValue(&error));
-	    Tcl_DStringFree(&error);
-	    if (!strncmp("ABORT", reply, 5)) {
+	    Tcl_DStringEndSublist(&cmdDS);
+	    Tcl_GlobalEval(interp, Tcl_DStringValue(&cmdDS));
+	    if (!strncmp("ABORT", Tcl_GetStringResult(interp), 5)) {
 		close(errPGP);
 		Tcl_DStringFree(&encDS);
-		Tcl_DStringFree(&cmdDS);
-		return NULL;
+		return TCL_ERROR;
 	    }
-	    retry = 1;
+	    all_ok = 0;
 	} else {
-	    retry = 0;
+	    all_ok = 1;
 	}
 	close(errPGP);
-    } while(0 != retry);
+    } while(0 == all_ok);
     Tcl_DStringFree(&cmdDS);
-    Tcl_DStringFree(&ds);
-    mail_free_body(&body);
+    mail_free_body(body);
 
     /*
      * Build encrypted multipart
@@ -352,6 +339,12 @@ RatPGPEncrypt(Tcl_Interp *interp, ENVELOPE *env, BODY *body, int sign)
     multiPtr->parameter = parmPtr = mail_newbody_parameter();
     parmPtr->attribute = cpystr("protocol");
     parmPtr->value = cpystr("application/pgp-encrypted");
+    parmPtr->next = mail_newbody_parameter();
+    parmPtr = parmPtr->next;
+    parmPtr->attribute = cpystr("BOUNDARY");
+    snprintf(buf, sizeof(buf), "%ld-%ld-%ld=:%ld",(long)gethostid(),random(),
+	     time(NULL), (long)getpid());
+    parmPtr->value = cpystr(buf);
     parmPtr->next = NULL;
     multiPtr->encoding = ENC7BIT;
     multiPtr->id = NULL;
@@ -373,7 +366,9 @@ RatPGPEncrypt(Tcl_Interp *interp, ENVELOPE *env, BODY *body, int sign)
     Tcl_DStringFree(&encDS);
     partPtr->next = NULL;
 
-    return multiPtr;
+    *body = multiPtr;
+
+    return TCL_OK;
 }
 
 
@@ -394,69 +389,70 @@ RatPGPEncrypt(Tcl_Interp *interp, ENVELOPE *env, BODY *body, int sign)
  *----------------------------------------------------------------------
  */
 
-BODY*
-RatPGPSign(Tcl_Interp *interp, ENVELOPE *env, BODY *body, const char *keyid)
+int
+RatPGPSign(Tcl_Interp *interp, ENVELOPE *env, BODY **body, const char *signer)
 {
-    int toPGP, fromPGP, errPGP, length, retry, pid, status, result, i, j;
-    char *passPhrase, *hdrPtr, *from, *cmd, buf[MAILTMPLEN];
+    int toPGP, fromPGP, errPGP, length, all_ok, pid, status, result, i, j;
+    char *hdrPtr, *outfile, *cmd, buf[MAILTMPLEN];
+    volatile char passPhrase[MAXPASSLENGTH];
     CONST84 char *version;
-    Tcl_DString sigDS;
+    Tcl_DString sigDS, cmdDS;
     BODY *multiPtr;
     PARAMETER *parmPtr;
     PART *partPtr;
-	
+
     version = Tcl_GetVar2(interp, "option", "pgp_version", TCL_GLOBAL_ONLY);
 
     Tcl_DStringInit(&sigDS);
+    Tcl_DStringInit(&cmdDS);
     do {
 	/*
 	 * Run command
 	 */
-        passPhrase = RatSenderPGPPhrase(interp);
-	if (NULL == passPhrase) {
-	    return NULL;
-	}
-	rfc822_encode_body_7bit(NIL, body);
+	rfc822_encode_body_7bit(NIL, *body);
+	Tcl_DStringSetLength(&cmdDS, 0);
 	if (!strcmp("gpg-1", version)) {
 	    cmd = "gpg";
-	    strlcpy(buf, "--detach-sign --armor --no-secmem-warning "
-		    "--passphrase-fd 0 --batch", sizeof(buf));
+	    Tcl_DStringAppend(&cmdDS, "--detach-sign --armor "
+			      "--no-secmem-warning --passphrase-fd 0 "
+			      "--batch", -1);
 	} else if (!strcmp("2", version)) {
 	    cmd = "pgp";
-	    strlcpy(buf, "+BATCHMODE +VERBOSE=0 -satbf", sizeof(buf));
+	    Tcl_DStringAppend(&cmdDS, "+BATCHMODE +VERBOSE=0 -satbf", -1);
 	} else if (!strcmp("5", version)) {
 	    cmd = "pgps";
-	    strlcpy(buf, "-abf", sizeof(buf));
+	    Tcl_DStringAppend(&cmdDS, "-abf", -1);
 	} else if (!strcmp("6", version)) {
 	    cmd = "pgp";
-	    strlcpy(buf, "+BATCHMODE +VERBOSE=0 +force -satbf", sizeof(buf));
+	    Tcl_DStringAppend(&cmdDS,"+BATCHMODE +VERBOSE=0 +force -satbf",-1);
 	} else {
 	    Tcl_SetResult(interp, "Unkown pgp version", TCL_STATIC);
-	    return NULL;
+	    return TCL_ERROR;
 	}
-	if (keyid && *keyid) {
-	    strlcat(buf, " -u {", sizeof(buf));
-	    strlcat(buf, keyid, sizeof(buf));
-	    strlcat(buf, "}", sizeof(buf));
-	}
-	pid = RatRunPGP(interp, 0, cmd, buf, &toPGP, &from, &errPGP);
+	Tcl_DStringAppend(&cmdDS, " -u ", -1);
+	Tcl_DStringAppendElement(&cmdDS, signer);
+	pid = RatRunPGP(interp, 0, cmd, Tcl_DStringValue(&cmdDS),
+			&toPGP, &outfile, &errPGP);
 	
-	write(toPGP, passPhrase, strlen(passPhrase));
-	memset(passPhrase, '\0', strlen(passPhrase));
+        if (NULL == RatPGPPhrase(interp, passPhrase, sizeof(passPhrase))) {
+	    return TCL_ERROR;
+	}
+	write(toPGP, (char*)passPhrase, strlen((char*)passPhrase));
+	for (i=0; i<strlen((char*)passPhrase); i++) passPhrase[i] = '\0';
 	write(toPGP, "\n", 1);
 	hdrPtr = buf;
 	buf[0] = '\0';
-	rfc822_write_body_header(&hdrPtr, body);
+	rfc822_write_body_header(&hdrPtr, *body);
 	strlcat(buf, "\015\012", sizeof(buf));
 	write(toPGP, buf, strlen(buf));
 	RatInitDelayBuffer();
-	rfc822_output_body(body, RatDelaySoutr, (void*)toPGP);
+	rfc822_output_body(*body, RatDelaySoutr, (void*)toPGP);
 	close(toPGP);
-	/*i = open("/tmp/sigdump", O_CREAT | O_TRUNC | O_WRONLY, 0644);
-	  write(i, buf, strlen(buf));
-	  RatInitDelayBuffer();
-	  rfc822_output_body(body, RatDelaySoutr, (void*)i);
-	  close(i);*/
+	/*i = open("/tmp/sigdump", O_CREAT | O_TRUNC | O_WRONLY, FILEMODE);
+	write(i, buf, strlen(buf));
+	RatInitDelayBuffer();
+	rfc822_output_body(*body, RatDelaySoutr, (void*)i);
+	close(i);*/
 	do {
 	    result = waitpid(pid, &status, 0);
 	} while(-1 == result && EINTR == errno);
@@ -464,7 +460,7 @@ RatPGPSign(Tcl_Interp *interp, ENVELOPE *env, BODY *body, const char *keyid)
 	/*
 	 * Read result
 	 */
-	fromPGP = open(from, O_RDONLY);
+	fromPGP = open(outfile, O_RDONLY);
 	Tcl_DStringSetLength(&sigDS, 0);
 	do {
 	    length = read(fromPGP, buf, sizeof(buf));
@@ -478,39 +474,34 @@ RatPGPSign(Tcl_Interp *interp, ENVELOPE *env, BODY *body, const char *keyid)
 	    }
 	} while (length > 0);
 	close(fromPGP);
-	unlink(from);
+	unlink(outfile);
 
 	/*
 	 * Check for errors
 	 */
 	if (pid != result || WEXITSTATUS(status)) {
-	    Tcl_DString error;
-	    char *reply;
-
-	    Tcl_DStringInit(&error);
-	    Tcl_DStringAppendElement(&error, "PGP");
-	    Tcl_DStringAppendElement(&error, "error");
-	    Tcl_DStringStartSublist(&error);
+	    Tcl_DStringSetLength(&cmdDS, 0);
+	    Tcl_DStringAppendElement(&cmdDS, "RatPGPError");
+	    Tcl_DStringStartSublist(&cmdDS);
 	    do {
 		if (0 < (length = read(errPGP, buf, sizeof(buf)))) {
-		    Tcl_DStringAppend(&error, buf, length);
+		    Tcl_DStringAppend(&cmdDS, buf, length);
 		}
 	    } while (length > 0);
-	    Tcl_DStringEndSublist(&error);
-
-	    reply = RatSendPGPCommand(Tcl_DStringValue(&error));
-	    Tcl_DStringFree(&error);
-	    if (!strncmp("ABORT", reply, 5)) {
+	    Tcl_DStringEndSublist(&cmdDS);
+	    Tcl_GlobalEval(interp, Tcl_DStringValue(&cmdDS));
+	    if (!strncmp("ABORT", Tcl_GetStringResult(interp), 5)) {
 		close(errPGP);
 		Tcl_DStringFree(&sigDS);
-		return NULL;
+		return TCL_ERROR;
 	    }
-	    retry = 1;
+	    all_ok = 0;
 	} else {
-	    retry = 0;
+	    all_ok = 1;
 	}
 	close(errPGP);
-    } while(0 != retry);
+    } while(0 == all_ok);
+    Tcl_DStringFree(&cmdDS);
 
     /*
      * Build signature multipart
@@ -528,12 +519,18 @@ RatPGPSign(Tcl_Interp *interp, ENVELOPE *env, BODY *body, const char *keyid)
     parmPtr = parmPtr->next;
     parmPtr->attribute = cpystr("protocol");
     parmPtr->value = cpystr("application/pgp-signature");
+    parmPtr->next = mail_newbody_parameter();
+    parmPtr = parmPtr->next;
+    parmPtr->attribute = cpystr("BOUNDARY");
+    snprintf(buf, sizeof(buf), "%ld-%ld-%ld=:%ld",(long)gethostid(),random(),
+	     time(NULL), (long)getpid());
+    parmPtr->value = cpystr(buf);
     parmPtr->next = NULL;
     multiPtr->encoding = ENC7BIT;
     multiPtr->id = NULL;
     multiPtr->description = NULL;
     multiPtr->nested.part = partPtr = mail_newbody_part();
-    partPtr->body = *body;
+    memcpy(&partPtr->body, *body, sizeof(partPtr->body));
     partPtr->next = mail_newbody_part();
     partPtr = partPtr->next;
     partPtr->body.type = TYPEAPPLICATION;
@@ -545,7 +542,9 @@ RatPGPSign(Tcl_Interp *interp, ENVELOPE *env, BODY *body, const char *keyid)
     Tcl_DStringFree(&sigDS);
     partPtr->next = NULL;
 
-    return multiPtr;
+    *body = multiPtr;
+
+    return TCL_OK;
 }
 
 
@@ -627,7 +626,8 @@ RatPGPChecksig(Tcl_Interp *interp, MessageProcInfo* procInfo,
 	 * Generate filenames
 	 */
 	tmp = Tcl_GetVar(interp, "rat_tmp", TCL_GLOBAL_ONLY);
-	RatGenId(NULL, interp, 0, NULL);
+	tmp = RatTranslateFileName(interp, tmp);
+	RatGenIdCmd(NULL, interp, 0, NULL);
 	snprintf(textfile, sizeof(textfile), "%s/rat.%s",
 		tmp, Tcl_GetStringResult(interp));
 	strlcpy(sigfile, textfile, sizeof(sigfile));
@@ -656,12 +656,12 @@ RatPGPChecksig(Tcl_Interp *interp, MessageProcInfo* procInfo,
 	    return;
 	}
 	end -= 2;
-	fd = open(textfile, O_CREAT | O_TRUNC | O_WRONLY, 0600);
+	fd = open(textfile, O_CREAT | O_TRUNC | O_WRONLY, FILEMODE);
 	write(fd, start, end-start);
 	close(fd);
 	text = (unsigned char*)(*procInfo[bodyInfoPtr->type].fetchBodyProc)
 		(bodyInfoPtr->secPtr->firstbornPtr->nextPtr, &length);
-	fd = open(sigfile, O_CREAT | O_TRUNC | O_WRONLY, 0600);
+	fd = open(sigfile, O_CREAT | O_TRUNC | O_WRONLY, FILEMODE);
 	if (text) {
 	    write(fd, text, length);
 	}
@@ -776,8 +776,9 @@ void
 RatPGPDecrypt(Tcl_Interp *interp, MessageProcInfo *procInfo,
 	      BodyInfo **bodyInfoPtrPtr)
 {
-    int toPGP, fromPGP, errPGP, result, pid, retry, status;
-    char *text, *passPhrase, buf[1024], *from;
+    int toPGP, fromPGP, errPGP, result, pid, retry, status, i;
+    char *text, buf[1024], *from;
+    volatile char passPhrase[MAXPASSLENGTH];
     CONST84 char *version;
     BodyInfo *origPtr = *bodyInfoPtrPtr, *partInfoPtr;
     MessageInfo *msgPtr;
@@ -797,8 +798,7 @@ RatPGPDecrypt(Tcl_Interp *interp, MessageProcInfo *procInfo,
 	    ((*bodyInfoPtrPtr)->firstbornPtr->nextPtr, &length);
     retry = 1;
     while (retry && text) {
-	passPhrase = RatPGPPhrase(interp);
-	if (NULL == passPhrase) {
+	if (NULL == RatPGPPhrase(interp, passPhrase, sizeof(passPhrase))) {
 	    goto failed;
 	}
 	if (!strcmp("gpg-1", version)) {
@@ -818,11 +818,11 @@ RatPGPDecrypt(Tcl_Interp *interp, MessageProcInfo *procInfo,
 			    &toPGP, &from, &errPGP);
 	} else {
 	    Tcl_SetResult(interp, "Unkown pgp version", TCL_STATIC);
+	    for (i=0; i<strlen((char*)passPhrase); i++) passPhrase[i] = '\0';
 	    break;
 	}
-	write(toPGP, passPhrase, strlen(passPhrase));
-	memset(passPhrase, '\0', strlen(passPhrase));
-	ckfree(passPhrase);
+	write(toPGP, (char*)passPhrase, strlen((char*)passPhrase));
+	for (i=0; i<strlen((char*)passPhrase); i++) passPhrase[i] = '\0';
 	write(toPGP, "\n", 1);
 	write(toPGP, text, length);
 	/*fprintf(stderr, "%s:%d Dumped data to '/tmp/msgdump'\n", __FILE__,
@@ -934,23 +934,30 @@ RatPGPListKeys(Tcl_Interp *interp, char *keyringName)
     struct stat sbuf;
     Tcl_DString ck;
     RatPGPKeyring *k = NULL;
-    Tcl_Obj **list, **l = NULL, *l3[3];
-    int i, j, size;
-    CONST84 char *value;
+    Tcl_Obj **list, **l = NULL, *l3[6];
+    int i;
+    CONST84 char *value, *name;
+    int secring = 0;
 
-    if (keyringName) {
+    Tcl_DStringInit(&ck);
+    if (keyringName && !strcmp("PubRing", keyringName)) {
+	Tcl_DStringAppend(&ck, "", 0);
+    } else if (keyringName && !strcmp("SecRing", keyringName)) {
+	Tcl_DStringAppend(&ck, "", 0);
+	secring = 1;
+    } else if (keyringName) {
 	switch (keyringName[0]) {
 	case '/':
-	    Tcl_DStringInit(&ck);
 	    Tcl_DStringAppend(&ck, keyringName, -1);
 	    break;
 	case '~':
-	    Tcl_TranslateFileName(interp, keyringName, &ck);
+	    name = RatTranslateFileName(interp, keyringName);
+	    Tcl_DStringAppend(&ck, name, -1);	    
 	    break;
 	default:
-	    Tcl_DStringInit(&ck);
 	    Tcl_DStringAppend(&ck,
-		    Tcl_GetVar2(interp, "env", "HOME", TCL_GLOBAL_ONLY), -1);
+			      Tcl_GetVar2(interp, "env", "HOME",
+					  TCL_GLOBAL_ONLY), -1);
 	    Tcl_DStringAppend(&ck, "/.pgp/", -1);
 	    Tcl_DStringAppend(&ck, keyringName, -1);
 	    break;
@@ -959,7 +966,6 @@ RatPGPListKeys(Tcl_Interp *interp, char *keyringName)
 	if (NULL == (value = RatGetPathOption(interp, "pgp_keyring"))) {
 	    return TCL_ERROR;
 	}
-	Tcl_DStringInit(&ck);
 	Tcl_DStringAppend(&ck, value, -1);
     }
 
@@ -971,14 +977,15 @@ RatPGPListKeys(Tcl_Interp *interp, char *keyringName)
 	if (0 != stat(k->name, &sbuf) || sbuf.st_mtime != k->mtime) {
 	    RatPGPFreeKeyring(keyring);
 	    k = NULL;
-	    keyring = k = RatPGPNewKeyring(Tcl_DStringValue(&ck));
+	    keyring = k = RatPGPNewKeyring(interp, Tcl_DStringValue(&ck),
+					   secring);
 	    if (TCL_OK != RatUpdatePGPKeys(interp, k)) {
 		return TCL_ERROR;
 	    }
 	}
     }
     if (!k) {
-	k = RatPGPNewKeyring(Tcl_DStringValue(&ck));
+	k = RatPGPNewKeyring(interp, Tcl_DStringValue(&ck), secring);
 	if (TCL_OK != RatUpdatePGPKeys(interp, k)) {
 	    return TCL_ERROR;
 	}
@@ -990,19 +997,14 @@ RatPGPListKeys(Tcl_Interp *interp, char *keyringName)
 
     if (0 < k->keyCount) {
 	list = (Tcl_Obj**)ckalloc(sizeof(Tcl_Obj*)*k->keyCount);
-	size = 0;
 	for (i=0; i<k->keyCount; i++) {
-	    if (k->keys[i].addrCount > size) {
-		size = k->keys[i].addrCount + 8;
-		l = (Tcl_Obj**)ckrealloc(l, sizeof(Tcl_Obj*)*size);
-	    }
-	    for (j=0; j < k->keys[i].addrCount; j++) {
-		l[j] = k->keys[i].address[j];
-	    }
 	    l3[0] = k->keys[i].keyid;
-	    l3[1] = Tcl_NewListObj(k->keys[i].addrCount, l);
+	    l3[1] = k->keys[i].addresses;
 	    l3[2] = k->keys[i].descr;
-	    list[i] = Tcl_NewListObj(3, l3);
+	    l3[3] = k->keys[i].subjects;
+	    l3[4] = k->keys[i].sign;
+	    l3[5] = k->keys[i].encrypt;
+	    list[i] = Tcl_NewListObj(6, l3);
 	}
 	l3[0] = k->title;
 	l3[1] = Tcl_NewListObj(k->keyCount, list);
@@ -1042,32 +1044,31 @@ RatPGPExtractKey(Tcl_Interp *interp, char *id, char *keyringName)
     int toPGP, fromPGP, errPGP, pid, status, length, ret;
     Tcl_DString cmd, ck;
     char buf[1024], *cPtr, *command, *from;
-    CONST84 char *value, *version;
+    CONST84 char *value, *version, *name, *keyring_arg;
     Tcl_Obj *rPtr;
 
+    Tcl_DStringInit(&ck);
     if (keyringName) {
 	switch (keyringName[0]) {
 	case '/':
-	    Tcl_DStringInit(&ck);
 	    Tcl_DStringAppend(&ck, keyringName, -1);
 	    break;
 	case '~':
-	    Tcl_TranslateFileName(interp, keyringName, &ck);
+	    name = RatTranslateFileName(interp, keyringName);
+	    Tcl_DStringAppend(&ck, name, -1);
 	    break;
 	default:
-	    Tcl_DStringInit(&ck);
 	    Tcl_DStringAppend(&ck,
-		    Tcl_GetVar2(interp, "env", "HOME", TCL_GLOBAL_ONLY), -1);
+			      Tcl_GetVar2(interp, "env", "HOME",
+					  TCL_GLOBAL_ONLY), -1);
 	    Tcl_DStringAppend(&ck, "/.pgp/", -1);
 	    Tcl_DStringAppend(&ck, keyringName, -1);
 	    break;
 	}
     } else {
-	if (NULL == (value = RatGetPathOption(interp, "pgp_keyring"))) {
-	    return TCL_ERROR;
+	if (NULL != (value = RatGetPathOption(interp, "pgp_keyring"))) {
+	    Tcl_DStringAppend(&ck, value, -1);
 	}
-	Tcl_DStringInit(&ck);
-	Tcl_DStringAppend(&ck, value, -1);
     }
 
     Tcl_DStringInit(&cmd);
@@ -1075,23 +1076,28 @@ RatPGPExtractKey(Tcl_Interp *interp, char *id, char *keyringName)
     version = Tcl_GetVar2(interp, "option", "pgp_version", TCL_GLOBAL_ONLY);
     if (!strcmp("gpg-1", version)) {
 	command = "gpg";
-	Tcl_DStringAppend(&cmd, "--no-secmem-warning --export -aqt --keyring ",
-		-1);
+	keyring_arg = "--keyring ";
+	Tcl_DStringAppend(&cmd, "--no-secmem-warning --export -aqt ", -1);
     } else if (!strcmp("2", version)) {
 	command = "pgp";
-	Tcl_DStringAppend(&cmd, "-kxaf +BATCHMODE +VERBOSE=0 +PubRing=", -1);
+	keyring_arg = "+PubRing=";
+	Tcl_DStringAppend(&cmd, "-kxaf +BATCHMODE +VERBOSE=0 ", -1);
     } else if (!strcmp("5", version)) {
 	command = "pgpk";
-	Tcl_DStringAppend(&cmd, "+batchmode=1 -x +PubRing=", -1);
+	keyring_arg = "+PubRing=";
+	Tcl_DStringAppend(&cmd, "+batchmode=1 -x ", -1);
     } else if (!strcmp("6", version)) {
 	command = "pgp";
-	Tcl_DStringAppend(&cmd,
-			  "-kxaf +BATCHMODE +VERBOSE=0 +force +PubRing=", -1);
+	keyring_arg = "+PubRing=";
+	Tcl_DStringAppend(&cmd, "-kxaf +BATCHMODE +VERBOSE=0 +force ", -1);
     } else {
 	Tcl_SetResult(interp, "Unkown pgp version", TCL_STATIC);
 	return TCL_ERROR;
     }
-    Tcl_DStringAppend(&cmd, Tcl_DStringValue(&ck), Tcl_DStringLength(&ck));
+    if (Tcl_DStringLength(&ck)) {
+	Tcl_DStringAppend(&cmd, keyring_arg, -1);
+	Tcl_DStringAppend(&cmd, Tcl_DStringValue(&ck), Tcl_DStringLength(&ck));
+    }
     Tcl_DStringAppend(&cmd, " \"", 2);
     for (cPtr = id; *cPtr; cPtr++) {
       if ('"' == *cPtr) {
@@ -1204,8 +1210,9 @@ RatPGPRunOld(Tcl_Interp *interp, BodyInfo *bodyInfoPtr, char *text,
 	*bodyDSPtr = (Tcl_DString*)ckalloc(sizeof(Tcl_DString)),
 	*dsPtr = NULL;
     int needPhrase, toPGP, fromPGP, errPGP, length, preamble, pid, status,
-	result, retry;
-    char *ePtr, *cPtr, *passPhrase, buf[1024], *from;
+	result, retry, i;
+    char *ePtr, *cPtr, buf[1024], *from;
+    volatile char passPhrase[MAXPASSLENGTH];
     CONST84 char *version;
     FILE *fp;
 
@@ -1224,15 +1231,14 @@ RatPGPRunOld(Tcl_Interp *interp, BodyInfo *bodyInfoPtr, char *text,
     needPhrase = strncmp(start, "-----BEGIN PGP SIGNED", 21);
     do {
 	if (needPhrase) {
-	    passPhrase = RatPGPPhrase(interp);
-	    if (NULL == passPhrase) {
+	    if (NULL == RatPGPPhrase(interp, passPhrase, sizeof(passPhrase))) {
 		RatDStringApendNoCRLF(bodyDSPtr, start, end-start);
 		ckfree(errDSPtr);
 		bodyInfoPtr->pgpOutput = NULL;
 		return bodyDSPtr;
 	    }
 	} else {
-	    passPhrase = "";
+	    passPhrase[0] = '\0';
 	}
 	if (!strcmp("gpg-1", version)) {
 	    pid = RatRunPGP(interp, 0, "gpg", "--decrypt -atq "
@@ -1250,11 +1256,11 @@ RatPGPRunOld(Tcl_Interp *interp, BodyInfo *bodyInfoPtr, char *text,
 			    &toPGP, &from, &errPGP);
 	} else {
 	    Tcl_SetResult(interp, "Unkown pgp version", TCL_STATIC);
+	    for (i=0; i<strlen((char*)passPhrase); i++) passPhrase[i] = '\0';
 	    return NULL;
 	}
-	write(toPGP, passPhrase, strlen(passPhrase));
-	memset(passPhrase, '\0', strlen(passPhrase));
-	ckfree(passPhrase);
+	write(toPGP, (char*)passPhrase, strlen((char*)passPhrase));
+	for (i=0; i<strlen((char*)passPhrase); i++) passPhrase[i] = '\0';
 	write(toPGP, "\n", 1);
 	fp = fdopen(toPGP, "w");
 	/*
@@ -1420,15 +1426,14 @@ RatPGPHandleOld(Tcl_Interp *interp, BodyInfo *bodyInfoPtr, char *text,
 static int
 RatUpdatePGPKeys(Tcl_Interp *interp, RatPGPKeyring *k)
 {
-    int toPGP, errPGP, pid, status, length, ret, preamble, blankiscont;
-    char buf[1024], title[1024], idbuf[1024], *command, *from;
-    CONST84 char *version, *start, *end, *last;
-    Tcl_DString cmd, tmp;
+    int toPGP, errPGP, pid, status, length, ret, blankiscont = 0;
+    char buf[1024], *command, *from;
+    CONST84 char *version, *keyring_arg;
+    Tcl_DString cmd;
     struct stat sbuf;
-    Tcl_RegExp exp_id, exp_addr;
+    Tcl_RegExp exp_id = NULL, exp_addr = NULL;
     FILE *fp;
-    Tcl_Obj **ids, *rPtr;
-    unsigned int idNum, idAlloc;
+    Tcl_Obj *rPtr;
 
     stat(k->name, &sbuf);
     k->mtime = sbuf.st_mtime;
@@ -1440,30 +1445,38 @@ RatUpdatePGPKeys(Tcl_Interp *interp, RatPGPKeyring *k)
     version = Tcl_GetVar2(interp, "option", "pgp_version", TCL_GLOBAL_ONLY);
     if (!strcmp("gpg-1", version)) {
         command = "gpg";
-	Tcl_DStringAppend(&cmd,
-			  "--no-secmem-warning --list-keys --keyring ", -1);
-	exp_id = Tcl_RegExpCompile(interp, "[0-9]+./([0-9A-F]{8})");
-	exp_addr = Tcl_RegExpCompile(interp, "<[a-zA-Z.+@-]+>");
-	blankiscont = 0;
+	keyring_arg = "--keyring ";
+	if (k->secring) {
+	    Tcl_DStringAppend(&cmd, "--list-secret-keys ", -1);
+	} else {
+	    Tcl_DStringAppend(&cmd, "--list-public-keys ", -1);
+	}
+	Tcl_DStringAppend(&cmd, "--no-secmem-warning "
+			  "--with-colons --fixed-list-mode ", -1);
 
     } else if (!strcmp("2", version)) {
+	/* XXX Handle private-public keyrings */
 	command = "pgp";
-	Tcl_DStringAppend(&cmd, "-kv +BATCHMODE +VERBOSE=0 +PubRing=", -1);
+	keyring_arg = "+PubRing=";
+	Tcl_DStringAppend(&cmd, "-kv +BATCHMODE +VERBOSE=0 ", -1);
 	exp_id = Tcl_RegExpCompile(interp, "[0-9]/([0-9A-F]{8})");
 	exp_addr = Tcl_RegExpCompile(interp, "<[a-zA-Z.+@-]+>");
 	blankiscont = 1;
 
     } else if (!strcmp("5", version)) {
+	/* XXX Handle private-public keyrings */
 	command = "pgpk";
-	Tcl_DStringAppend(&cmd, "-l +batchmode=1 +PubRing=", -1);
-	exp_id = Tcl_RegExpCompile(interp, ".ub.+0x([0-9A-F]{8})");
+	keyring_arg = "+PubRing=";
+	Tcl_DStringAppend(&cmd, "-l +batchmode=1", -1);
+	exp_id = Tcl_RegExpCompile(interp, ".ub.+0x([0-9A-F]{8}) ");
 	exp_addr = Tcl_RegExpCompile(interp, "<[a-zA-Z.+@-]+>");
 	blankiscont = 0;
 
     } else if (!strcmp("6", version)) {
+	/* XXX Handle private-public keyrings */
 	command = "pgp";
-	Tcl_DStringAppend(&cmd, "-kv +BATCHMODE +VERBOSE=0 +force +PubRing=",
-			  -1);
+	keyring_arg = "+PubRing=";
+	Tcl_DStringAppend(&cmd, "-kv +BATCHMODE +VERBOSE=0 +force ", -1);
 	exp_id = Tcl_RegExpCompile(interp, "0x([0-9A-F]{8})");
 	exp_addr = Tcl_RegExpCompile(interp, "<[a-zA-Z.+@-]+>");
 	blankiscont = 1;
@@ -1472,7 +1485,10 @@ RatUpdatePGPKeys(Tcl_Interp *interp, RatPGPKeyring *k)
 	Tcl_SetResult(interp, "Unkown pgp version", TCL_STATIC);
 	return TCL_ERROR;
     }
-    Tcl_DStringAppend(&cmd, k->name, -1);
+    if (k->name && *k->name) {
+	Tcl_DStringAppend(&cmd, keyring_arg, -1);
+	Tcl_DStringAppend(&cmd, k->name, -1);
+    }
     pid = RatRunPGP(interp, 1, command, Tcl_DStringValue(&cmd),
 	    &toPGP, &from, &errPGP);
     Tcl_DStringFree(&cmd);
@@ -1481,73 +1497,12 @@ RatUpdatePGPKeys(Tcl_Interp *interp, RatPGPKeyring *k)
 	ret = waitpid(pid, &status, 0);
     } while(-1 == ret && EINTR == errno);
 
-    /*
-     * Read and parse output
-     */
-    Tcl_DStringInit(&tmp);
     fp = fopen(from, "r");
-    ids = NULL;
-    idNum = idAlloc = 0;
-    preamble = 1;
-    buf[sizeof(buf)-1] = '\0';
-    while (fgets(buf, sizeof(buf)-1, fp), !feof(fp)) {
-	if (buf[0]) {
-	    buf[strlen(buf)-1] = '\0';
-	}
-	if (blankiscont && !isspace(buf[0]) && idNum) {
-	    AddKey(k, ids, idNum, &tmp);
-	    Tcl_DStringSetLength(&tmp, 0);
-	    idNum = 0;
-	}
-	if (Tcl_RegExpExec(interp, exp_id, buf, buf)
-	    || Tcl_RegExpExec(interp, exp_addr, buf, buf)) {
-	    if (preamble) {
-		preamble = 0;
-		k->title = Tcl_NewStringObj(title, -1);
-		Tcl_IncrRefCount(k->title);
-	    }
-	    if (Tcl_DStringLength(&tmp)) {
-		Tcl_DStringAppend(&tmp, "\n", 1);
-	    }
-	    Tcl_DStringAppend(&tmp, buf, -1);
-	    last = buf;
-	    do {
-		if (idNum+1 >= idAlloc) {
-		    idAlloc += 256;
-		    ids = (Tcl_Obj**)ckrealloc(ids, sizeof(Tcl_Obj*)*idAlloc);
-		}
-		if (Tcl_RegExpExec(interp, exp_id, buf, buf)) {
-		    Tcl_RegExpRange(exp_id, 1, &start, &end);
-		    last = end;
-		    strlcpy(idbuf, "0x", sizeof(idbuf));
-		    strlcpy(idbuf+2, start, end-start+1);
-		    ids[idNum++] = Tcl_NewStringObj(idbuf, 2+end-start);
-		}
-		if (Tcl_RegExpExec(interp, exp_addr, buf, buf)) {
-		    Tcl_RegExpRange(exp_addr, 0, &start, &end);
-		    last = end;
-		    ids[idNum++] = Tcl_NewStringObj(start, end-start);
-		}
-	    } while (Tcl_RegExpExec(interp, exp_id, last, buf)
-		     || Tcl_RegExpExec(interp, exp_addr, last, buf));
-	} else {
-	    if (idNum) {
-		AddKey(k, ids, idNum, &tmp);
-		Tcl_DStringSetLength(&tmp, 0);
-		idNum = 0;
-	    }
-	    if (preamble && buf[0] && buf[0] != '-') {
-		strlcpy(title, buf, sizeof(title));
-	    }
-	}
+    if (exp_id) {
+	ParsePGPListFormat(interp, fp, exp_id, exp_addr, blankiscont, k);
+    } else {
+	ParseGPGListFormat(interp, fp, k);
     }
-    if (idNum) {
-	AddKey(k, ids, idNum, &tmp);
-    }
-    if (idAlloc) {
-	ckfree(ids);
-    }
-    Tcl_DStringFree(&tmp);
     fclose(fp);
     unlink(from);
 
@@ -1569,14 +1524,13 @@ RatUpdatePGPKeys(Tcl_Interp *interp, RatPGPKeyring *k)
     close(errPGP);
     return TCL_OK;
 }
-
 
 /*
  *----------------------------------------------------------------------
  *
- * AddKey --
+ * ParsePGPListFormat --
  *
- *      Add key(s) to current keyring
+ *      Parse the old format key list
  *
  * Results:
  *	None
@@ -1588,47 +1542,323 @@ RatUpdatePGPKeys(Tcl_Interp *interp, RatPGPKeyring *k)
  *----------------------------------------------------------------------
  */
 static void
-AddKey(RatPGPKeyring *k, Tcl_Obj **ids, unsigned int idNum, Tcl_DString *descr)
+ParsePGPListFormat(Tcl_Interp *interp, FILE *fp, Tcl_RegExp exp_id,
+		   Tcl_RegExp exp_addr, int blankiscont, RatPGPKeyring *k)
 {
-    unsigned int i, j, ai, numAddr;
-    RatPGPKey *key;
+    int preamble;
+    char buf[1024], title[1024], idbuf[1024];
+    CONST84 char *start, *end, *last;
+    Tcl_DString tmp;
+    Tcl_Obj *ids = NULL;
 
-    if (idNum == 0
-	|| !strcmp("0x00000000", Tcl_GetStringFromObj(ids[0], NULL))
-	|| strncmp("0x", Tcl_GetStringFromObj(ids[0], NULL), 2)) {
+    Tcl_DStringInit(&tmp);
+    preamble = 1;
+    buf[sizeof(buf)-1] = '\0';
+    while (fgets(buf, sizeof(buf)-1, fp), !feof(fp)) {
+	if (buf[0]) {
+	    buf[strlen(buf)-1] = '\0';
+	}
+	if (blankiscont && !isspace(buf[0]) && ids) {
+	    AddKey(interp, k, ids, &tmp);
+	    Tcl_DStringSetLength(&tmp, 0);
+	    ids = NULL;
+	}
+	if (Tcl_RegExpExec(interp, exp_id, buf, buf)
+	    || Tcl_RegExpExec(interp, exp_addr, buf, buf)) {
+	    if (preamble) {
+		preamble = 0;
+		if (k->title) {
+		    Tcl_DecrRefCount(k->title);
+		}
+		k->title = Tcl_NewStringObj(title, -1);
+		Tcl_IncrRefCount(k->title);
+	    }
+	    if (Tcl_DStringLength(&tmp)) {
+		Tcl_DStringAppend(&tmp, "\n", 1);
+	    }
+	    Tcl_DStringAppend(&tmp, buf, -1);
+	    last = buf;
+	    do {
+		if (NULL == ids) {
+		    ids = Tcl_NewObj();
+		}
+		if (Tcl_RegExpExec(interp, exp_id, buf, buf)) {
+		    Tcl_RegExpRange(exp_id, 1, &start, &end);
+		    last = end;
+		    strlcpy(idbuf, "0x", sizeof(idbuf));
+		    strlcpy(idbuf+2, start, end-start+1);
+		    Tcl_ListObjAppendElement(
+			interp, ids, Tcl_NewStringObj(idbuf, 2+end-start));
+		}
+		if (Tcl_RegExpExec(interp, exp_addr, buf, buf)) {
+		    Tcl_RegExpRange(exp_addr, 0, &start, &end);
+		    last = end;
+		    Tcl_ListObjAppendElement(
+			interp, ids, Tcl_NewStringObj(start, end-start));
+		}
+	    } while (Tcl_RegExpExec(interp, exp_id, last, buf)
+		     || Tcl_RegExpExec(interp, exp_addr, last, buf));
+	} else {
+	    if (ids) {
+		AddKey(interp, k, ids, &tmp);
+		Tcl_DStringSetLength(&tmp, 0);
+		ids = NULL;
+	    }
+	    if (preamble && buf[0] && buf[0] != '-') {
+		strlcpy(title, buf, sizeof(title));
+	    }
+	}
+    }
+    if (ids) {
+	AddKey(interp, k, ids, &tmp);
+    }
+    Tcl_DStringFree(&tmp);
+}
+
+/*
+ *----------------------------------------------------------------------
+ *
+ * ParseGPGListFormat --
+ *
+ *      Parse the gpg format key list
+ *
+ * Results:
+ *	None
+ *
+ * Side effects:
+ *	None
+ *
+ *
+ *----------------------------------------------------------------------
+ */
+static void
+ParseGPGListFormat(Tcl_Interp *interp, FILE *fp, RatPGPKeyring *k)
+{
+    char buf[1024], buf2[1024], buf3[16], *fields[MAX_FIELDS], *s, *e, *alg;
+    int num_fields, expect_uid = 0, is_subkey, is_key;
+    Tcl_Obj *id = NULL;
+    Tcl_Obj *addresses = NULL;
+    Tcl_Obj *subjects = NULL;
+    Tcl_Obj *descr = NULL;
+    int sign = 0, encrypt = 0;
+    Tcl_Obj *oPtr;
+    struct tm *tm;
+    time_t t;
+
+    buf[sizeof(buf)-1] = '\0';
+    do {
+	fgets(buf, sizeof(buf)-1, fp);
+	if (feof(fp)) {
+	    buf[0] = '\0';
+	} else if (buf[0]) {
+	    buf[strlen(buf)-1] = '\0';
+	}
+	for (num_fields=0, s=buf; s && *s && num_fields < MAX_FIELDS;) {
+	    fields[num_fields++] = s;
+	    if (NULL != (s = strchr(s, ':'))) {
+		*s++ = '\0';
+	    }
+	}
+
+	if (expect_uid) {
+	    if (num_fields && !strcmp("uid", fields[0])) {
+		oPtr = Tcl_NewStringObj(fields[9], -1);		
+		Tcl_ListObjAppendElement(interp, subjects, oPtr);
+		if (NULL != (s = strchr(fields[9], '<'))
+		    && NULL != (e = strchr(++s, '>'))) {
+		    oPtr = Tcl_NewStringObj(s, e-s);
+		}
+		Tcl_ListObjAppendElement(interp, addresses, oPtr);
+		continue;
+	    } else {
+		AddKeyNew(interp, k, id, addresses, subjects, descr,
+			  Tcl_NewBooleanObj(sign), Tcl_NewBooleanObj(encrypt));
+		expect_uid = 0;
+	    }
+	}
+
+	is_subkey = is_key = 0;
+	if (num_fields
+	    && (!strcmp("sub", fields[0]) || !strcmp("ssb", fields[0]))) {
+	    is_subkey = 1;
+	} else if (num_fields
+	    && (!strcmp("pub", fields[0]) || !strcmp("sec", fields[0]))) {
+	    is_key = 1;
+	}
+
+	if (is_subkey || is_key) {
+	    id = Tcl_NewStringObj(fields[4], -1);
+	    switch (atoi(fields[3])) {
+	    case 1:
+		alg = "RSA";
+		sign = 1;
+		encrypt = 1;
+		break;
+	    case 16:
+		alg = "ElGamal (encrypt only)";
+		sign = 0;
+		encrypt = 1;
+		break;
+	    case 17:
+		alg = "DSA (sign only)";
+		sign = 1;
+		encrypt = 0;
+		break;
+	    case 20:
+		alg = "ElGamal (sign and encrypt)";
+		sign = 1;
+		encrypt = 1;
+		break;
+	    default:
+		alg = "unknown";
+		sign = 1;
+		encrypt = 1;
+		break;
+	    }
+	    snprintf(buf2, sizeof(buf2), "%s %s %s",
+		     fields[0], fields[2], alg);
+	    if (fields[6][0]) { /* Expire date */
+		strlcat(buf2, " expires ", sizeof(buf));
+		t = atol(fields[6]);
+		tm = localtime(&t);
+		strftime(buf3, sizeof(buf3), "%x", tm);
+		strlcat(buf2, buf3, sizeof(buf2));
+	    }
+	    descr = Tcl_NewStringObj(buf2, -1);
+	    if (fields[11][0]) {
+		sign = (int)strchr(fields[11], 's');
+		encrypt = (int)strchr(fields[11], 'e');
+	    }
+	    if (is_subkey) {
+		AddKeyNew(interp, k, id, addresses, subjects, descr,
+			  Tcl_NewBooleanObj(sign), Tcl_NewBooleanObj(encrypt));
+	    } else {
+		expect_uid = 1;
+		addresses = Tcl_NewObj();
+		subjects = Tcl_NewObj();
+	    }
+	}
+    } while (!feof(fp));
+/*
+  0x986343A5 <support@appgate.com> {pub  2048R/986343A5 2002-03-26 AppGate support <support@appgate.com>}
+  0xA2646D35 <maf@appgate.com> {pub  1024D/A2646D35 2003-11-10 Martin Forssen <maf@appgate.com>
+sub  2048g/63A7B927 2003-11-10 [expires: 2004-11-09]}
+*/
+
+    /* Fields to handle, pub, uid, sub, sec, ssb */
+}
+
+/*
+ *----------------------------------------------------------------------
+ *
+ * AddKey --
+ *
+ *      Add key(s) to current keyring
+ *
+ *      TODO, usage, trust, expiration date, alg/size
+ *
+ * Results:
+ *	None
+ *
+ * Side effects:
+ *	None
+ *
+ *
+ *----------------------------------------------------------------------
+ */
+static void
+AddKey(Tcl_Interp *interp, RatPGPKeyring *k, Tcl_Obj *ids,
+       Tcl_DString *descr)
+{
+    unsigned int i;
+    int idc;
+    Tcl_Obj **idv;
+    RatPGPKey *key;
+    Tcl_Obj *addresses = Tcl_NewObj();
+    char *s;
+
+    if (TCL_OK != Tcl_ListObjGetElements(interp, ids, &idc, &idv)
+	|| idc == 0
+	|| !strcmp("0x00000000", Tcl_GetString(idv[0]))
+	|| strncmp("0x", Tcl_GetString(idv[0]), 2)) {
 	return;
     }
+    Tcl_IncrRefCount(ids);
 
-    for (i = numAddr = 0; i < idNum; i++) {
-	if ('<' == *Tcl_GetStringFromObj(ids[i], NULL)) {
-	    numAddr++;
+    for (i = 0; i < idc; i++) {
+	if ('<' == *Tcl_GetString(idv[i])) {
+	    s = Tcl_GetString(idv[i])+1;
+	    Tcl_ListObjAppendElement(interp, addresses,
+				     Tcl_NewStringObj(s, strlen(s)-1));
 	}
     }
 
-    for(i = 0; i<idNum; i++) {
-	if ('<' != *Tcl_GetStringFromObj(ids[i], NULL)) {
+    for(i = 0; i<idc; i++) {
+	if ('<' != *Tcl_GetStringFromObj(idv[i], NULL)) {
 	    if (k->keyCount == k->keyAlloc) {
 		k->keyAlloc += 256;
 		k->keys = (RatPGPKey*)
-			ckrealloc(k->keys, sizeof(RatPGPKey)*k->keyAlloc);
+		    ckrealloc(k->keys, sizeof(RatPGPKey)*k->keyAlloc);
 	    }
 	    key = &k->keys[k->keyCount++];
-	    key->keyid = ids[i];
-	    Tcl_IncrRefCount(ids[i]);
-	    key->addrCount = numAddr;
-	    key->address  = (Tcl_Obj**)ckalloc(sizeof(Tcl_Obj*)*numAddr);
-	    for (j=ai=0; j<idNum; j++) {
-		if ('<' == *Tcl_GetStringFromObj(ids[j], NULL)) {
-		    key->address[ai++] = ids[j];
-		    Tcl_IncrRefCount(ids[j]);
-		}
-	    }
+	    key->keyid = idv[i];
+	    Tcl_IncrRefCount(key->keyid);
+	    key->addresses = addresses;
+	    key->subjects = NULL;
+	    Tcl_IncrRefCount(key->subjects);
 	    key->descr = Tcl_NewStringObj(
 		    Tcl_DStringValue(descr), Tcl_DStringLength(descr));
 	    Tcl_IncrRefCount(key->descr);
-	    key->key = NULL;
+	    key->sign = Tcl_NewBooleanObj(1);
+	    key->encrypt = key->sign;
+	    Tcl_IncrRefCount(key->sign);
+	    Tcl_IncrRefCount(key->encrypt);
 	}
     }
+    Tcl_DecrRefCount(ids);
+}
+
+/*
+ *----------------------------------------------------------------------
+ *
+ * AddKeyNew --
+ *
+ *      Add key(s) to current keyring. Thsi is the new interface.
+ *
+ * Results:
+ *	None
+ *
+ * Side effects:
+ *	None
+ *
+ *
+ *----------------------------------------------------------------------
+ */
+static void
+AddKeyNew(Tcl_Interp *interp, RatPGPKeyring *k, Tcl_Obj *id,
+	  Tcl_Obj *addresses, Tcl_Obj *subjects, Tcl_Obj *descr,
+	  Tcl_Obj *sign, Tcl_Obj *encrypt)
+{
+    RatPGPKey *key;
+
+    if (k->keyCount == k->keyAlloc) {
+	k->keyAlloc += 256;
+	k->keys = (RatPGPKey*)
+	    ckrealloc(k->keys, sizeof(RatPGPKey)*k->keyAlloc);
+    }
+    key = &k->keys[k->keyCount++];
+    key->keyid = id;
+    key->addresses = addresses;
+    key->subjects = subjects;
+    key->descr = descr;
+    key->sign = sign;
+    key->encrypt = encrypt;
+    Tcl_IncrRefCount(key->keyid);
+    Tcl_IncrRefCount(key->addresses);
+    Tcl_IncrRefCount(key->subjects);
+    Tcl_IncrRefCount(key->descr);
+    Tcl_IncrRefCount(key->sign);
+    Tcl_IncrRefCount(key->encrypt);
 }
 
 
@@ -1651,18 +1881,15 @@ AddKey(RatPGPKeyring *k, Tcl_Obj **ids, unsigned int idNum, Tcl_DString *descr)
 static void
 RatPGPFreeKeyring(RatPGPKeyring *k)
 {
-    int i, j;
+    int i;
 
     for (i=0; i < k->keyCount; i++) {
 	Tcl_DecrRefCount(k->keys[i].keyid);
-	for (j=0; j < k->keys[i].addrCount; j++) {
-	    Tcl_DecrRefCount(k->keys[i].address[j]);
-	}
-	ckfree(k->keys[i].address);
+	Tcl_DecrRefCount(k->keys[i].addresses);
+	Tcl_DecrRefCount(k->keys[i].subjects);
 	Tcl_DecrRefCount(k->keys[i].descr);
-	/*if (k->keys[i].key) {
-	    Tcl_DecrRefCount(k->keys[i].key);
-	}*/
+	Tcl_DecrRefCount(k->keys[i].sign);
+	Tcl_DecrRefCount(k->keys[i].encrypt);
     }
     ckfree(k->keys);
     if (k->title) {
@@ -1691,7 +1918,7 @@ RatPGPFreeKeyring(RatPGPKeyring *k)
  *----------------------------------------------------------------------
  */
 static RatPGPKeyring*
-RatPGPNewKeyring(const char *name)
+RatPGPNewKeyring(Tcl_Interp *interp, const char *name, int secring)
 {
     RatPGPKeyring *k;
 
@@ -1699,9 +1926,13 @@ RatPGPNewKeyring(const char *name)
     k->keys = NULL;
     k->keyCount = 0;
     k->keyAlloc = 0;
-    k->title = NULL;
+    k->title = Tcl_GetVar2Ex(interp, "t",
+			     (secring ? "secring" : "pubring"),
+			     TCL_GLOBAL_ONLY);
+    Tcl_IncrRefCount(k->title);
     k->name = cpystr(name);
     k->mtime = 0;
+    k->secring = secring;
 
     return k;
 }

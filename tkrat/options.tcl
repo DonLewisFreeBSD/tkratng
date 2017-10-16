@@ -4,7 +4,7 @@
 # built in defaults.
 #
 #
-#  TkRat software and its included text is Copyright 1996-2002 by
+#  TkRat software and its included text is Copyright 1996-2004 by
 #  Martin Forssén
 #
 #  The full text of the legal notice is contained in the file called
@@ -20,11 +20,11 @@
 proc OptionsInit {} {
     global env option tkrat_version ratCurrent
 
-    # Last run version
-    set option(last_version) ""
-
     # The date of the last version used
     set option(last_version_date) 0
+
+    # Last of the features presented
+    set option(last_seen_feature) 0
 
     # Want information about changes?
     set option(info_changes) 1
@@ -46,14 +46,8 @@ proc OptionsInit {} {
     # Directory to backup database messages to
     set option(dbase_backup) $option(ratatosk_dir)/backup
 
-    # Directory to store outgoing messages
-    set option(send_cache) $option(ratatosk_dir)/send
-
     # How long to wait between expiring the database (in days)
     set option(expire_interval) 7
-
-    # Directory for message hold
-    set option(hold_dir) $option(ratatosk_dir)/hold
 
     # Userprocedures file
     set option(userproc) $option(ratatosk_dir)/userproc
@@ -82,9 +76,6 @@ proc OptionsInit {} {
     # Which the selected headers are:
     set option(show_header_selection) {From Subject Date To CC Reply-To}
 
-    # Default permissions mask
-    set option(permissions) 0600
-
     # Geometry of compose window
     set option(compose_geometry) +0+50
 
@@ -97,11 +88,14 @@ proc OptionsInit {} {
     # True if we always want to use the external editor
     set option(always_editor) 0
 
-    # Which domain we should pretend we are from
-    set option(r0,masquerade_as) {}
-
     # List of SMTP hosts
     set option(r0,smtp_hosts) {localhost}
+
+    # Username for SMTP
+    set option(r0,smtp_user) {}
+
+    # Password for SMTP
+    set option(r0,smtp_passwd) {}
 
     # Default sening protocol
     set option(r0,sendprot) smtp
@@ -110,13 +104,10 @@ proc OptionsInit {} {
     set option(r0,sendprog) /usr/lib/sendmail
 
     # Can the sending program handle eightbit data
-    set option(r0,sendprog_8bit) true
+    set option(r0,sendprog_8bit) 1
 
     # Default signature file
     set option(r0,signature) ~/.signature
-
-    # If we should default to request DSN
-    set option(r0,dsn_request) 0
 
     # The default reply_to address
     set option(r0,reply_to) ""
@@ -142,6 +133,18 @@ proc OptionsInit {} {
     # Name for SMTP HELO/EHLO exchange (defaults to domain of From:)
     set option(r0,smtp_helo) ""
 
+    # Validate SMTP server certificate or not
+    set option(r0,validate_cert) 0
+
+    # Keep same sending preferences in all roles
+    set option(r0,same_sending_prefs) 0
+
+    # User to sign as
+    set option(r0,sign_as) {{} {}}
+
+    # Default to signing
+    set option(r0,sign_outgoing) 0
+
     # Default role
     set option(default_role) r0
 
@@ -150,9 +153,6 @@ proc OptionsInit {} {
 
     # Which domain we are in
     set option(domain) {}
-
-    # Default character set for tcl
-    set option(charset) iso-8859-1
 
     # Leader string for replies
     set option(reply_lead) {> }
@@ -165,9 +165,6 @@ proc OptionsInit {} {
 
     # Geometry of watcher
     set option(watcher_geometry) -140+0
-
-    # Watcher window name
-    set option(watcher_name) Watcher
 
     # Watcher max height
     set option(watcher_max_height) 10
@@ -200,20 +197,22 @@ proc OptionsInit {} {
     set option(folder_sort) threaded
 
     # Message attribution
-    set option(attribution) "On %d, %n wrote:"
+    set option(attribution) "On %d, %N wrote:"
 
     # Forwarded tag
     set option(forwarded_message) "------ Forwarded message ------"
 
     # File typing
-    set option(typetable) { {*GIF* image/gif}
+    set option(typetable) { {"*gzip compressed*" application/octet-stream}
+	                    {*GIF* image/gif}
 			    {*JPEG* image/jpeg}
 			    {*JPG* image/jpeg}
-			    {*PNG* image/png}
+			    {*PNG* image/png}			    
 			    {"*HTML document*" text/html}
 			    {"*8-bit u-law*" audio/basic}
 			    {*MP3* audio/mp3}
 			    {*PostScript* application/postscript}
+	                    {*Word* application/msword}
 			    {*PDF* application/pdf}
 			    {*text* text/plain}
 			    {*data* application/octet-stream}}
@@ -238,18 +237,6 @@ proc OptionsInit {} {
 
     # How many messages are required for one chunk (in dbase backup)
     set option(chunksize) 100
-
-    # Where we should store dsn files
-    set option(dsn_directory) $option(ratatosk_dir)/DSN
-
-    # If we should remove delivery reports from folders
-    set option(dsn_snarf_reports) 1
-
-    # How many days each DSN entry should be kept in the list
-    set option(dsn_expiration) 7
-
-    # How verbose we should be when recieving DSN's
-    set option(dsn_verbose) {{failed notify} {delayed status} {delivered status} {relayed status} {expanded none}}
 
     # Which message we should select when a folder is opened
     set option(start_selection) first_new
@@ -278,10 +265,10 @@ proc OptionsInit {} {
     set option(folder_key_replys) <Key-r>
     set option(folder_key_forward_i) <Key-f>
     set option(folder_key_forward_a) <Key-F>
-    set option(folder_key_home) {<Key-0> <Key-F27>}
+    set option(folder_key_home) {<Key-0> <Key-F27> <Key-Home>}
     set option(folder_key_bottom) {<Key-F33> <Key-End>}
-    set option(folder_key_pagedown) {<Key-space> <Key-F35> <Key-z>}
-    set option(folder_key_pageup) {<Key-BackSpace> <Key-F29> <Control-b>}
+    set option(folder_key_pagedown) {<Key-space> <Key-z> <Key-Next>}
+    set option(folder_key_pageup) {<Key-BackSpace> <Control-b> <Key-Prior>}
     set option(folder_key_linedown) {<Key-Down>}
     set option(folder_key_lineup) {<Key-Up>}
     set option(folder_key_cycle_header) <Key-h>
@@ -290,17 +277,26 @@ proc OptionsInit {} {
     set option(folder_key_markunread) <Key-U>
     set option(folder_key_print) <Key-P>
     set option(folder_key_online) <Key-o>
+    set option(folder_key_mvdb) <Alt-Key-d>
 
     # Compose window key combinations
     set option(compose_key_send) <Control-s>
     set option(compose_key_abort) <Control-c>
     set option(compose_key_editor) <Control-o>
     set option(compose_key_undo) <Control-u>
+    set option(compose_key_redo) <Control-underscore>
     set option(compose_key_cut) <Control-w>
     set option(compose_key_copy) <Meta-w>
-    set option(compose_key_cut_all) <Control-x>
+    set option(compose_key_cut_all) <Control-X>
     set option(compose_key_paste) <Control-y>
     set option(compose_key_wrap) <Control-j>
+
+    # Alias window key combinations
+    set option(alias_key_new_menu) <Control-n>
+    set option(alias_key_read_menu) <Control-l>
+    set option(alias_key_close_menu) <Control-w>
+    set option(alias_key_delete_menu) <Control-d>
+    set option(alias_key_edit_menu) <Control-e>
 
     # If we should check for stolen mail
     set option(mail_steal) 1
@@ -315,8 +311,8 @@ proc OptionsInit {} {
     # True if we should let the user specify from address.
     set option(use_from) 1
 
-    # The level of verboseness we should use when talking SMTP
-    set option(smtp_verbose) 1
+    # The level of verboseness we should use when talking SMTP (0-3)
+    set option(smtp_verbose) 2
 
     # If we should try to send multiple letters though one channel
     set option(smtp_reuse) 1
@@ -325,9 +321,9 @@ proc OptionsInit {} {
     set option(override_color) 1
 
     # The color set
-    set option(color_set) {gray85 black}
+    set option(color_set) {\#dde3eb black white black}
 
-    # Which icon to set
+    # Which icon to set {normal small none}
     set option(icon) normal
 
     # The default expression mode
@@ -379,29 +375,17 @@ proc OptionsInit {} {
     # Name of pgp keyring
     set option(pgp_keyring) {}
 
-    # If we should make a copy of attached files
-    set option(copy_attached) 1
-
-    # If we should sign outgoing letters
-    set option(pgp_sign) 0
-
     # If we should encrypt outgoing letters
     set option(pgp_encrypt) 0
 
     # Default url viewer
-    set option(url_viewer) netscape
+    set option(url_viewer) firefox
 
-    # Name (and possibly path) of netscape command
-    set option(netscape) {netscape -install}
+    # Name (and possibly path) of browser
+    set option(browser_cmd) firefox
 
-    # Name (and possibly path) of opera command
-    set option(opera) {opera}
-
-    # Name (and path) of lynx command
-    set option(lynx) {xterm -T "Lynx:%u" +sb -e lynx "%u"}
-
-    # Name (and path) of other command
-    set option(other_browser) {other_browser %u}
+    # Where to show URLs
+    set option(url_behavior) new_window
 
     # Color of URL
     set option(url_color) blue
@@ -435,10 +419,7 @@ proc OptionsInit {} {
     set option(show_balhelp) 1
 
     # Balloon help delay
-    set option(balhelp_delay) 500
-
-    # Message finding fields
-    set option(msgfind_format) "%s%n%b%D"
+    set option(balhelp_delay) 1500
 
     # Automatically expunge on folder close
     set option(expunge_on_close) 1
@@ -459,17 +440,14 @@ proc OptionsInit {} {
     set option(charsets) [concat us-ascii [lsort -command isosort $iso]]
     lappend option(charsets) iso-2022-jp
     lappend option(charsets) iso-2022-kr
-    set option(charset_candidates) \
-	[linsert $option(charsets) 1 $option(charset)]
+    lappend option(charsets) utf-8
+    set option(charset_candidates) $option(charsets)
 
     # Automatically create sender field
     set option(create_sender) 0
 
     # Unused option which must be here
     set option(tip) {}
-
-    # Alias expansion level 
-    set option(alias_expand) 1
 
     # Dynamic folder behaviour (expanded | closed)
     set option(dynamic_behaviour) expanded
@@ -486,14 +464,17 @@ proc OptionsInit {} {
     # If we should add the signature delimiter
     set option(sigdelimit) 1
 
+    # Do automatic line wrapping?
+    set option(do_wrap) 1
+
     # Place where lines wrap
     set option(wrap_length) 72
 
     # Regexp for finding citation marks
-    set option(citexp) {^[ 	]*(([a-zA-Z0-9]+> *)|(>+ *)+)?}
+    set option(citexp) {^[ 	]*(([a-zA-Z0-9]+>[ 	]*)|(>+[ 	]*)+)?}
 
     # Regexp for finding bullet characters
-    set option(bullexp) {^(([0-9]+(\.[0-9]+)*[.\)]?)|[-*+o]) *}
+    set option(bullexp) {^(([0-9]+(\.[0-9]+)*\.?\)?)|[-*+o])[ 	]*}
 
     # Should we wrap cited text automatically
     set option(wrap_cited) 0
@@ -535,14 +516,13 @@ proc OptionsInit {} {
 
     # Font options
     set option(override_fonts) 1
-    set option(prop_norm) {components Helvetica 12 bold roman 0 0}
-    set option(prop_light) {components Helvetica 12 normal roman 0 0}
-    set option(fixed_norm) {components Courier 12 normal roman 0 0}
-    set option(fixed_bold) {components Courier 12 bold roman 0 0}
+    set option(font_family_prop) helvetica
+    set option(font_family_fixed) courier
+    set option(font_size) 12
     set option(watcher_font) {name 5x7}
 
     # Debug output dir
-    set option(debug_file) $option(ratatosk_dir)/log
+    set option(debug_file) $option(ratatosk_dir)/debug_log.txt
 
     # Wrap mode for shown messages
     set option(wrap_mode) word
@@ -559,8 +539,8 @@ proc OptionsInit {} {
     # SSH timeout
     set option(ssh_timeout) 15
 
-    # path to ispell
-    set option(ispell_path) ispell
+    # path to spell
+    set option(spell_path) auto
 
     # Online/offline mode
     set option(start_online_mode) last
@@ -569,20 +549,86 @@ proc OptionsInit {} {
     # Template for new folder
     set option(template_folder) [list Template file {} $env(HOME)/FOO]
 
-    # HTML proportional font family
-    set option(html_prop_font) {name Times}
-
-    # HTML fixed font family
-    set option(html_fixed_font) {name Courier}
-
-    # HTML proportional font sizes
-    set option(html_prop_font_sizes) {8 9 10 12 14 18 24}
-    
-    # HTML fixed font sizes
-    set option(html_fixed_font_sizes) {8 9 10 12 14 18 24}
-    
     # Show HTML images
     set option(html_show_images) 0
+    
+    # Minimum acceptable size for images
+    set option(html_min_image_size) 2
+
+    # Proxy server
+    set option(html_proxy_host) ""
+
+    # Proxy port
+    set option(html_proxy_port) 8080
+
+    # HTTP timeout (milliseconds)
+    set option(html_timeout) 10000
+
+    # How to encode parameters
+    #  rfc2231 - The standard way, but some clients do not understand it
+    #  rfc2047 - Illegal according to the standard but interoperates better
+    #  both    - Duplicate all parameters which needs encoding and encode
+    #            in both systems. A compromise.
+    set option(parm_enc) both
+
+    # Should we prefer to show text parts over html?
+    set option(prefer_other_over_html) 0
+
+    # Default spell checking language
+    set option(def_spell_dict) auto
+
+    # Dictionaries to auto test against
+    # Empty means all available if using ispell and an automatic selection
+    # if using aspell
+    set option(auto_dicts) {}
+
+    # Enable auto spell check when composing
+    set option(autospell) 1
+
+    # Seconds between backups in compose window (0 means no backups)
+    set option(compose_backup) 30
+
+    # Mark non-wrappable parts of messages
+    set option(mark_nowrap) 0
+
+    # How long to keep a backup in the drafts folder after a compose window
+    # has been closed.
+    set option(compose_last_chance) 300
+
+    # SHow address autocompletion list
+    set option(show_autocomplete) 1
+
+    # How many addresses to remember and use when popping up an
+    # autocomplete menu. 0 means none
+    set option(num_autocomplete_addr) 500
+
+    # How many autocomplete addresses to show in list
+    set option(automplete_addr_num_suggestions) 20
+
+    # Initial directory for file selectors (empty means homedir)
+    set option(initialdir) ""
+
+    # Format of date in message list (look at 'man strftime' for details)
+    set option(date_format) "%e %b"
+
+    # tnef program which unpacks winmail.dat-attachments
+    set option(tnef) tnef
+
+    # tnef max size of contained file
+    set option(tnef_max_size) 10000000
+}
+
+# OptionsInitText --
+#
+# Initialize options depending on the language
+#
+# Arguments:
+
+proc OptionsInitText {} {
+    global option t
+
+    # Watcher title
+    set option(watcher_title) $t(watcher)
 }
 
 # OptionsRead --
@@ -614,8 +660,11 @@ proc OptionsRead {} {
     }
 
     # Setup list of charset candidates
-    set option(charset_candidates) \
-	[linsert $option(charsets) 1 $option(charset)]
+    if {[info exists option(charset)]} {
+        set option(charset_candidates) \
+            [linsert $option(charsets) 1 $option(charset)]
+        set globalOption(charset) ""
+    }
 }
 
 # SaveOptions --
@@ -678,7 +727,7 @@ proc ReadUserproc {} {
 
 proc InitCharsetAliases {} {
     global charsetAlias option charsetName charsetMapping \
-	    charsetReverseMapping t
+	    charsetReverseMapping t ratCurrent
 
     # Mapping to tcl names
     set charsetMapping(us-ascii) ascii
@@ -751,6 +800,18 @@ proc InitCharsetAliases {} {
 
     foreach c [array names charsetMapping] {
 	set charsetReverseMapping($charsetMapping($c)) $c
+    }
+
+    # Default character set for tcl
+    if {![info exists option(charset)]} {
+        set charset $ratCurrent(charset)
+        if {[info exists charsetReverseMapping($charset)]} {
+            set option(charset) $charsetReverseMapping($charset)
+        } else {
+            set option(charset) $charset
+        }
+        global globalOption
+        set globalOption(charset) $option(charset)
     }
 }
 

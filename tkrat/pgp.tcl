@@ -3,7 +3,7 @@
 # This file contains code which handles pgp interaction
 #
 #
-#  TkRat software and its included text is Copyright 1996-2002 by
+#  TkRat software and its included text is Copyright 1996-2004 by
 #  Martin Forssén
 #
 #  The full text of the legal notices is contained in the file called
@@ -38,12 +38,12 @@ proc RatGetPGPPassPhrase {} {
     bind $w.entry <Return> "set ${id}(done) ok"
     wm protocol $w WM_DELETE_WINDOW "set ${id}(done) abort"
 
-    Place $w pgpPhrase
-    ModalGrab $w $w.entry
+    ::tkrat::winctl::SetGeometry pgpPhrase $w
+    ::tkrat::winctl::ModalGrab $w $w.entry
 
     tkwait variable ${id}(done)
 
-    RecordPos $w pgpPhrase
+    ::tkrat::winctl::RecordGeometry pgpPhrase $w
     destroy $w
     set ret [list $hd(done) $hd(phrase)]
     unset hd
@@ -89,10 +89,9 @@ proc RatPGPError {error} {
 	-relief raised \
 	-bd 0 \
 	-highlightthickness 0
-    Size $w.f.t.text pgpError
     pack $w.f.t.scroll -side right -fill y
     pack $w.f.t.text -side left -expand yes -fill both
-    regsub -all "\a" $error {} errmsg
+    set errmsg [string map [list "\a" ""] $error]
     $w.f.t.text insert 1.0 $errmsg
     $w.f.t.text configure -state disabled
     pack $w.f.t -expand 1 -fill both
@@ -104,13 +103,12 @@ proc RatPGPError {error} {
     pack $w.f.b -side bottom -fill x
     wm protocol $w WM_DELETE_WINDOW "set ${id}(done) ABORT"
 
-    Place $w pgpError
+    ::tkrat::winctl::SetGeometry pgpError $w $w.f.t.text
 
-    ModalGrab $w
+    ::tkrat::winctl::ModalGrab $w
     tkwait variable ${id}(done)
 
-    RecordSize $w.f.t.text pgpError
-    RecordPos $w pgpError
+    ::tkrat::winctl::RecordGeometry pgpError $w $w.f.t.text
     destroy $w
     set action $hd(done)
     unset hd
@@ -146,7 +144,6 @@ proc RatPGPGetIds {proc arg} {
     # Add text
     set hd(list) $w.l
     rat_textlist::create $hd(list) [lindex $keylist 0]
-    Size [rat_textlist::textwidget $hd(list)] pgpGet
     pack $w.l -side top -fill both -expand 1
 
     # Buttons
@@ -169,13 +166,18 @@ proc RatPGPGetIds {proc arg} {
     set hd(keys) {}
     foreach e [lindex $keylist 1] {
 	lappend hd(keys) [lrange $e 0 1]
-	rat_textlist::insert $hd(list) end [lindex $e 2]
+	set desc [lindex $e 2]
+	foreach s [lindex $e 3] {
+	    set desc "$desc\n  $s"
+	}
+	rat_textlist::insert $hd(list) end $desc
     }
 
     wm protocol $w WM_DELETE_WINDOW \
 	    "RatPGPGetIdsDone $w $id 0 [list $proc $arg]"
 
-    Place $w pgpGet
+    ::tkrat::winctl::SetGeometry pgpGet \
+        $w [rat_textlist::textwidget $hd(list)]
 }
 
 # RatPGPGetIdsDone --
@@ -200,8 +202,8 @@ proc RatPGPGetIdsDone {w handler done proc arg} {
 	}
 	$proc $arg $ids
     }
-    RecordPos $w pgpGet
-    RecordSize [rat_textlist::textwidget $hd(list)] pgpGet
+    ::tkrat::winctl::RecordGeometry pgpGet \
+        $w [rat_textlist::textwidget $hd(list)]
     catch {focus $hd(oldfocus)}
     destroy $w
     unset hd
@@ -250,7 +252,7 @@ proc RatPGPAddKeys {keys {keyring ""}} {
     trace variable hd(existStatus) w RatPGPAddKeysDone
 }
 
-# RatPGPAddKeysDone
+# RatPGPAddKeysDone --
 #
 # This gets called when the add command has run and should clean
 # things up.
@@ -266,3 +268,110 @@ proc RatPGPAddKeysDone {name1 name2 op} {
     unset hd
 }
 
+
+# SetupSignAsWidget --
+#
+# Create a widget to select signing key
+#
+# w      - Window to build
+# var    - Name of global variable which holds the value
+
+proc SetupSignAsWidget {w var} {
+    global t b
+    upvar \#0 $var v
+	
+    set sa [lindex $v 1]
+    if {"" == $sa} {
+	set sa "-- $t(auto) --"
+    }
+    menubutton $w -text $sa -indicatoron 1 \
+	-menu $w.m -bd 2 -relief raised -anchor w -justify left
+    set b($w) pref_sign_as
+
+    menu $w.m -postcommand "PostSignAs $w $var"
+}
+
+# PostSignAs --
+#
+# Post the SignAs menu
+#
+# Arguments
+# w      - Widget
+# var    - Name of global variable which holds the value
+
+proc PostSignAs {w var} {
+    global t
+
+    $w.m delete 0 end
+    set al "-- $t(auto) --"
+    $w.m add command -label $al -command \
+	"$w configure -text [list $al]; \
+         set $var {}"
+    foreach k [lindex [RatPGP listkeys SecRing] 1] {
+	if {[lindex $k 4]} {
+	    set label "[lindex $k 2] [join [lindex $k 3]]"
+	    set ln "[lindex $k 2]\n  [join [lindex $k 3] {  }]"
+	    $w.m add command -label $label -command \
+		"$w configure -text [list $ln] ; \
+                 set $var [list [list [lindex $k 0] $ln]]"
+	}
+    }
+    FixMenu $w.m
+}
+
+# PGPDetails --
+#
+# Show detailed pgp settings when composing
+#
+# Arguments:
+# handler - message handler
+
+proc PGPDetails {handler} {
+    global t fixedBoldFont
+    upvar \#0 $handler mh
+
+    # Create toplevel
+    set w .pgp_details
+    toplevel $w -class TkRat
+    wm title $w $t(pgp_details) 
+
+    # Populate window
+    labelframe $w.my -text $t(my_key)
+    SetupSignAsWidget $w.my.k ${handler}(pgp_signer)
+    pack $w.my.k -padx 2 -pady 2 -fill x
+
+    labelframe $w.recipients -text $t(recipients)
+    text $w.recipients.t -wrap none
+    pack $w.recipients.t -padx 2 -pady 2
+
+    $w.recipients.t tag configure bold -font $fixedBoldFont -lmargin1 2
+    $w.recipients.t tag configure last -spacing3 5 -lmargin1 2
+    set na 0
+    foreach f {to cc} {
+        foreach a [RatSplitAdr $mh($f)] {
+            set key_info [lindex [RatAlias expand pgp $a $mh(role)] 0]
+            if {1 < [llength $key_info]} {
+                set key [lindex $key_info 1]
+            } else {
+                set key $key_info
+            }
+            $w.recipients.t insert end "$t($f): " bold
+            $w.recipients.t insert end "$a\n"
+            $w.recipients.t insert end "$t(key): $key\n" last
+            incr na
+        }
+    }
+    if {$na < 4} {
+        set na 4
+    }
+    $w.recipients.t configure -height [expr int($na*2.2+0.9)]
+
+    button $w.close -text $t(close) -command "destroy $w"
+
+    pack $w.my $w.recipients -side top -padx 2 -pady 2 -fill x
+    pack $w.close -padx 2 -pady 2
+
+    bind $w.close <Destroy> "::tkrat::winctl::RecordGeometry pgpDetails $w"
+    ::tkrat::winctl::SetGeometry pgpDetails $w
+    ::tkrat::winctl::ModalGrab $w
+}

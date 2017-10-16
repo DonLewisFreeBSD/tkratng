@@ -10,10 +10,10 @@
  *		Internet: MRC@CAC.Washington.EDU
  *
  * Date:	27 July 1988
- * Last Edited:	6 July 2004
+ * Last Edited:	30 April 2005
  * 
  * The IMAP toolkit provided in this Distribution is
- * Copyright 1988-2004 University of Washington.
+ * Copyright 1988-2005 University of Washington.
  * The full text of our legal notices is contained in the file called
  * CPYRIGHT, included with this Distribution.
  *
@@ -147,15 +147,22 @@ SENDSTREAM *smtp_open_full (NETDRIVER *dv,char **hostlist,char *service,
   if (!(hostlist && *hostlist)) mm_log ("Missing SMTP service host",ERROR);
 				/* maximum domain name is 64 characters */
   else do if (strlen (*hostlist) < SMTPMAXDOMAIN) {
-    sprintf (tmp,"{%.1000s/%.20s}",*hostlist,service ? service : "smtp");
-    if (!mail_valid_net_parse (tmp,&mb) || mb.anoflag || mb.readonlyflag) {
+    sprintf (tmp,"{%.1000s}",*hostlist);
+    if (!mail_valid_net_parse_work (tmp,&mb,service ? service : "smtp") ||
+	mb.anoflag || mb.readonlyflag) {
       sprintf (tmp,"Invalid host specifier: %.80s",*hostlist);
       mm_log (tmp,ERROR);
     }
     else {			/* light tryssl flag if requested */
       mb.trysslflag = (options & SOP_TRYSSL) ? T : NIL;
-				/* default port */
+				/* explicit port overrides all */
       if (mb.port) port = mb.port;
+				/* else /submit overrides port argument */
+      else if (!compare_cstring (mb.service,"submit")) {
+	port = SUBMITTCPPORT;	/* override port, use IANA name */
+	strcpy (mb.service,"submission");
+      }
+				/* else port argument overrides SMTP port */
       else if (!port) port = smtp_port ? smtp_port : SMTPTCPPORT;
       if (netstream =		/* try to open ordinary connection */
 	  net_open (&mb,dv,port,
@@ -414,7 +421,7 @@ long smtp_mail (SENDSTREAM *stream,char *type,ENVELOPE *env,BODY *body)
    * need to install your own rfc822out_t routine via SET_RFC822OUTPUT
    * to use in place of this to avoid a buffer overflow.
    */
-  char tmp[8*MAILTMPLEN];
+  char tmp[8*MAILTMPLEN], *s;
   long error = NIL;
   long retry = NIL;
   if (!(env->to || env->cc || env->bcc)) {
@@ -442,6 +449,7 @@ long smtp_mail (SENDSTREAM *stream,char *type,ENVELOPE *env,BODY *body)
     }
 
     strcpy (tmp,"FROM:<");	/* compose "MAIL FROM:<return-path>" */
+    s = tmp+strlen(tmp); /* TkRat */
 #ifdef RFC2821
     if (env->return_path && env->return_path->host &&
 	!((strlen (env->return_path->mailbox) > SMTPMAXLOCALPART) ||
@@ -457,6 +465,7 @@ long smtp_mail (SENDSTREAM *stream,char *type,ENVELOPE *env,BODY *body)
 	  (strlen (env->return_path->host) > SMTPMAXDOMAIN)))
       rfc822_address (tmp,env->return_path);
 #endif
+    mm_smtptrace(SMTPSTATE_MAIL_FROM, s); /* TkRat */
     strcat (tmp,">");
     if (ESMTP.ok) {
       if (ESMTP.eightbit.ok && ESMTP.eightbit.want)
@@ -489,6 +498,7 @@ long smtp_mail (SENDSTREAM *stream,char *type,ENVELOPE *env,BODY *body)
     }
   } while (retry);
 				/* negotiate data command */
+  mm_smtptrace(SMTPSTATE_SENDING_DATA, NIL); /* TkRat */
   if (!(smtp_send (stream,"DATA",NIL) == SMTPREADY)) return NIL;
 				/* set up error in case failure */
   smtp_fake (stream,SMTPSOFTFATAL,"SMTP connection went away!");
@@ -533,13 +543,15 @@ long smtp_rcpt (SENDSTREAM *stream,ADDRESS *adr,long *error)
 
       else {
 	strcpy (tmp,"TO:<");	/* compose "RCPT TO:<return-path>" */
+        s = tmp + strlen (tmp); /* TkRat */
 #ifdef RFC2821
 	rfc822_cat (tmp,adr->mailbox,NIL);
-	sprintf (tmp + strlen (tmp),"@%s>",adr->host);
+	sprintf (tmp + strlen (tmp),"@%s",adr->host);
 #else				/* old code with A-D-L support */
 	rfc822_address (tmp,adr);
-	strcat (tmp,">");
 #endif
+        mm_smtptrace(SMTPSTATE_RCPT_TO, s); /* TkRat */
+	strcat (tmp,">");
 				/* want notifications */
 	if (ESMTP.ok && ESMTP.dsn.ok && ESMTP.dsn.want) {
 				/* yes, start with prefix */

@@ -1,5 +1,5 @@
 #
-#  TkRat software and its included text is Copyright 1996-2002 by
+#  TkRat software and its included text is Copyright 1996-2005 by
 #  Martin Forssén
 #
 #  The full text of the legal notices is contained in the file called
@@ -11,10 +11,11 @@ proc TkRatStart {} {
 	   option currentLanguage_t tk_patchLevel vFolderInbox \
 	   folderWindowList openFolders folderChanged propNormFont \
 	   propLightFont fixedNormFont fixedBoldFont watcherFont \
-	   ISO_Left_Tab tk_version rat_tmp tklead folderUnseen
+	   ISO_Left_Tab tk_version rat_tmp tklead folderUnseen propBigFont \
+	   fixedItalicFont
 
     # Base package requirements
-    package require ratatosk 2.1
+    package require -exact ratatosk 2.2
 
     # Function to let client know we have started
     proc RatPing {} {
@@ -22,8 +23,8 @@ proc TkRatStart {} {
     }
 
     # Initialize variables
-    set tkrat_version 2.1.5
-    set tkrat_version_date 20050602
+    set tkrat_version 2.2dev
+    set tkrat_version_date 20050717
     set idCnt 0
     set inbox ""
     set expAfter {}
@@ -45,11 +46,16 @@ proc TkRatStart {} {
     RatGenId	# Force load of package
     OptionsInit
     InitMessages $option(language) t
+    OptionsInitText
     OptionsRead
     InitCharsetAliases
     InitPgp
     if {$tk_version >= 8.3} {
 	tk useinputmethods $option(useinputmethods)
+    }
+    if {$tk_version == 8.3} {
+        package require rat_compat 1.0
+        rat_compat::init8_3
     }
 
     # Reinitialize language (if needed)
@@ -57,23 +63,42 @@ proc TkRatStart {} {
 	InitMessages $option(language) t
     }
 
-    if {[info exists option(last_version_date)] 
-	    && "$option(last_version_date)" != $tkrat_version_date} {
+    if {0 != $option(last_version_date)
+	&& "$option(last_version_date)" != $tkrat_version_date} {
 	NewVersionUpdate
     }
 
-    # Update the default font
-    set propNormFont [RatCreateFont $option(prop_norm)]
-    set propLightFont [RatCreateFont $option(prop_light)]
-    set fixedNormFont [RatCreateFont $option(fixed_norm)]
-    set fixedBoldFont [RatCreateFont $option(fixed_bold)]
+    # Update the default fonts
+    if {$option(font_size) > 10} {
+        set big_size [expr 10+($option(font_size)-10)*2]
+    } else {
+        set big_size [expr $option(font_size)+2]
+    }
+    set propBigFont [RatCreateFont \
+                         [list components $option(font_family_prop) \
+                              $big_size bold roman 1 0]]
+    set propNormFont [RatCreateFont \
+                         [list components $option(font_family_prop) \
+                              $option(font_size) bold roman 0 0]]
+    set propLightFont [RatCreateFont \
+                         [list components $option(font_family_prop) \
+                              $option(font_size) normal roman 0 0]]
+    set fixedNormFont [RatCreateFont \
+                         [list components $option(font_family_fixed) \
+                              $option(font_size) normal roman 0 0]]
+    set fixedBoldFont [RatCreateFont \
+                         [list components $option(font_family_fixed) \
+                              $option(font_size) bold roman 0 0]]
+    set fixedItalicFont [RatCreateFont \
+                         [list components $option(font_family_fixed) \
+                              $option(font_size) normal italic 0 0]]
     set watcherFont [RatCreateFont $option(watcher_font)]
     if {$option(override_fonts)} {
 	set pri interactive
     } else {
 	set pri widgetDefault
     }
-    option add *TkRat*font $propNormFont $pri
+    option add *TkRat*font $propLightFont $pri
     option add *TkRat*Entry.font $fixedNormFont $pri
     option add *TkRat*Text.font $fixedNormFont $pri
     option add *TkRat*Listbox.font $fixedNormFont $pri
@@ -82,6 +107,12 @@ proc TkRatStart {} {
 
     option add *Menu.tearOff $option(tearoff) widgetDefault
 
+    option add *TkRat*Button.padY 1 widgetDefault
+    option add *TkRat*Button.padX 2 widgetDefault
+    option add *TkRat*Menubutton.padY 1 widgetDefault
+    option add *TkRat*Menubutton.padX 2 widgetDefault
+    option add *TkRat*Menu.activeBorderWidth 0 widgetDefault
+
     bind Menubutton <Up> {event generate %W <space>}
     bind Menubutton <Down> {event generate %W <space>}
 
@@ -89,78 +120,23 @@ proc TkRatStart {} {
     package require rat_list 1.0
     package require rat_fbox 1.1
     package require rat_balloon 1.0
-    package require rat_edit 1.0
+    package require rat_edit 1.1
     package require rat_textlist 1.0
     package require blt_busy 1.0
     package require rat_ed 1.0
-    package require rat_ispell 1.0
+    package require rat_ispell 1.1
     package require rat_tree 1.0
     package require rat_enriched 1.0
+    package require rat_flowmsg 1.0
+    package require rat_scrollframe 1.0
+    package require rat_textspell 1.0
+    package require rat_find 1.0
 
     # Change the color
     if {$option(override_color)} {
 	option add *TkRat*foreground black interactive
-	option add *TkRat*background gray85 interactive
+	option add *TkRat*background \#dde3eb interactive
 	eval "SetColor $option(color_set)"
-    }
-
-    # Make sure our config directory exists
-    if {![file isdirectory $option(ratatosk_dir)]} {
-	set but [RatDialog "" $t(need_tkrat_dir_title) \
-	       "$t(need_tkrat_dir1) \"$option(ratatosk_dir)\". \
-	       $t(need_tkrat_dir2)" {} 0 $t(create) $t(dont_create) $t(abort)]
-	switch $but {
-	    0 {
-		catch "exec mkdir [RatTildeSubst $option(ratatosk_dir)]" result
-		if {[string length $result]} {
-		    Popup [concat \
-			    "$t(failed_create) \"$option(ratatosk_dir)\":"\
-			    "$result.\n$t(do_without_dir)"]
-		}
-	    }
-	    1 {
-		Popup $t(do_without_dir)
-		set option(send_cache) $rat_tmp/send.$env(USER)
-	    }
-	    2 {exit 0}
-	}
-    }
-    if {![string length $option(last_version)]
-	    || "$option(last_version_date)" != $tkrat_version_date} {
-	StartupInfo
-    }
-
-    # Create send cache
-    if {![file isdirectory $option(send_cache)] &&
-	    [catch {exec mkdir [RatTildeSubst $option(send_cache)]} result]} {
-	Popup "$t(failed_to_create_send_cache) '$option(send_cache)': $result"
-    }
-
-    # Read misc files
-    VFolderRead
-    AliasRead
-    if { 3 > $option(scan_aliases) } {
-	ScanAliases
-    }
-    ReadUserproc
-    ReadPos
-    if {[file readable $option(ratatosk_dir)/expressions]} {
-	ExpRead
-    }
-
-    # Initialize balloon help system
-    InitMessages $option(language) balText
-    rat_balloon::Init b balText
-
-    # Setup trace of folderWindoList
-    set openFolders {}
-    trace variable folderWindowList wu RatTraceFolder
-
-    # Setup online status
-    switch $option(start_online_mode) {
-	online { set option(online) 1 }
-	offline { set option(online) 0 }
-	default {}
     }
 
     # Redo bindings for entry and text to make the selection work more
@@ -173,6 +149,58 @@ proc TkRatStart {} {
     bind Entry <1> "${tklead}EntryButton1 %W %x"
     bind Text <1> "${tklead}TextButton1 %W %x %y"
 
+    # Bind global window close
+    bind TkRat <Control-w> {destroy %W}
+
+    # Make sure our config directory exists
+    if {![file isdirectory $option(ratatosk_dir)]} {
+	catch {file mkdir [RatTildeSubst $option(ratatosk_dir)]} result
+	if {[string length $result]} {
+	    Popup [concat \
+		       "$t(failed_create) \"$option(ratatosk_dir)\":"\
+		       "$result.\n$t(do_without_dir)"]
+	}
+    }
+
+    # Initialize balloon help
+    InitMessages $option(language) balText
+    rat_balloon::Init b balText
+
+    # Give info about new features (or run first use wizard)
+    if {"$option(last_version_date)" != $tkrat_version_date} {
+	set isFirstUse [StartupInfo]
+    } else {
+        set isFirstUse 0
+    }
+
+    # Read misc files
+    VFolderRead
+    AliasRead
+    if { 3 > $option(scan_aliases) } {
+	ScanAliases
+    }
+    ReadUserproc
+    ::tkrat::winctl::ReadPos
+    if {[file readable $option(ratatosk_dir)/expressions]} {
+	ExpRead
+    }
+
+    if {$isFirstUse} {
+        FirstUseWizard
+        SaveOptions
+    }
+
+    # Setup trace of folderWindoList
+    set openFolders {}
+    trace variable folderWindowList wu RatTraceFolder
+
+    # Setup online status
+    switch $option(start_online_mode) {
+	online { set option(online) 1 }
+	offline { set option(online) 0 }
+	default {}
+    }
+
     if { 0 <= [expr {[RatDaysSinceExpire]-$option(expire_interval)}]} {
 	catch {Expire} err
     } else {
@@ -180,9 +208,6 @@ proc TkRatStart {} {
 		[after [expr {($option(expire_interval)- \
 		[RatDaysSinceExpire])*24*60*60*1000}] Expire]
     }
-
-    # Check for deferred mail
-    RatSend init
 
     # Load watcher
     set folderChanged(no_such_folder) 0
@@ -242,11 +267,12 @@ proc RatLog {level message {mode time}} {
 	    Popup $message
 	}
     } else {
-	if {$level} {
+	if {$level > 0} {
 	    if {![string compare explicit $mode]} {
 		if {[string length $logAfter]} {
 		    after cancel $logAfter
 		    set statusBacklog {}
+		    set logAfter {}
 		}
 		set statusText $message
 		set statusId $ratLogTop
@@ -343,19 +369,15 @@ proc OkButtons {w t1 t2 cmd} {
     wm protocol [winfo toplevel $w] WM_DELETE_WINDOW "$cmd 0"
 }
 
-# RatBind --
+# RatMkAccelerator --
 #
-# Bind the specified keys to the specified function
+# Creates the accelerator entry for a key-binding
 #
 # Arguments:
-# w        - Window to bind in
 # keylist  - Index into options array to get key combinations
-# function - Function to bind the keys to
-# menu     - The menu to configure (if any)
-# eindex   - Index of the entry in the menu
 
-proc RatBind {w keylist function {menu {}}} {
-    global option
+proc RatMkAccelerator {keylist} {
+    global option accelerator
 
     foreach k $option($keylist) {
 	if {[info exists a]} {
@@ -365,83 +387,112 @@ proc RatBind {w keylist function {menu {}}} {
 	} else {
 	    set a $k
 	}
+    }
+
+    if {[info exists a]} {
+        set n {}
+        foreach k [split [string trim $a "<>"] -] {
+            switch $k {
+                "Key"		{}
+                "Control"	{lappend n "Ctrl"}
+                "Meta"		{lappend n "M"}
+                "exclam"       	{lappend n "!"}
+                "quotedbl"    	{lappend n "\""}
+                "numbersign"    {lappend n "#"}
+                "dollar"       	{lappend n "\$"}
+                "percent"       {lappend n "%"}
+                "ampersand"     {lappend n "&"}
+                "parenleft"     {lappend n "("}
+                "parenright"    {lappend n ")"}
+                "asterisk"      {lappend n "*"}
+                "plus"       	{lappend n "+"}
+                "comma"       	{lappend n ","}
+                "minus"       	{lappend n "-"}
+                "period"       	{lappend n "."}
+                "slash"       	{lappend n "/"}
+                "colon"		{lappend n ":"}
+                "semicolon"	{lappend n ";"}
+                "less"		{lappend n "<"}
+                "equal"		{lappend n "="}
+                "greater"	{lappend n ">"}
+                "question"	{lappend n "?"}
+                "at"		{lappend n "@"}
+                "bracketleft"	{lappend n "["}
+                "backslash"	{lappend n "\\"}
+                "bracketright"	{lappend n "]"}
+                "asciicircum"	{lappend n "^"}
+                "underscore"	{lappend n "_"}
+                "braceleft"	{lappend n "{"}
+                "bar"		{lappend n "|"}
+                "braceright"	{lappend n "}"}
+                default		{lappend n $k}
+            }
+        }
+        set key [join $n -]
+    } else {
+        set key ""
+    }
+    set accelerator($keylist) $key
+}
+
+# RatBind --
+#
+# Bind the specified keys to the specified function
+#
+# Arguments:
+# w        - Window to bind in
+# keylist  - Index into options array to get key combinations
+# function - Function to bind the keys to
+
+proc RatBind {w keylist function} {
+    global option accelerator
+
+    if {![info exists accelarator($keylist)]} {
+        RatMkAccelerator $keylist
+    }
+
+    foreach k $option($keylist) {
 	if {0 < [regsub < $k <Alt- altkey]} {
 	    bind $w $altkey { }
 	}
 	bind $w $k $function
     }
-    if {[string length $menu]} {
-	if {[info exists a]} {
-	    regsub Key- [string trim $a <>] {} key
-	    if {0 != [regexp Shift- $key]} {
-		set l [split $key -]
-		set end [lindex $l end]
-		if { 1 == [string length $end] && 
-			[string compare [string tolower $end] \
-					[string toupper $end]]} {
-		    set l [lreplace $l end end [string toupper $end]]
-		    set key [join $l -]
-		    regsub Shift- $key {} key
-		}
-	    }
-	    if {[regexp {^Control-([a-z])} $key {} l]} {
-		set key "^[string toupper $l]"
-	    }
-	    regsub Meta- $key {M-} key
-	} else {
-	    set key ""
-	}
-	[lindex $menu 0] entryconfigure [lindex $menu 1] -accelerator $key
-    }
 }
 
-
-# MailSteal --
+# RatBindMenu --
 #
-# Steal back mail that has been kidnapped by other programs.
+# Bind the specified keys to the specified menu function
 #
 # Arguments:
-# handler - The handler of the folder window which has the inbox
-# ask     - A boolean which says if we should ask the user for confirmation
+# w        - Window to bind in
+# keylist  - Index in options array to get key combinations
+# menu     - The menu to configure (if any)
 
-proc MailSteal {handler ask} {
-    global option t inbox
+proc RatBindMenu {w keylist menu} {
+    global option accelerator
 
-    if { 0 == [file readable $option(ms_netscape_pref_file)] 
-	    || 0 == [string length $inbox]} {
-	return
-    }
-    set dir ""
-    set fh [open $option(ms_netscape_pref_file) r]
-    while {0 == [eof $fh]} {
-	gets $fh line
-	if {![string compare MAIL_DIR: [lindex $line 0]]} {
-	    set dir [RatTildeSubst [lindex $line 1]]
-	    break
-	}
-    }
-    close $fh
-    if { ![string length $dir] || ![file readable $dir/Inbox]} {
-	return
-    }
+    set cmd [list [lindex $menu 0] invoke [lindex $menu 1]]
+    RatBind $w $keylist "$cmd ; break"
+    [lindex $menu 0] entryconfigure [lindex $menu 1] \
+        -accelerator $accelerator($keylist)
+}
 
-    if {$option(ms_netscape_mtime) != [file mtime $dir/Inbox]} {
-	if { 1 == $ask } {
-	    set ask [RatDialog "" ! $t(netscape_steal) {} \
-				0 $t(steal_back) $t(nothing)] } {
-	}
-	if {0 == $ask} {
-	    set f [RatOpenFolder [list Netscape file {} $dir/Inbox]]
-	    set max [lindex [$f info] 1]
-	    for {set i 0} {$i < $max} {incr i} {
-		$inbox insert [$f get $i]
-		$f setFlag $i deleted 1
-	    }
-	    $f close
-	    RatBusy {Sync $handler update}
-	}
-	set option(ms_netscape_mtime) [file mtime $dir/Inbox]
-	SaveOptions
+# RatBindMenus --
+#
+# Apply bindings for a number of menus.
+#
+# Arguments:
+# w      - Window to bind in
+# aname  - Name of array holding info
+# prefix - Prefix of option keys
+# keys   - Keys to bind for
+
+proc RatBindMenus {w aname prefix keys} {
+    upvar \#0 $aname hd
+    global option
+
+    foreach k $keys {
+	RatBindMenu $w ${prefix}_key_${k} $hd($k)
     }
 }
 
@@ -466,35 +517,87 @@ proc CalculateFontWidth {w} {
 # baseColor  - The base color for the new scheme.
 # foreground - The new foreground color
 
-proc SetColor {baseColor {foreground black}} {
+proc SetColor {baseColor baseFg editColor editFg} {
     global currentColor
 
-    # Do nothing on monochorme displays
+    # Do nothing on monochrome displays
     if {2 == [winfo cells .]} {
 	return
     }
 
     # Do nothing if no change
-    if {[list $baseColor $foreground] == $currentColor} {
+    if {[list $baseColor $baseFg $editColor $editFg] == $currentColor} {
 	return
     }
 
     # Remember new settings
-    set currentColor [list $baseColor $foreground]
+    set currentColor [list $baseColor $baseFg $editColor $editFg]
 
-    # Apply new settings
-    switch $baseColor {
-    bisque {tk_bisque}
-    default {tk_setPalette background $baseColor foreground $foreground}
-    }
+    array set base [CalculateColors $baseColor $baseFg]
+    array set edit [CalculateColors $editColor $editFg]
 
-    # Make'em stick
-    foreach p {background foreground activeForeground insertBackground
-	       selectForeground highlightColor disabledForeground
-	       highlightBackground activeBackground selectBackground
-	       troughColor selectColor} {
-	option add *TkRat*$p [option get . $p Color] interactive
+    set edit(highlightBackground) $base(background)
+    set edit(selectBackground) $base(selectBackground)
+
+    foreach c [array names base] {
+	option add *TkRat*$c $base($c) interactive
     }
+    foreach c [array names edit] {
+	option add *TkRat*Text.$c $edit($c) interactive
+	option add *TkRat*Entry.$c $edit($c) interactive
+	option add *TkRat*Listbox.$c $edit($c) interactive
+	option add *TkRat*Canvas.$c $edit($c) interactive
+	option add *TkRat*Spinbox.$c $edit($c) interactive
+    }
+}
+
+# CalculateColors --
+#
+# Calculate a set of colors
+#
+# Arguments:
+# background - The background color
+# foreground - The foreground color
+
+proc CalculateColors {background foreground} {
+    set new(background) $background
+    set new(foreground) $foreground
+
+    set bg [winfo rgb . $new(background)]
+    set fg [winfo rgb . $new(foreground)]
+    set darkerBg [format #%02x%02x%02x [expr {(9*[lindex $bg 0])/2560}] \
+	    [expr {(9*[lindex $bg 1])/2560}] [expr {(9*[lindex $bg 2])/2560}]]
+    foreach i {activeForeground insertBackground selectForeground \
+	    highlightColor} {
+        set new($i) $new(foreground)
+    }
+    set new(disabledForeground) \
+        [format #%02x%02x%02x \
+             [expr {(3*[lindex $bg 0] + [lindex $fg 0])/1024}] \
+             [expr {(3*[lindex $bg 1] + [lindex $fg 1])/1024}] \
+             [expr {(3*[lindex $bg 2] + [lindex $fg 2])/1024}]]
+    set new(highlightBackground) $new(background)
+
+    foreach i {0 1 2} {
+        set light($i) [expr {[lindex $bg $i]/256}]
+        set inc1 [expr {($light($i)*15)/100}]
+        set inc2 [expr {(255-$light($i))/3}]
+        if {$inc1 > $inc2} {
+            incr light($i) $inc1
+        } else {
+            incr light($i) $inc2
+        }
+        if {$light($i) > 255} {
+            set light($i) 255
+        }
+    }
+    set new(activeBackground) [format #%02x%02x%02x $light(0) \
+                                   $light(1) $light(2)]
+    set new(selectBackground) $darkerBg
+    set new(troughColor) $darkerBg
+    set new(selectColor) #b03060
+
+    return [array get new]
 }
 
 # SetIcon --
@@ -548,7 +651,7 @@ proc FixMenu {m} {
 	if {![winfo exists $m.m]} {
 	    menu $m.m -postcommand "FixMenu $m.m"
 	} else {
-	    $m.m delete 1 end
+	    $m.m delete 0 end
 	}
 	incr i
 	while {$i <= [$m index last]} {
@@ -593,7 +696,7 @@ proc AliasRead {} {
 	    tkrat {
 		set f [lindex $a 2]
 		if {[file readable $f]} {
-		    catch {RatAlias read $f}
+		    catch {RatAlias read $book $f}
 		}
 		set dir [file dirname $f]
 		if {([file isfile $f] && [file writable $f])
@@ -639,12 +742,12 @@ proc AliasRead {} {
 # Arguments:
 # var	- Name of array (in callers context) to place result in
 # ids	- List of ids of strings to search
+# used  - List of already use accelerators
 
-proc FindAccelerators {var ids} {
+proc FindAccelerators {var ids {used {}}} {
     upvar $var result
     global t
 
-    set used ""
     foreach id $ids {
 	set tot [string length $t($id)]
 	set sub [string length [string trimleft $t($id) $used]]
@@ -654,6 +757,44 @@ proc FindAccelerators {var ids} {
 	} else {
 	    set result($id) -1
 	}
+    }
+}
+
+# SetupShortcuts --
+#
+# Setup suitable keyboard shortcuts for a number of buttons. This includes:
+# - Figuring out sutable accelerators
+# - Marking them by underlining
+# - Adding keybindings
+#
+# Arguments:
+# buttons - List of buttons to work on
+
+proc SetupShortcuts {buttons} {
+    set top [winfo toplevel [lindex $buttons 0]]
+
+    # Remove old bindings
+    foreach b [bind $top] {
+	if {[string match "<Alt-Key-?>" $b]} {
+	    bind $top $b {}
+	}
+    }
+
+    set u " "
+    foreach but $buttons {
+	set text [string tolower [$but cget -text]]	
+	regsub -all {[^\w ]} $text " " text
+	if {![regexp -indices "(^| )(\[^$u\])\\w" $text unused unused loc]} {
+	    if {![regexp -indices "\[^$u\]" $text loc]} {
+		$but configure -underline -1
+		continue
+	    }
+	}
+	set c [string index $text [lindex $loc 0]]
+	bind $top <Alt-Key-$c> "$but invoke ; break"
+	bind $top <Alt-Key-[string toupper $c]> "$but invoke ; break"
+	$but configure -underline [lindex $loc 0]
+	set u "$u$c"
     }
 }
 
@@ -689,62 +830,62 @@ proc RatExec {cmds} {
 	}
 	switch -glob -- [lindex $cmd 0] {
 	    open* {
-		    global folderWindowList idCnt
-
-		    if {"open" == [lindex $cmd 0]
-			    && [array size folderWindowList]} {
-			set handler [lindex [array names folderWindowList] 0]
-		    } else {
-			global idCnt option vFolderDef vFolderInbox
-
-			set w .f[incr idCnt]
-			toplevel $w -class TkRat
-			regsub -all -- %f $option(main_window_name) . title
-			wm title $w $title
-			regsub -all -- %f $option(icon_name) . ititle
-			wm iconname $w $ititle
-			SetIcon $w $option(icon)
-			Place $w folder
-			if {"" == $arg} {
-			    set arg [lindex $vFolderDef($vFolderInbox) 0]
-			}
-			if {$option(iconic)} {
-			    wm iconify $w
-			} else {
-			    wm deiconify $w
-			}
-			set handler [FolderWindowInit $w $arg]
-		    }
-		    return [RatExecOpen $handler $arg]
-		}
-	    blank {
+		global folderWindowList idCnt
+		
+		if {"open" == [lindex $cmd 0]
+		    && [array size folderWindowList]} {
+		    set handler [lindex [array names folderWindowList] 0]
+		} else {
 		    global idCnt option vFolderDef vFolderInbox
-
+		    
 		    set w .f[incr idCnt]
 		    toplevel $w -class TkRat
-		    regsub -all -- %f $option(main_window_name) . title
+		    set title [string map {%f . %r ?} \
+				   $option(main_window_name)]
 		    wm title $w $title
-		    regsub -all -- %f $option(icon_name) . ititle
+		    set ititle [string map {%f .} $option(icon_name)]
 		    wm iconname $w $ititle
 		    SetIcon $w $option(icon)
-		    Place $w folder
-		    if {"" == $arg} {
-			set arg [lindex $vFolderDef($vFolderInbox) 0]
-		    }
+		    ::tkrat::winctl::Place folderWindow $w
+		    set handler [FolderWindowInit $w $arg]
+		    ::tkrat::winctl::Place folderWindow $w
 		    if {$option(iconic)} {
 			wm iconify $w
 		    } else {
 			wm deiconify $w
 		    }
-		    set handler [FolderWindowInit $w $arg]
-		    FolderWindowClear $handler
 		}
+		return [RatExecOpen $handler $arg]
+	    }
+	    blank {
+		global idCnt option vFolderDef vFolderInbox
+		
+		set w .f[incr idCnt]
+		toplevel $w -class TkRat
+		set title [string map {%f . %r ?} $option(main_window_name)]
+		wm title $w $title
+		set ititle [string map {%f .} $option(icon_name)]
+		wm iconname $w $ititle
+		SetIcon $w $option(icon)
+		if {"" == $arg} {
+		    set arg [lindex $vFolderDef($vFolderInbox) 0]
+		}
+                ::tkrat::winctl::Place folderWindow $w
+		set handler [FolderWindowInit $w $arg]
+                ::tkrat::winctl::Place folderWindow $w
+		FolderWindowClear $handler
+		if {$option(iconic)} {
+		    wm iconify $w
+		} else {
+		    wm deiconify $w
+		}
+	    }
 	    compose {
-		    return [ComposeClient $arg]
-		}
+		return [ComposeClient $arg]
+	    }
 	    netsync {
-		    return [RatExecNetsync $arg]
-		}
+		return [RatExecNetsync $arg]
+	    }
 	}
     }
 }
@@ -781,11 +922,6 @@ proc RatExecOpen {handler name} {
     }
     if {![FolderFailedOpen check $vFolderDef($spec)]} {
 	VFolderOpen $handler $spec
-    }
-
-    # Check for stolen mail
-    if {$check && $option(mail_steal)} {
-	MailSteal $handler 1
     }
 }
 
@@ -829,21 +965,35 @@ proc RatExecNetsync {what} {
 # mode	- Mode of file dialog
 
 proc Browse {w var mode} {
-    global env t
-    upvar #0 $var filein
+    global env t option
+    upvar \#0 $var filein
 
     if {"" != $filein} {
-	set dir [file dirname $filein]
-	set file [file tail $filein]
+	if {[file isdirectory $filein]} {
+	    set dir $filein
+	    set file ""
+	} else {
+	    set dir [file dirname $filein]
+	    set file [file tail $filein]
+	}
     } else {
-	set dir $env(HOME)
+	set dir $option(initialdir)
 	set file ""
     }
 
-    set r [rat_fbox::run -parent $w -initialdir $dir -initialfile $file \
-	    -title $t(select_file) -ok $t(ok) -mode $mode]
+    set r [rat_fbox::run \
+               -parent $w \
+               -initialdir $dir \
+               -initialfile $file \
+               -title $t(select_file) \
+               -ok $t(ok) \
+               -mode $mode]
     if {"" != $r} {
-	uplevel #0 [list set $var $r]
+        if {$option(initialdir) != [file dirname $r]} {
+            set option(initialdir) [file dirname $r]
+            SaveOptions
+        }
+	uplevel \#0 [list set $var $r]
     }
 }
 
@@ -869,4 +1019,17 @@ proc IsExecutable {cmd} {
 	}
     }
     return 0
+}
+
+
+# DumpStack --
+#
+# Dumps the tcl calling stack
+#
+# Arguments:
+
+proc DumpStack {} {
+    for {set i 1} {$i < [info level]} {incr i} {
+        puts "$i: [info level $i]"
+    }
 }

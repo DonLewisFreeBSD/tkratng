@@ -3,7 +3,7 @@
  *
  *	This file contains code which implements standard c-client messages.
  *
- * TkRat software and its included text is Copyright 1996-2002 by
+ * TkRat software and its included text is Copyright 1996-2004 by
  * Martin Forssén
  *
  * The full text of the legal notice is contained in the file called
@@ -11,18 +11,6 @@
  */
 
 #include "ratStdFolder.h"
-
-/*
- * The ClientData for each message entity
- */
-typedef struct StdMessageInfo {
-    MAILSTREAM *stream;
-    MESSAGECACHE *eltPtr;
-    ENVELOPE *envPtr;
-    BODY *bodyPtr;
-    RatStdFolderType type;
-    char *spec;
-} StdMessageInfo;
 
 /*
  * The ClientData for each bodypart entity
@@ -144,7 +132,7 @@ RatStdEasyCopyingOK(Tcl_Interp *interp, MessageInfo *msgPtr, Tcl_Obj *defPtr)
     case RAT_MBX:
 	return 0;
     case RAT_UNIX:
-	return !strcasecmp(Tcl_GetString(objv[1]), "file");
+	return 0;
     case RAT_MH:
 	return !strcasecmp(Tcl_GetString(objv[1]), "mh");
     case RAT_POP:
@@ -332,9 +320,8 @@ Std_CreateBodyProc(Tcl_Interp *interp, MessageInfo *msgPtr)
 {
     StdMessageInfo *stdMsgPtr = (StdMessageInfo*)msgPtr->clientData;
     StdBodyInfo *stdBodyInfoPtr = (StdBodyInfo*)ckalloc(sizeof(StdBodyInfo));
-    msgPtr->bodyInfoPtr = CreateBodyInfo(msgPtr);
+    msgPtr->bodyInfoPtr = CreateBodyInfo(interp, msgPtr, stdMsgPtr->bodyPtr);
 
-    msgPtr->bodyInfoPtr->bodyPtr = stdMsgPtr->bodyPtr;
     msgPtr->bodyInfoPtr->clientData = (ClientData)stdBodyInfoPtr;
     if (TYPEMULTIPART == msgPtr->bodyInfoPtr->bodyPtr->type) {
         stdBodyInfoPtr->section = NULL;
@@ -427,10 +414,10 @@ Std_MakeChildrenProc(Tcl_Interp *interp, BodyInfo *bodyInfoPtr)
 	partInfoPtrPtr = &bodyInfoPtr->firstbornPtr;
 	for (partPtr = bodyPtr->nested.part; partPtr;
 		partPtr = partPtr->next) {
-	    partInfoPtr = CreateBodyInfo(bodyInfoPtr->msgPtr);
+	    partInfoPtr = CreateBodyInfo(interp, bodyInfoPtr->msgPtr,
+					 &partPtr->body);
 	    partStdInfoPtr = (StdBodyInfo*)ckalloc(sizeof(StdBodyInfo));
 	    *partInfoPtrPtr = partInfoPtr;
-	    partInfoPtr->bodyPtr = &partPtr->body;
 	    partInfoPtrPtr = &partInfoPtr->nextPtr;
 	    partInfoPtr->msgPtr = bodyInfoPtr->msgPtr;
 	    partInfoPtr->clientData = (ClientData)partStdInfoPtr;
@@ -531,7 +518,7 @@ Std_GetInfoProc(Tcl_Interp *interp, ClientData clientData,
     if (msgPtr->info[type]) {
 	if (type == RAT_FOLDER_INDEX && msgPtr->folderInfoPtr) {
 	    Tcl_GetIntFromObj(interp, msgPtr->info[type], &i);
-	    if (i < msgPtr->folderInfoPtr->visible
+	    if (i < msgPtr->folderInfoPtr->number
 		    && msgPtr->folderInfoPtr->privatePtr[
 		       msgPtr->folderInfoPtr->presentationOrder[i-1]] ==
 		    (ClientData)msgPtr) {
@@ -545,6 +532,7 @@ Std_GetInfoProc(Tcl_Interp *interp, ClientData clientData,
     switch (type) {
 	case RAT_FOLDER_SUBJECT:	/* fallthrough */
 	case RAT_FOLDER_CANONSUBJECT:	/* fallthrough */
+	case RAT_FOLDER_ANAME:		/* fallthrough */
 	case RAT_FOLDER_NAME:		/* fallthrough */
 	case RAT_FOLDER_MAIL_REAL:	/* fallthrough */
 	case RAT_FOLDER_MAIL:		/* fallthrough */
@@ -639,6 +627,9 @@ Std_GetInfoProc(Tcl_Interp *interp, ClientData clientData,
 		}
 	    }
 	    break;
+	case RAT_FOLDER_UID:
+	    oPtr = Tcl_NewIntObj(
+		mail_uid(stdMsgPtr->stream, msgPtr->msgNo+1));
 	case RAT_FOLDER_END:
 	    break;
     }
@@ -696,6 +687,7 @@ RatStdMsgStructInit(RatFolderInfoPtr infoPtr, Tcl_Interp *interp, int index,
 		(ClientData)stdMsgPtr;
     }
 }
+
 #ifdef MEM_DEBUG
 void ratStdMessageCleanup()
 {

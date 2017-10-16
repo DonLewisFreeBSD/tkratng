@@ -4,7 +4,7 @@
  *      This file contains code which implements standard c-client folders.
  *	This means ONLY filefolders at this moment.
  *
- * TkRat software and its included text is Copyright 1996-2002 by
+ * TkRat software and its included text is Copyright 1996-2004 by
  * Martin Forssén
  *
  * The full text of the legal notice is contained in the file called
@@ -12,6 +12,7 @@
  */
 
 #include "ratStdFolder.h"
+#include <mbx.h>
 
 /*
  * We use this structure to keep a list of open connections
@@ -19,6 +20,7 @@
 
 typedef struct Connection {
     MAILSTREAM *stream;		/* Handler to c-client entity */
+    char *spec;                 /* Mailbox spec */
     int *errorFlagPtr;		/* Address of flag to set on hard errors */
     int refcount;		/* references count */
     int closing;		/* True if this connection is unused and
@@ -69,6 +71,20 @@ typedef struct Mailbox {
 static Mailbox *mailboxListPtr = NULL;
 static char *mailboxSearchBase = NULL;
 static char lastDelimiter[2] = {'\0', '\0'};
+static char *importCallback;
+static Tcl_Obj *testListPtr = NULL;
+static struct {
+    long mask;
+    char *name;
+    Tcl_Obj *oPtr;
+} attrTable[] = {
+    {LATT_NOINFERIORS, "noinferiors", NULL},
+    {LATT_NOSELECT, "noselect", NULL},
+    {LATT_MARKED, "marked", NULL},
+    {LATT_UNMARKED, "unmarked", NULL},
+    {LATT_REFERRAL, "referral", NULL},
+    {0, NULL, NULL}
+};
 
 /*
  * Used to store search results
@@ -97,14 +113,16 @@ static RatInsertProc Std_InsertProc;
 static RatSetFlagProc Std_SetFlagProc;
 static RatGetFlagProc Std_GetFlagProc;
 static Tcl_TimerProc CloseConnection;
-static Tcl_ObjCmdProc StdImportCmd;
+static Tcl_ObjCmdProc RatImportCmd;
+static Tcl_ObjCmdProc RatTestImportCmd;
 static Connection *FindConn(MAILSTREAM *stream);
-static void StdImportBuildResult(Tcl_Interp *interp, Mailbox *mPtr,
+static void RatImportBuildResult(Tcl_Interp *interp, Mailbox *mPtr,
 				 int *lastId, int id,
 				 int templatec, Tcl_Obj **templatev);
 static HandleExists Std_HandleExists;
 static HandleExpunged Std_HandleExpunged;
 static RatStdFolderType Std_GetType(const char *spec);
+static void RatDeleteVFolderStruct(Tcl_Interp *interp, int id);
 
 
 /*
@@ -130,10 +148,17 @@ static RatStdFolderType Std_GetType(const char *spec);
 int
 RatStdFolderInit(Tcl_Interp *interp)
 {
+    int i;
+
+    for (i=0; attrTable[i].mask; i++) {
+	attrTable[i].oPtr = Tcl_NewStringObj(attrTable[i].name, -1);
+	Tcl_IncrRefCount(attrTable[i].oPtr);
+    }
     /* Link imap code */
 #include "../imap/c-client/linkage.c"
 
-    Tcl_CreateObjCommand(interp, "RatImport", StdImportCmd, NULL, NULL);
+    Tcl_CreateObjCommand(interp, "RatImport", RatImportCmd, NULL, NULL);
+    Tcl_CreateObjCommand(interp, "RatTestImport", RatTestImportCmd, NULL,NULL);
     return TCL_OK;
 }
 
@@ -161,8 +186,12 @@ Std_StreamOpen(Tcl_Interp *interp, char *spec, long options,
 {
     MAILSTREAM *stream = NULL;
     Connection *connPtr = NULL;
-    char *host = NULL, *cPtr;
+    char *cPtr;
     int len;
+
+    if (errorFlagPtr) {
+	*errorFlagPtr = 0;
+    }
 
     if ('{' == spec[0]) {
 	strlcpy(loginSpec, spec, sizeof(loginSpec));
@@ -175,11 +204,12 @@ Std_StreamOpen(Tcl_Interp *interp, char *spec, long options,
 	
 	for (connPtr = connListPtr; connPtr; connPtr = connPtr->next) {
 	    if ((connPtr->closing || options & OP_HALFOPEN)
-		&& !strncmp(spec, connPtr->stream->mailbox, len)) {
+		&& !strncmp(spec, connPtr->spec, len)
+		&& (!connPtr->stream->halfopen || options & OP_HALFOPEN)) {
 		break;
 	    }
 	}
-	if (connPtr) {
+	if (connPtr && T == mail_ping(connPtr->stream)) {
 	    stream = connPtr->stream;
 	    connPtr->refcount++;
 	    Tcl_DeleteTimerHandler(connPtr->token);
@@ -191,7 +221,6 @@ Std_StreamOpen(Tcl_Interp *interp, char *spec, long options,
 	}
     }
     if (stream && options & OP_HALFOPEN) {
-	ckfree(host);
 	return stream;
     }
     loginPassword[0] = '\0';
@@ -199,6 +228,7 @@ Std_StreamOpen(Tcl_Interp *interp, char *spec, long options,
     if (stream && !connPtr) {
 	connPtr = (Connection*)ckalloc(sizeof(Connection));
 	connPtr->stream = stream;
+	connPtr->spec = cpystr(spec);
 	connPtr->errorFlagPtr = errorFlagPtr;
 	connPtr->refcount = 1;
 	connPtr->closing = 0;
@@ -222,10 +252,10 @@ Std_StreamOpen(Tcl_Interp *interp, char *spec, long options,
 	Tcl_SetVar2Ex(interp, "ratNetOpenFailures", NULL, Tcl_NewIntObj(++n),
 		      TCL_GLOBAL_ONLY);
     }
-    if (errorFlagPtr) {
-	*errorFlagPtr = 0;
+    if (stream && stream->halfopen && 0 == (options & OP_HALFOPEN)) {
+	Std_StreamClose(interp, stream);
+	stream = NIL;
     }
-    ckfree(host);
     return stream;
 }
 
@@ -280,6 +310,7 @@ Std_StreamClose(Tcl_Interp *interp, MAILSTREAM *stream)
 	    } else {
 		connPtr->token = NULL;
 	    }
+	    connPtr->handlers = NULL;
 	} else {
 	    CloseConnection((ClientData)connPtr);
 	}
@@ -344,14 +375,12 @@ OpenStdFolder(Tcl_Interp *interp, char *spec, void *voidPtr)
     MAILSTREAM *stream = NULL;
     RatStdFolderType type;
     StdFolderInfo *stdPtr = (StdFolderInfo*)voidPtr;
-    Tcl_DString dsBuf;
     struct stat sbuf;
-    int dsBufUse = 0;
+    char *to_free = NULL;
 
     type = Std_GetType(spec);
     if (RAT_UNIX == type) {
-	spec = Tcl_UtfToExternalDString(NULL, spec, -1, &dsBuf);
-	dsBufUse = 1;
+	spec = to_free = cpystr(RatTranslateFileName(interp, spec));
     }
     if ('/' == spec[0] && stat(spec, &sbuf) && ENOENT == errno) {
 	int fd;
@@ -379,8 +408,8 @@ OpenStdFolder(Tcl_Interp *interp, char *spec, void *voidPtr)
 	stdPtr->exists = stream->nmsgs;
 	stdPtr->type = type;
     }
-    if (dsBufUse) {
-	Tcl_DStringFree(&dsBuf);
+    if (to_free) {
+	ckfree(to_free);
     }
     return stream;
 }
@@ -420,11 +449,7 @@ RatStdFolderCreate(Tcl_Interp *interp, Tcl_Obj *defPtr)
      * Now it is time to initialize things
      */
     if (initialize) {
-        char *role, *domain;
-        
-	role = Tcl_GetVar2(interp, "option", "default_role",TCL_GLOBAL_ONLY);
-        domain = RatGetCurrent(interp, RAT_HOST, role);
-	env_parameters(SET_LOCALHOST, (void*)domain);
+	env_parameters(SET_LOCALHOST, (void*)Tcl_GetHostName());
 	initialize = 0;
     }
 
@@ -439,7 +464,7 @@ RatStdFolderCreate(Tcl_Interp *interp, Tcl_Obj *defPtr)
 	return NULL;
     }
 
-    infoPtr = (RatFolderInfo *) ckalloc(sizeof(*infoPtr)); 
+    infoPtr = (RatFolderInfo*)ckalloc(sizeof(*infoPtr)); 
 
     infoPtr->type = "std";
     Tcl_ListObjIndex(interp, defPtr, 0, &oPtr);
@@ -742,6 +767,11 @@ Std_InsertProc(RatFolderInfoPtr infoPtr, Tcl_Interp *interp, int argc,
     return TCL_OK;
 }
 
+static int
+intcompare(const void *v1, const void *v2)
+{
+    return *(int*)v1 - *(int*)v2;
+}
 
 /*
  *----------------------------------------------------------------------
@@ -760,61 +790,79 @@ Std_InsertProc(RatFolderInfoPtr infoPtr, Tcl_Interp *interp, int argc,
  *----------------------------------------------------------------------
  */
 static int
-Std_SetFlagProc(RatFolderInfoPtr infoPtr, Tcl_Interp *interp, int index,
-	RatFlag flag, int value)
+Std_SetFlagProc(RatFolderInfoPtr infoPtr, Tcl_Interp *interp, int *ilist,
+		int count, RatFlag flag, int value)
 {
     StdFolderInfo *stdPtr = (StdFolderInfo *) infoPtr->private;
-    MessageInfo *msgPtr = (MessageInfo*)infoPtr->privatePtr[index];
+    MessageInfo *msgPtr;
     MESSAGECACHE *cachePtr;
-    char sequence[8];
-    int wasseen;
-
+    char s[64];
+    int i;
+    
     if (!stdPtr->stream
 	|| stdPtr->stream->rdonly) {
 	return TCL_OK;
     }
 
-    if (msgPtr->info[RAT_FOLDER_STATUS]) {
-	Tcl_DecrRefCount(msgPtr->info[RAT_FOLDER_STATUS]);
-	msgPtr->info[RAT_FOLDER_STATUS] = NULL;
+    qsort(ilist, count, sizeof(int), intcompare);
+    if (RAT_SEEN == flag) {
+	for (i=0; i<count; i++) {
+	    cachePtr = mail_elt(stdPtr->stream, ilist[i]+1);
+	    if (cachePtr->seen != value) {
+		if (cachePtr->seen) {
+		    infoPtr->unseen++;
+		} else {
+		    infoPtr->unseen--;
+		}
+	    }
+	}
     }
 
-    cachePtr = mail_elt(stdPtr->stream, index+1);
-    wasseen = cachePtr->seen;
-    sprintf(sequence, "%d", index+1);
-    if (value) {
-	mail_setflag_full(stdPtr->stream, sequence,
-			  flag_name[flag].imap_name, NIL);
-    } else {
-	mail_clearflag_full(stdPtr->stream, sequence,
-			    flag_name[flag].imap_name, NIL);
+    for (i=0, s[0] = '\0'; i<count; i++) {
+	snprintf(s+strlen(s), sizeof(s)-strlen(s), "%d", ilist[i]+1);
+	if (i<count-1 && ilist[i+1] == ilist[i]+1) {
+	    for (i++; ilist[i] == ilist[i+1]-1 && i<count; i++);
+	    snprintf(s+strlen(s), sizeof(s)-strlen(s), ":%d", ilist[i]+1);
+	}
+	if (i == count-1 || strlen(s) >= sizeof(s)-8) {
+	    if (value) {
+		mail_setflag_full(stdPtr->stream, s,
+				  flag_name[flag].imap_name, NIL);
+	    } else {
+		mail_clearflag_full(stdPtr->stream, s,
+				    flag_name[flag].imap_name, NIL);
+	    }
+	    s[0] = '\0';
+	} else {
+	    strlcat(s, ",", sizeof(s));
+	}
     }
-    (void)mail_fetchenvelope(stdPtr->stream, index+1);
-    cachePtr = mail_elt(stdPtr->stream, index+1);
-    switch (flag) {
-	case RAT_SEEN:	   
-		if (wasseen != value) {
-		    if (wasseen) {
-			infoPtr->unseen++;
-		    } else {
-			infoPtr->unseen--;
-		    }
-		}
-		cachePtr->seen = value; break;
-		break;
+    
+    for (i=0; i<count; i++) {
+	msgPtr = (MessageInfo*)infoPtr->privatePtr[ilist[i]];
+	if (msgPtr->info[RAT_FOLDER_STATUS]) {
+	    Tcl_DecrRefCount(msgPtr->info[RAT_FOLDER_STATUS]);
+	    msgPtr->info[RAT_FOLDER_STATUS] = NULL;
+	}
+
+	(void)mail_fetchenvelope(stdPtr->stream, ilist[i]+1);
+	cachePtr = mail_elt(stdPtr->stream, ilist[i]+1);
+	switch (flag) {
+	case RAT_SEEN:     cachePtr->seen = value; break; break;
 	case RAT_DELETED:  cachePtr->deleted = value; break;
 	case RAT_FLAGGED:  cachePtr->flagged = value; break;
 	case RAT_ANSWERED: cachePtr->answered = value; break;
 	case RAT_DRAFT:	   cachePtr->draft = value; break;
 	case RAT_RECENT:   cachePtr->recent = value; break;
+        case RAT_FLAG_END: break;
+	}
+	infoPtr->recent = stdPtr->stream->recent;
+	if (logLevel > RAT_WARN) {
+	    Tcl_SetResult(interp, logMessage, TCL_VOLATILE);
+	    return TCL_ERROR;
+	}
     }
-    infoPtr->recent = stdPtr->stream->recent;
-    if (logLevel > RAT_WARN) {
-	Tcl_SetResult(interp, logMessage, TCL_VOLATILE);
-	return TCL_ERROR;
-    } else {
-	return TCL_OK;
-    }
+    return TCL_OK;
 }
 
 
@@ -856,6 +904,7 @@ Std_GetFlagProc(RatFolderInfoPtr infoPtr, Tcl_Interp *interp, int index,
     case RAT_ANSWERED:	value = cachePtr->answered; break;
     case RAT_DRAFT:	value = cachePtr->draft; break;
     case RAT_RECENT:	value = cachePtr->recent; break;
+    case RAT_FLAG_END:  break;
     }
     return value;
 }
@@ -950,12 +999,12 @@ Std_CreateProc(RatFolderInfoPtr infoPtr, Tcl_Interp *interp, int index)
 /*
  *----------------------------------------------------------------------
  *
- * StdImportCmd --
+ * RatImportCmd --
  *
  *      Import folders (via mm_list)
  *
  * Results:
- *	The folders found are returned as a list
+ *	The folders found are stored in the vFolderDef array
  *
  * Side effects:
  *	RatLogin may be called.
@@ -964,8 +1013,8 @@ Std_CreateProc(RatFolderInfoPtr infoPtr, Tcl_Interp *interp, int index)
  *----------------------------------------------------------------------
  */
 static int
-StdImportCmd(ClientData dummy, Tcl_Interp *interp, int objc,
-	Tcl_Obj *const objv[])
+RatImportCmd(ClientData dummy, Tcl_Interp *interp, int objc,
+	     Tcl_Obj *const objv[])
 {
     Tcl_Obj *oPtr, **iobjv, **bobjv, *origPtr;
     int iobjc, bobjc, subscribed, i, lastId, id;
@@ -978,9 +1027,9 @@ StdImportCmd(ClientData dummy, Tcl_Interp *interp, int objc,
      *  check that it is is a folder definition id and that it
      *    points to a correct import-folder.
      */
-    if (objc != 2) {
+    if (objc != 2 && objc != 3) {
 	Tcl_AppendResult(interp, "wrong # args: should be \"",
-		Tcl_GetString(objv[0]), " id\"", (char *) NULL);
+		Tcl_GetString(objv[0]), " id ?callback?\"", (char *) NULL);
 	return TCL_ERROR;
     }
     origPtr = Tcl_GetVar2Ex(interp, "vFolderDef", Tcl_GetString(objv[1]),
@@ -1016,6 +1065,15 @@ StdImportCmd(ClientData dummy, Tcl_Interp *interp, int objc,
     }
 
     /*
+     * Store callback, if specified
+     */
+    if (3 == objc) {
+	importCallback = Tcl_GetString(objv[2]);
+    } else {
+	importCallback = NULL;
+    }
+
+    /*
      * Run search
      * This builds a list of all found folders in mailboxListPtr
      * First we run a dummy-search to get the hierarchy delimiter
@@ -1028,8 +1086,7 @@ StdImportCmd(ClientData dummy, Tcl_Interp *interp, int objc,
     mail_list(stream, "", spec);
     strlcpy(buf, spec, sizeof(buf));
     if (*mailboxSearchBase
-	&& lastDelimiter[0] != mailboxSearchBase[strlen(mailboxSearchBase)-1]
-	&& lastDelimiter[0] != Tcl_GetString(iobjv[4])[0]) {
+	&& lastDelimiter[0] != mailboxSearchBase[strlen(mailboxSearchBase)-1]){
 	strlcat(buf, lastDelimiter, sizeof(buf));
     }
     strlcat(buf, Tcl_GetString(iobjv[4]), sizeof(buf));
@@ -1060,9 +1117,8 @@ StdImportCmd(ClientData dummy, Tcl_Interp *interp, int objc,
 	     "lindex [lsort -integer [array names vFolderDef]] end");
     Tcl_GlobalEval(interp, buf);
     lastId = atoi(Tcl_GetStringResult(interp));
-    StdImportBuildResult(interp, mailboxListPtr, &lastId, id,
+    RatImportBuildResult(interp, mailboxListPtr, &lastId, id,
 			 bobjc, bobjv);
-
     
     mailboxListPtr = NULL;
     return TCL_OK;
@@ -1071,7 +1127,7 @@ StdImportCmd(ClientData dummy, Tcl_Interp *interp, int objc,
 /*
  *----------------------------------------------------------------------
  *
- * StdImportBuildResult --
+ * RatImportBuildResult --
  *
  *      Recursive function which parses the import result into folders
  *
@@ -1092,7 +1148,7 @@ typedef struct {
 } Mbox;
 
 static void
-StdImportBuildResult(Tcl_Interp *interp, Mailbox *mPtr, int *lastId,
+RatImportBuildResult(Tcl_Interp *interp, Mailbox *mPtr, int *lastId,
 		     int id, int templatec, Tcl_Obj **templatev)
 {
     Tcl_Obj **objv, *oPtr, *lPtr, *iPtr, *idList;
@@ -1172,7 +1228,7 @@ StdImportBuildResult(Tcl_Interp *interp, Mailbox *mPtr, int *lastId,
 		}
 		count++;
 	    }
-	    if (0 == (mPtr->attributes & LATT_NOINFERIORS)) {
+	    if (mPtr->child) {
 		/* Create struct */
 		mbox_out[count].id = ++(*lastId);
 		lPtr = Tcl_NewObj();
@@ -1196,7 +1252,7 @@ StdImportBuildResult(Tcl_Interp *interp, Mailbox *mPtr, int *lastId,
 	    count++;
 	}
 	if (mPtr->child) {
-	    StdImportBuildResult(interp, mPtr->child, lastId,
+	    RatImportBuildResult(interp, mPtr->child, lastId,
 				 mbox_out[count-1].id, templatec, templatev);
 	}
 	nPtr = mPtr->next;
@@ -1205,8 +1261,7 @@ StdImportBuildResult(Tcl_Interp *interp, Mailbox *mPtr, int *lastId,
     for (i=0; i<num_mbox_in; i++) {
 	if (0 != mbox_in[i].id) {
 	    changed = 1;
-	    snprintf(buf, sizeof(buf), "%d", mbox_in[i].id);
-	    Tcl_UnsetVar2(interp, "vFolderDef", buf, TCL_GLOBAL_ONLY);
+            RatDeleteVFolderStruct(interp, mbox_in[i].id);
 	}
     }
     /* Build result */
@@ -1226,7 +1281,137 @@ StdImportBuildResult(Tcl_Interp *interp, Mailbox *mPtr, int *lastId,
 	oPtr = idList;
     }
 }
+
+/*
+ *----------------------------------------------------------------------
+ *
+ * RatDeleteVFolderStruct --
+ *
+ *      Deletes a vfolder entry and its eventual children. It is the
+ *      callers responsibility to delete the references in the parent
+ *      of this vfolderstruct.
+ *
+ * Results:
+ *	None
+ *
+ * Side effects:
+ *	None
+ *
+ *
+ *----------------------------------------------------------------------
+ */
+static void
+RatDeleteVFolderStruct(Tcl_Interp *interp, int id)
+{
+    Tcl_Obj *oPtr, **objv;
+    int i, child_id, objc = 0;
+    char buf[32];
 
+    /* Get definition */
+    snprintf(buf, sizeof(buf), "%d", id);
+    oPtr = Tcl_GetVar2Ex(interp, "vFolderDef", buf, TCL_GLOBAL_ONLY);
+
+    /* Check if struct entry */
+    Tcl_ListObjGetElements(interp, oPtr, &objc, &objv);
+    if (objc > 3
+        && !strcmp("struct", Tcl_GetString(objv[1]))
+        && TCL_OK == Tcl_ListObjGetElements(interp, objv[3], &objc, &objv)) {
+
+        /* Recursively delete children */
+        for (i=0; i<objc; i++) {
+            if (TCL_OK == Tcl_GetIntFromObj(interp, objv[i], &child_id)) {
+                RatDeleteVFolderStruct(interp, child_id);
+            }
+        }
+    }
+
+    /* Delete object */
+    Tcl_UnsetVar2(interp, "vFolderDef", buf, TCL_GLOBAL_ONLY);
+}
+
+/*
+ *----------------------------------------------------------------------
+ *
+ * RatTestImportCmd --
+ *
+ *      Import folders (via mm_list)
+ *
+ * Results:
+ *	The folders found are returned as a list
+ *
+ * Side effects:
+ *	RatLogin may be called.
+ *
+ *
+ *----------------------------------------------------------------------
+ */
+static int
+RatTestImportCmd(ClientData dummy, Tcl_Interp *interp, int objc,
+		 Tcl_Obj *const objv[])
+{
+    Tcl_Obj **iobjv;
+    int iobjc;
+    char *spec, *wildcard, buf[1024];
+    MAILSTREAM *stream = NULL;
+
+    /*
+     * Check arguments
+     *  check that we got one
+     *  check that it is is a folder definition id and that it
+     *    points to a correct import-folder.
+     */
+    if (objc != 3) {
+	Tcl_AppendResult(interp, "wrong # args: should be \"",
+		Tcl_GetString(objv[0]), " wildcard def\"", (char *) NULL);
+	return TCL_ERROR;
+    }
+
+    if (TCL_OK != Tcl_ListObjGetElements(interp, objv[2], &iobjc, &iobjv)
+	|| iobjc < 4) {
+	Tcl_AppendResult(interp, "Bad folder def specified \"",
+		Tcl_GetString(objv[1]), "\"", (char *) NULL);
+	return TCL_ERROR;
+    }
+    wildcard = Tcl_GetString(objv[1]);
+
+    spec = RatGetFolderSpec(interp, objv[2]);
+    logIgnore++;
+    stream = Std_StreamOpen(interp, spec, OP_HALFOPEN, NULL, NULL);
+    logIgnore--;
+
+    /*
+     * Run search
+     * This builds a list of all found folders in mailboxListPtr
+     * First we run a dummy-search to get the hierarchy delimiter
+     */
+    strlcpy(buf, spec, sizeof(buf));
+    if ((mailboxSearchBase = strchr(spec, '}'))) {
+	mailboxSearchBase++;
+    } else {
+	mailboxSearchBase = spec;
+    }
+    if (*wildcard) {
+	testListPtr = Tcl_NewObj();
+	Tcl_IncrRefCount(testListPtr);
+	mail_list(stream, "", spec);
+	if (*mailboxSearchBase
+	    && lastDelimiter[0] !=
+	       mailboxSearchBase[strlen(mailboxSearchBase)-1]){
+	    strlcat(buf, lastDelimiter, sizeof(buf));
+	}
+	strlcat(buf, wildcard, sizeof(buf));
+	Tcl_DecrRefCount(testListPtr);
+    }
+    testListPtr = Tcl_NewObj();
+    mail_list(stream, "", buf);
+    if (stream) {
+	Std_StreamClose(interp, stream);
+    }
+
+    Tcl_SetObjResult(interp, testListPtr);
+    testListPtr = NULL;
+    return TCL_OK;
+}
 
 /*
  *----------------------------------------------------------------------
@@ -1256,46 +1441,8 @@ CloseConnection(ClientData clientData)
     for (connPtrPtr = &connListPtr; *connPtrPtr != connPtr;
 	    connPtrPtr = &(*connPtrPtr)->next);
     *connPtrPtr = connPtr->next;
+    ckfree(connPtr->spec);
     ckfree(connPtr);
-}
-
-
-/*
- *----------------------------------------------------------------------
- *
- * AppendToIMAP --
- *
- *      Append the given message to an IMAP folder
- *
- * Results:
- *	None.
- *
- * Side effects:
- *	The specified folder will be modified
- *
- *
- *----------------------------------------------------------------------
- */
-
-void
-AppendToIMAP(Tcl_Interp *interp, const char *mailboxSpec, const char *flags,
-	     const char *date, const char *msg, int length)
-{
-    char *mailbox;
-    MAILSTREAM *stream;
-    STRING msgString;
-    int error;
-
-    mailbox = RatLindex(interp, mailboxSpec, 0);
-    if (NULL == (stream = Std_StreamOpen(interp, mailbox, 0, &error, NULL))) {
-	return;
-    }
-
-    INIT(&msgString, mail_string, (char*)msg, length);
-    mail_append_full(stream, (char*)mailbox, (char*)flags, (char*)date,
-		     &msgString);
-
-    Std_StreamClose(interp, stream);
 }
 
 /*
@@ -1401,7 +1548,7 @@ Std_GetType(const char *spec)
  *
  * RatStdManageFolder --
  *
- *      Create or delete folders on disk ro remote server
+ *      Create or delete folders on disk or remote server
  *
  * Results:
  *	A standard tcl result
@@ -1413,16 +1560,19 @@ Std_GetType(const char *spec)
  *----------------------------------------------------------------------
  */
 int
-RatStdManageFolder(Tcl_Interp *interp, RatManagementAction op, Tcl_Obj *fPtr)
+RatStdManageFolder(Tcl_Interp *interp, RatManagementAction op, int mbx,
+		   Tcl_Obj *fPtr)
 {
     MAILSTREAM *stream;
     struct stat sbuf;
     char *spec;
     Tcl_Obj *oPtr;
-    int result, error;
+    int result, error, exists;
 
     spec = RatGetFolderSpec(interp, fPtr);
-    if ('{' == spec[0]) {
+    if (TCL_OK == Tcl_ListObjIndex(interp, fPtr, 1, &oPtr)
+        && oPtr
+        && !strcmp("imap", Tcl_GetString(oPtr))) {
 	stream = Std_StreamOpen(interp, spec, OP_HALFOPEN, &error, NULL);
 	if (!stream) {
 	    Tcl_SetResult(interp,"Failed to open stream to server",TCL_STATIC);
@@ -1431,7 +1581,8 @@ RatStdManageFolder(Tcl_Interp *interp, RatManagementAction op, Tcl_Obj *fPtr)
     } else {
 	stream = NULL;
     }
-    if (op == RAT_MGMT_CREATE) {
+    switch (op) {
+    case RAT_MGMT_CREATE:
 	if ('/' == spec[0]) {
 	    /*
 	     * Since this is a file folder we check if the file already
@@ -1442,12 +1593,41 @@ RatStdManageFolder(Tcl_Interp *interp, RatManagementAction op, Tcl_Obj *fPtr)
 		return TCL_OK;
 	    }
 	}
-	result = mail_create(stream, spec);
-    } else {
+	if (mbx) {
+	    result = mbx_create(stream, spec);
+	} else {
+	    result = mail_create(stream, spec);
+	    if (T == result) {
+		mail_subscribe(stream, spec);
+	    }
+	}
+	Tcl_SetObjResult(interp, Tcl_NewBooleanObj(result));
+	break;
+
+    case RAT_MGMT_CHECK:
+	exists = mail_status(stream, spec, SA_UIDVALIDITY);
+	Tcl_SetObjResult(interp, Tcl_NewBooleanObj(exists));
+	result = 1;
+	break;
+	
+    case RAT_MGMT_DELETE:
 	logIgnore++;
 	(void)mail_delete(stream, spec);
 	logIgnore--;
 	result = 1;
+	break;
+
+    case RAT_MGMT_SUBSCRIBE:
+	result = mail_subscribe(stream, spec);
+	break;
+	
+    case RAT_MGMT_UNSUBSCRIBE:
+	result = mail_unsubscribe(stream, spec);
+	break;
+	
+    default:
+	result = 0;
+	break;
     }
     if (stream) {
 	Std_StreamClose(interp, stream);
@@ -1460,7 +1640,6 @@ RatStdManageFolder(Tcl_Interp *interp, RatManagementAction op, Tcl_Obj *fPtr)
     if (result) {
 	return TCL_OK;
     } else {
-	Tcl_SetResult(interp, "Failed to create folder", TCL_STATIC);
 	return TCL_ERROR;
     }
 }
@@ -1611,6 +1790,19 @@ void mm_login (NETMBX *mbPtr, char *user, char *pwd, long trial)
     Tcl_Obj *oPtr, **objv;
 
     /*
+     * Work differently in the sender child process
+     */
+    if (is_sender_child) {
+	if (mbPtr->authuser[0]) {
+	    strlcpy(user, mbPtr->authuser, MAILTMPLEN);
+	} else {
+	    strlcpy(user, mbPtr->user, MAILTMPLEN);
+	}
+	strlcpy(pwd, smtp_passwd, MAILTMPLEN);
+	return;
+    }
+
+    /*
      * Check for cached entry
      */
     if ((pw = RatGetCachedPassword(timerInterp, loginSpec))) {
@@ -1618,6 +1810,7 @@ void mm_login (NETMBX *mbPtr, char *user, char *pwd, long trial)
 	strlcpy(pwd, pw, MAILTMPLEN);
 	return;
     }
+    
     oPtr = Tcl_NewObj();
     Tcl_ListObjAppendElement(timerInterp, oPtr,
 			     Tcl_NewStringObj("RatLogin", -1));
@@ -1684,7 +1877,7 @@ void
 mm_list(MAILSTREAM *stream, int delimiter, char *spec, long attributes)
 {
     Mailbox **mPtrPtr = &mailboxListPtr, *nPtr;
-    char *name, *folder, *s, *e;
+    char *name, *folder, *s, *e, d;
     int do_decode = 0;
     Tcl_DString *encoded;
 
@@ -1696,7 +1889,7 @@ mm_list(MAILSTREAM *stream, int delimiter, char *spec, long attributes)
 	}
     }
     /*
-     * Create new Mailbox structure
+     * Prepare new Mailbox structure
      */
     if ((folder = strchr(spec, '}'))) {
 	folder++;
@@ -1708,18 +1901,57 @@ mm_list(MAILSTREAM *stream, int delimiter, char *spec, long attributes)
     } else {
 	name = folder;
     }
-    if (!*name && !(attributes & LATT_NOSELECT)) {
-	return;
-    }
-
-    /*
-     * First find the right level
-     */
     if (!strncmp(mailboxSearchBase, folder, strlen(mailboxSearchBase))) {
 	s = folder+strlen(mailboxSearchBase);
     } else {
 	s = folder;
     }
+
+    /*
+     * Call callback if specified
+     */
+    if (importCallback) {
+	Tcl_DString cmd;
+	int i;
+
+	Tcl_DStringInit(&cmd);
+	Tcl_DStringAppend(&cmd, importCallback, -1);
+	Tcl_DStringAppendElement(&cmd, s);
+	Tcl_DStringStartSublist(&cmd);
+	for (i=0; attrTable[i].mask; i++) {
+	    if (attributes & attrTable[i].mask) {
+		Tcl_DStringAppendElement(&cmd,
+					 Tcl_GetString(attrTable[i].oPtr));
+	    }
+	}
+	Tcl_DStringEndSublist(&cmd);
+	Tcl_Eval(timerInterp, Tcl_DStringValue(&cmd));
+	Tcl_DStringFree(&cmd);
+    }
+
+    /*
+     * Are we just doing a test import?
+     */
+    if (testListPtr) {
+	Tcl_Obj *objv[3];
+	int i;
+
+	objv[0] = Tcl_NewObj();
+	for (i=0; attrTable[i].mask; i++) {
+	    if (attributes & attrTable[i].mask) {
+		Tcl_ListObjAppendElement(NULL, objv[0], attrTable[i].oPtr);
+	    }
+	}
+	d = (char)delimiter;
+	objv[1] = Tcl_NewStringObj(&d, 1);
+	objv[2] = Tcl_NewStringObj(s, -1);
+	Tcl_ListObjAppendElement(NULL, testListPtr, Tcl_NewListObj(3, objv));
+	return;
+    }
+    
+    /*
+     * First find the right level
+     */
     for (; delimiter && (e = strchr(s, delimiter));
 	 *e = delimiter, s = e+1) {
 	*e = '\0';
@@ -1758,7 +1990,7 @@ mm_list(MAILSTREAM *stream, int delimiter, char *spec, long attributes)
     /*
      * Ignore duplicates
      */
-    encoded = RatEncodeQP(folder);
+    encoded = RatEncodeQP((unsigned char*)folder);
     if (*mPtrPtr && (*mPtrPtr)->folder
 	&& !strcmp((*mPtrPtr)->folder, Tcl_DStringValue(encoded))
 	&& (*mPtrPtr)->attributes == attributes) {
