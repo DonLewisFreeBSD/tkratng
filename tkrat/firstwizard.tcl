@@ -1,6 +1,6 @@
 # firstwizard.tcl -
 #
-#  TkRat software and its included text is Copyright 1996-2004 by
+#  TkRat software and its included text is Copyright 1996-2010 by
 #  Martin Forssén
 #
 #  The full text of the legal notice is contained in the file called
@@ -14,7 +14,7 @@ proc FirstUseWizard {} {
 
     set id firstusewizard[incr idCnt]
     set w .$id
-    upvar #0 $id hd
+    upvar \#0 $id hd
     set hd(history) {}
     set hd(top) $w
 
@@ -85,7 +85,7 @@ proc FirstUseWizardClose {id} {
 }
 
 proc FirstUseWizardReset {id} {
-    upvar #0 $id hd
+    upvar \#0 $id hd
     global t
 
     eval destroy [winfo children $hd(body)]
@@ -97,7 +97,7 @@ proc FirstUseWizardReset {id} {
 }
 
 proc FirstUseWizardIdent {id} {
-    upvar #0 $id hd
+    upvar \#0 $id hd
     global t
 
     # Setup the first step
@@ -136,7 +136,7 @@ proc FirstUseWizardIdent {id} {
 }
 
 proc FirstUseWizardSend {id} {
-    upvar #0 $id hd
+    upvar \#0 $id hd
     global t
 
     # Setup the first step
@@ -188,7 +188,7 @@ proc FirstUseWizardSend {id} {
 }
 
 proc FirstUseWizardSendSetup {id} {
-    upvar #0 $id hd
+    upvar \#0 $id hd
 
     switch $hd(sendprot) {
 	"smtp" {set s 1; set p 0; set fw $hd(body).smtpserver_e}
@@ -204,7 +204,7 @@ proc FirstUseWizardSendSetup {id} {
 }
 
 proc FirstUseWizardInbox {id} {
-    upvar #0 $id hd
+    upvar \#0 $id hd
     global t
 
     # Setup the first step
@@ -279,7 +279,7 @@ proc FirstUseWizardInbox {id} {
 }
 
 proc FirstUseWizardInboxSetup {id} {
-    upvar #0 $id hd
+    upvar \#0 $id hd
 
     switch $hd(inproto) {
 	"imap" {set i 1; set p 0; set f 0; set fw $hd(body).imap_e}
@@ -301,12 +301,12 @@ proc FirstUseWizardInboxSetup {id} {
 }
 
 proc FirstUseWizardInboxAdv {id prot} {
-    upvar #0 $id hd
+    upvar \#0 $id hd
     global idCnt t propBigFont
 
     set id2 imapadv[incr idCnt]
     set w .$id2
-    upvar #0 $id2 hd2
+    upvar \#0 $id2 hd2
     set hd2(host) $hd(${prot}_host)
     set hd2(name) Dummy
 
@@ -343,12 +343,14 @@ proc FirstUseWizardInboxAdv {id prot} {
 
     if {"done" == $hd(action)} {
 	set hd(mailServer) [VFolderWizardBuildNewServer $id2 $prot]
+        set hd(${prot}_host) $hd2(host)
+        set hd(${prot}_user) $hd2(user)
     }
     unset hd2
 }
 
 proc FirstUseWizardImport {id} {
-    upvar #0 $id hd
+    upvar \#0 $id hd
     global t
 
     FirstUseWizardReset $id
@@ -368,7 +370,7 @@ proc FirstUseWizardImport {id} {
 }
 
 proc FirstUseWizardDone {id} {
-    upvar #0 $id hd
+    upvar \#0 $id hd
     global option mailServer vFolderDef vFolderInbox t
 
     set r $option(default_role)

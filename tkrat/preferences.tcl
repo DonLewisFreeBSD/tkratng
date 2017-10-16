@@ -297,6 +297,7 @@ proc BuildPreferences {} {
     grid columnconfigure $w 1 -weight 5
     grid propagate $w.pane 0
 
+    bind $w <Escape> "$w.buttons.close invoke"
     ::tkrat::winctl::SetGeometry preferences $w $w.pane
     
     # Initialize tracing function
@@ -538,10 +539,6 @@ proc PrefValidate {parent} {
 		Popup "$t(re_regexp_error): $e" $parent
 		return "fail"
 	    }
-	    if {[catch {regexp -nocase $pref(opt,citexp) ""} e]} {
-		Popup [format $t(illegal_regexp): $e] $parent
-		return "fail"
-	    }
 	}
 	roles,sending {
 	    if {[string compare $option(${rp}sendprog) \
@@ -638,13 +635,12 @@ proc PrefApply {parent} {
 	if {[string compare $option($opt) $pref(opt,$opt)]} {
 	    set option($opt) $pref(opt,$opt)
 	    set hasChanged 1
-	    if { -1 != [lsearch -exact {language charset fontsize
+	    if { -1 != [lsearch -exact {language charset font_size
 		    			main_window_name icon_name
 					default_folder pgp_enable
 					override_fonts prop_norm prop_light
-					fixed_norm fixed_bold watcher_font
-	                                charset prop_big fixed_italic
-                                        color_set} \
+					fixed_norm watcher_font
+	                                charset color_set} \
 				$opt]} {
 		set needRestart 1
 	    }
@@ -856,7 +852,8 @@ proc SetupNetworkSync {} {
     checkbutton $w.def -variable setupNS(deferred) -text $t(send_deferred)
     grid $w.def - -sticky w
 
-    checkbutton $w.dis -variable setupNS(disconnected) -text $t(sync_folders)
+    checkbutton $w.dis -variable setupNS(disconnected) \
+        -text $t(sync_offline_folders)
     grid $w.dis -  -sticky w
 
     frame $w.f
@@ -873,6 +870,7 @@ proc SetupNetworkSync {} {
 	    -command {destroy $setupNS(w); unset setupNS}
     pack $w.f.ok $w.f.cancel -side left -expand 1
     grid $w.f - -sticky nsew
+    bind $w <Escape> "$w.f.cancel invoke"
 }
 
 # SelectFont --
@@ -1139,7 +1137,7 @@ proc SelectDefaultSave {id} {
     global t pref vFolderDef
 
     set pref(opt,$pref(rolePrefix)save_outgoing) $id
-    if {"" == $id} {
+    if {"" == $id || ![info exists vFolderDef($id)]} {
 	set pref(text,save_outgoing) "-- $t(none) --"
     } else {
 	set pref(text,save_outgoing) [lindex $vFolderDef($id) 0]

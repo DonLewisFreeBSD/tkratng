@@ -14,6 +14,8 @@
 #include "ratStdFolder.h"
 #include <signal.h>
 #include <smtp.h>
+#include <sys/types.h>
+#include <sys/wait.h>
 
 /*
  * Stuff used to handle sender comm
@@ -22,11 +24,6 @@ static int sender_created = 0;
 static int to_sender[2];
 static FILE *to_sender_fh;
 static int from_sender[2];
-#define WRITE_STRING(str) { \
-    unsigned int l = strlen(str); \
-    fwrite(&l, sizeof(int), 1, to_sender_fh); \
-    fwrite(str, l, 1, to_sender_fh); \
-}
 typedef enum {
     EVENT_NONE,
     EVENT_LOG,
@@ -67,6 +64,13 @@ char *smtp_passwd = NULL;
 static char cverboseness;
 
 /*
+ * The sending process if any
+ */
+static pid_t sender_pid;
+static int sender_died = 0;
+static int sender_status;
+
+/*
  * Local functions
  */
 static void RatSenderFileHandler(ClientData clientData, int mask);
@@ -74,6 +78,7 @@ static void RatSenderHandler(Tcl_Interp *interp, int check_sender);
 static void RatReadString(int fd, Tcl_DString *ds);
 static void RatSender(void);
 static void RatAlarmHandler(int sig);
+static void RatSigChldHandler(int sig);
 static void RatFillinBody(BODY *b, char *bt);
 static char *RatSendSMTP(int in_fd, int out_fd, char *host,
 			 ENVELOPE *env, BODY *b);
@@ -109,8 +114,12 @@ RatNudgeSender(Tcl_Interp *interp)
     pid_t pid;
 
     if (0 == sender_created) {
-	pipe(to_sender);
-	pipe(from_sender);
+	if (pipe(to_sender)) return;
+	if (pipe(from_sender)) {
+            close(to_sender[0]);
+            close(to_sender[1]);
+            return;
+        }
 	if (0 == (pid = fork())) {
 	    RatSender();
 	    /* Notreached */
@@ -146,7 +155,32 @@ RatSenderFileHandler(ClientData clientData, int mask)
 {
     RatSenderHandler((Tcl_Interp*)clientData, mask & TCL_READABLE);
 }
-
+/*
+ *----------------------------------------------------------------------
+ *
+ * RatWriteString --
+ *
+ *      Writes the given string to the outgoing file
+ *
+ * Results:
+ *      non zero on failure
+ *
+ * Side effects:
+ *	None.
+ *
+ *----------------------------------------------------------------------
+ */
+static int
+RatWriteString(const char *str, FILE *out)
+{
+    unsigned int l = strlen(str);
+    if (1 != fwrite(&l, sizeof(int), 1, out)
+        || 1 != fwrite(str, l, 1, out)) {
+        return -1;
+    } else {
+        return 0;
+    }
+}
 /*
  *----------------------------------------------------------------------
  *
@@ -198,10 +232,7 @@ RatSenderHandler(Tcl_Interp *interp, int check_sender)
      * Handle possible file event
      */
     if (check_sender) {
-	if (0 == read(from_sender[0], &c, 1)) {
-	    if (EINTR == errno) {
-		return;
-	    }
+	if (1 != SafeRead(from_sender[0], &c, 1)) {
 	    RatLog(interp, RAT_ERROR, "Sender died!", RATLOG_NOWAIT);
 	    Tcl_DeleteFileHandler(from_sender[0]);
 	    sender_created = 0;
@@ -210,9 +241,13 @@ RatSenderHandler(Tcl_Interp *interp, int check_sender)
 	}
 	switch ((send_event_t)c) {
 	case EVENT_LOG:
-	    read(from_sender[0], &i, sizeof(i));
+	    if (sizeof(i) != SafeRead(from_sender[0], &i, sizeof(i))) {
+                return;
+            }
 	    Tcl_DStringSetLength(log_ds, i);
-	    read(from_sender[0], Tcl_DStringValue(log_ds), i);
+	    if (i != SafeRead(from_sender[0], Tcl_DStringValue(log_ds), i)) {
+                return;
+            }
 	    Tcl_GlobalEval(interp, Tcl_DStringValue(log_ds));
 	    return;
 	    /* NOTREACHED */
@@ -246,9 +281,13 @@ RatSenderHandler(Tcl_Interp *interp, int check_sender)
 		strlcpy(buf, "RatLog 2 {} explicit", sizeof(buf));
 		Tcl_GlobalEval(interp, buf);
 	    }
-	    read(from_sender[0], &i, sizeof(i));
+	    if (sizeof(i) != SafeRead(from_sender[0], &i, sizeof(i))) {
+                return;
+            }
 	    Tcl_DStringSetLength(log_ds, i);
-	    read(from_sender[0], Tcl_DStringValue(log_ds), i);
+	    if (i != SafeRead(from_sender[0], Tcl_DStringValue(log_ds), i)) {
+                return;
+            }
 	    Tcl_GlobalEval(interp, Tcl_DStringValue(log_ds));
 	    eobjv[n++] = Tcl_NewStringObj("RatSendFailed", -1);
 	    eobjv[n++] = Tcl_NewStringObj(name, -1);
@@ -295,7 +334,7 @@ RatSenderHandler(Tcl_Interp *interp, int check_sender)
 					 TCL_GLOBAL_ONLY);
 
 	oPtr = Tcl_GetVar2Ex(interp, "vFolderDef", index, TCL_GLOBAL_ONLY);
-	infoPtr = RatOpenFolder(interp, oPtr);
+	infoPtr = RatOpenFolder(interp, 0, oPtr);
 	if (NULL == infoPtr) {
 	    return;
 	}
@@ -380,17 +419,17 @@ RatSenderHandler(Tcl_Interp *interp, int check_sender)
     oPtr = Tcl_GetVar2Ex(interp, "option", "smtp_verbose", TCL_GLOBAL_ONLY);
     Tcl_GetIntFromObj(interp, oPtr, &verboseness);
     buf[1] = verboseness;
-    fwrite(buf, 2, 1, to_sender_fh);
+    if (1 != fwrite(buf, 2, 1, to_sender_fh)) goto fail;
     s = RatGetCurrent(interp, RAT_HOST, role);
-    WRITE_STRING(s);
+    if (RatWriteString(s, to_sender_fh)) goto fail;
     RatMessageGetContent(interp, msgPtr, &header, &body);
-    WRITE_STRING(header);
-    WRITE_STRING(body);
+    if (RatWriteString(header, to_sender_fh)) goto fail;
+    if (RatWriteString(body, to_sender_fh)) goto fail;
     if (buf[0]) {
 	snprintf(buf, sizeof(buf), "%s,smtp_hosts", role);
 	oPtr = Tcl_GetVar2Ex(interp, "option", buf, TCL_GLOBAL_ONLY);
 	Tcl_ListObjGetElements(interp, oPtr, &objc, &objv);
-	fwrite(&objc, sizeof(int), 1, to_sender_fh);
+	if (1 != fwrite(&objc, sizeof(int), 1, to_sender_fh)) goto fail;
 	snprintf(buf, sizeof(buf), "%s,validate_cert", role);
 	oPtr = Tcl_GetVar2Ex(interp, "option", buf, TCL_GLOBAL_ONLY);
 	Tcl_GetBooleanFromObj(interp, oPtr, &validate);
@@ -409,14 +448,14 @@ RatSenderHandler(Tcl_Interp *interp, int check_sender)
 		strlcat(buf, "/user=", sizeof(buf));
 		strlcat(buf, user, sizeof(buf));
 	    }
-	    WRITE_STRING(buf);
+	    if (RatWriteString(buf, to_sender_fh)) goto fail;
 	}
 	snprintf(buf, sizeof(buf), "%s,smtp_passwd", role);
 	s = Tcl_GetVar2(interp, "option", buf, TCL_GLOBAL_ONLY);
-	WRITE_STRING(s);
+	if (RatWriteString(s, to_sender_fh)) goto fail;
 	snprintf(buf, sizeof(buf), "%s,from", role);
 	s = Tcl_GetVar2(interp, "option", buf, TCL_GLOBAL_ONLY);
-	WRITE_STRING(s);
+	if (RatWriteString(s, to_sender_fh)) goto fail;
 	oPtr = Tcl_GetVar2Ex(interp, "option", "cache_conn", TCL_GLOBAL_ONLY);
 	Tcl_GetBooleanFromObj(interp, oPtr, &i);
 	if (0 == i) {
@@ -426,18 +465,24 @@ RatSenderHandler(Tcl_Interp *interp, int check_sender)
 				 TCL_GLOBAL_ONLY);
 	    Tcl_GetIntFromObj(interp, oPtr, &i);
 	}
-	fwrite(&i, sizeof(int), 1, to_sender_fh);
+	if (1 != fwrite(&i, sizeof(int), 1, to_sender_fh)) goto fail;
     } else {
 	snprintf(buf, sizeof(buf), "%s,sendprog", role);
 	s = Tcl_GetVar2(interp, "option", buf, TCL_GLOBAL_ONLY);
-	WRITE_STRING(s);
+	if (RatWriteString(s, to_sender_fh)) goto fail;
 	snprintf(buf, sizeof(buf), "%s,sendprog_8bit", role);
 	oPtr = Tcl_GetVar2Ex(interp, "option", buf, TCL_GLOBAL_ONLY);
 	Tcl_GetBooleanFromObj(interp, oPtr, &i);
 	c = i;
-	fwrite(&c, 1, 1, to_sender_fh);
+	if (1 != fwrite(&c, 1, 1, to_sender_fh)) goto fail;
     }
     fflush(to_sender_fh);
+    return;
+
+fail:
+    fclose(to_sender_fh);
+    to_sender_fh = NULL;
+    sender_created = 0;
 }
 
 /*
@@ -459,13 +504,13 @@ static void
 RatReadString(int fd, Tcl_DString *ds)
 {
     unsigned int len;
-    int i;
 
-    read(fd, &len, sizeof(int));
+    if (sizeof(int) != SafeRead(fd, &len, sizeof(int))) {
+        exit(0); /* Master has died */
+    }
     Tcl_DStringSetLength(ds, len);
-    i = 0;
-    while (i < len) {
-	i += max(0, read(fd, Tcl_DStringValue(ds)+i, len-i));
+    if (len != SafeRead(fd, Tcl_DStringValue(ds), len)) {
+        exit(0);
     }
 }
 
@@ -515,31 +560,29 @@ RatSender()
 	/*
 	 * Read generic data from parent and handle cached connections
 	 */
-	do {
-	    now = time(NULL);
-	    for (cp = &conn_cache, a = 0; *cp;) {
-		if ((*cp)->expires <= now) {
-		    smtp_close((*cp)->stream);
-		    ckfree((*cp)->host);
-		    ncp = (*cp)->next;
-		    ckfree(*cp);
-		    *cp = ncp;
-		} else if (0 == a || a > (*cp)->expires) {
-		    a = (*cp)->expires;
-		    cp = &(*cp)->next;
-		}
-	    }
-	    if (a) {
-		alarm(a - time(NULL));
-	    }
-	    len = read(to_sender[0], &smtp, 1);
-	    /* Has parent died? */
-	    if (0 == len) {
-		exit(0);
-	    }
-	    alarm(0);
-	} while (1 != len);
-	read(to_sender[0], &cverboseness, 1);
+        now = time(NULL);
+        for (cp = &conn_cache, a = 0; *cp;) {
+            if ((*cp)->expires <= now) {
+                smtp_close((*cp)->stream);
+                ckfree((*cp)->host);
+                ncp = (*cp)->next;
+                ckfree(*cp);
+                *cp = ncp;
+            } else if (0 == a || a > (*cp)->expires) {
+                a = (*cp)->expires;
+                cp = &(*cp)->next;
+            }
+        }
+        if (a) {
+            alarm(a - time(NULL));
+        }
+        if (1 != SafeRead(to_sender[0], &smtp, 1)) {
+            exit(0); /* Master has died */
+        }
+        alarm(0);
+	if (1 != SafeRead(to_sender[0], &cverboseness, 1)) {
+            exit(0); /* Master has died */
+        }
 	RatReadString(to_sender[0], &host);
 	RatReadString(to_sender[0], &header);
 	RatReadString(to_sender[0], &body);
@@ -583,12 +626,16 @@ RatSender()
 	if (errmsg) {
 	    c = EVENT_SEND_FAIL;
 	    len = strlen(errmsg);
-	    write(from_sender[1], &c, 1);
-	    write(from_sender[1], &len, 4);
-	    write(from_sender[1], errmsg, len);
+	    if (0 > safe_write(from_sender[1], &c, 1)
+                || 0 > safe_write(from_sender[1], &len, 4)
+                || 0 > safe_write(from_sender[1], errmsg, len)) {
+                exit(1);
+            }
 	} else {
 	    c = EVENT_SEND_OK;
-	    write(from_sender[1], &c, 1);
+	    if (0 > safe_write(from_sender[1], &c, 1)) {
+                exit(1);
+            }
 	}
 
 	/*
@@ -612,7 +659,7 @@ RatSender()
  *      None.
  *
  * Side effects:
- *	Modifies the body-structure.
+ *      None.
  *
  *----------------------------------------------------------------------
  */
@@ -620,6 +667,36 @@ static void
 RatAlarmHandler(int sig)
 {
     /* Do nothing */
+}
+
+/*
+ *----------------------------------------------------------------------
+ *
+ * RatSigChldHandler --
+ *
+ *      Signal hander which handles the CHLD signal. Thsi sets a flag
+ *      that the sending child has dies (if that pid died).
+ *
+ * Results:
+ *      None.
+ *
+ * Side effects:
+ *      None.
+ *
+ *----------------------------------------------------------------------
+ */
+static void
+RatSigChldHandler(int sig)
+{
+    pid_t pid;
+    int status;
+
+    while (0 < (pid = waitpid(-1, &status, WNOHANG))) {
+        if (pid == sender_pid) {
+            sender_died = 1;
+            sender_status = status;
+        }
+    }
 }
 
 /*
@@ -688,13 +765,19 @@ RatSendSMTP(int in_fd, int out_fd, char *host, ENVELOPE *env, BODY *b)
     }
     
     /* Read data from master */
-    read(in_fd, &nhosts, sizeof(nhosts));
+    if (sizeof(nhosts) != SafeRead(in_fd, &nhosts, sizeof(nhosts))) {
+        exit(0); /* Master has died */
+    }
     smtp_hosts = (char**)ckalloc((nhosts+1)*sizeof(char*));
     for (i=0; i<nhosts; i++) {
-	read(in_fd, &len, sizeof(len));
+	if (sizeof(len) != SafeRead(in_fd, &len, sizeof(len))) {
+            exit(0); /* Master has died */
+        }
 	smtp_hosts[i] = (char*)ckalloc(len+1);
 	smtp_hosts[i][len] = '\0';
-	read(in_fd, smtp_hosts[i], len);
+	if (len != SafeRead(in_fd, smtp_hosts[i], len)) {
+            exit(0); /* Master has died */
+        }
     }
     smtp_hosts[i] = NULL;
     Tcl_DStringInit(&passwd);
@@ -703,7 +786,9 @@ RatSendSMTP(int in_fd, int out_fd, char *host, ENVELOPE *env, BODY *b)
     Tcl_DStringInit(&from);
     RatReadString(in_fd, &from);
     rfc822_parse_adrlist(&env->return_path, Tcl_DStringValue(&from), host);
-    read(in_fd, &cache, sizeof(int));
+    if (sizeof(int) != SafeRead(in_fd, &cache, sizeof(int))) {
+        exit(0); /* Master has died */
+    }
 
     /* Get cached */
     for (cp = &conn_cache; *cp; cp = &(*cp)->next) {
@@ -804,10 +889,11 @@ RatSendLog(int fd, const char *msg)
 {
     char c = EVENT_LOG;
     unsigned int len = strlen(msg);
+    int ignored;
 
-    write(fd, &c, 1);
-    write(fd, &len, sizeof(int));
-    write(fd, msg, len);
+    ignored = safe_write(fd, &c, 1);
+    ignored = safe_write(fd, &len, sizeof(int));
+    ignored = safe_write(fd, msg, len);
 }
 
 /*
@@ -832,7 +918,8 @@ RatSendProg(int in_fd, int out_fd, char *host, ENVELOPE *env, BODY *b)
     static char *buf = NULL;
     static int bufsize = 0;
     static soutr_data_t sd = {0, 0, NULL, 0, 0};
-    int to[2], err[2], len, status, r;
+    struct sigaction nact;
+    int to[2], err[2], len, r;
     pid_t child;
     char ok_8bit;
     long arg;
@@ -853,7 +940,9 @@ RatSendProg(int in_fd, int out_fd, char *host, ENVELOPE *env, BODY *b)
 	RatSendLog(out_fd, buf);
     }
     RatReadString(in_fd, cmd);
-    read(in_fd, &ok_8bit, 1);
+    if (1 != SafeRead(in_fd, &ok_8bit, 1)) {
+        exit(0); /* Master has died */
+    }
     RatAddAddresses(cmd, env->to);
     RatAddAddresses(cmd, env->cc);
     RatAddAddresses(cmd, env->bcc);
@@ -861,8 +950,10 @@ RatSendProg(int in_fd, int out_fd, char *host, ENVELOPE *env, BODY *b)
     /*
      * Execute send command
      */
-    pipe(to);
-    pipe(err);
+    if (pipe(to) || pipe(err)) {
+	snprintf(buf, bufsize, "$t(prog_send_failed): %s",strerror(errno));
+	return buf;
+    }
     if (0 == (child = fork())) {
 	/* Child */
 	RatSendProgChild(Tcl_DStringValue(cmd), to[0], err[1]);
@@ -873,6 +964,15 @@ RatSendProg(int in_fd, int out_fd, char *host, ENVELOPE *env, BODY *b)
 	snprintf(buf, bufsize, "$t(prog_send_failed): %s",strerror(errno));
 	return buf;
     }
+    close(to[0]);
+    close(err[1]);
+    sender_pid = child;
+    sender_died = 0;
+    memset(&nact,0,sizeof (struct sigaction));
+    sigemptyset(&nact.sa_mask);
+    nact.sa_handler = RatSigChldHandler;
+    sigaction(SIGCHLD, &nact, NULL);
+
 
     arg = O_NONBLOCK;
     fcntl(err[0], F_SETFL, arg);
@@ -904,7 +1004,9 @@ RatSendProg(int in_fd, int out_fd, char *host, ENVELOPE *env, BODY *b)
     /*
      * Wait for command to complete
      */
-    while (0 == (r = waitpid(child, &status, WNOHANG))) {
+    nact.sa_handler = SIG_DFL;
+    sigaction(SIGCHLD, &nact, NULL);
+    while (!sender_died && 0 == (r = waitpid(child, &sender_status,WNOHANG))) {
 	RatReadData(sd.errfd, &sd.errbuf, &sd.errbufsize, &sd.errbufused);
 	usleep(100000); /* 0.1 second */
     }
@@ -914,17 +1016,20 @@ RatSendProg(int in_fd, int out_fd, char *host, ENVELOPE *env, BODY *b)
      * Check status
      */
     if (child == r) {
-	if (!WIFEXITED(status) || WEXITSTATUS(status)) {
+	if (!WIFEXITED(sender_status) || WEXITSTATUS(sender_status)) {
 	    if (!sd.errbufused) {
 		snprintf(sd.errbuf, sd.errbufsize,
 			 "Child terminated with code %d\n",
-			 WEXITSTATUS(status));
+			 WEXITSTATUS(sender_status));
 		sd.errbufused = strlen(sd.errbuf);
 	    }
 	} else {
 	    sd.errbufused = 0;
 	}
     }
+    
+    close(to[1]);
+    close(err[0]);
 
     /*
      * Report
@@ -1049,7 +1154,7 @@ RatSendProgChild(char *cmd, int to, int err)
 
     snprintf(buf, sizeof(buf), "Failed to exec '%s': %s\n", argv[0],
 	     strerror(errno));
-    write(err, buf, strlen(buf));
+    i = safe_write(err, buf, strlen(buf));
     exit(1);
 }
 /*
@@ -1085,8 +1190,8 @@ RatSendSoutr(void *stream, char *string)
      * - The child has died
      *
      */
-    while (len != (r = write(sd->fd, data, len))) {
-	if (0 > r) {
+    while (len != (r = safe_write(sd->fd, data, len))) {
+	if (0 > r || sender_died) {
 	    /* If failed the child must be dead */
 	    return NIL;
 	}
@@ -1100,6 +1205,9 @@ RatSendSoutr(void *stream, char *string)
 	data += r;
 	len -= r;
     }
+    if (sender_died) {
+        return NIL;
+    }
     return T;
 }
 /*
@@ -1107,7 +1215,7 @@ RatSendSoutr(void *stream, char *string)
  *
  * RatReadData --
  *
- *      Reads all available data from the gived filedescriptor and stores
+ *      Reads all available data from the given descriptor and stores
  *      it in the given buffer (which may be reallocated).
  *
  * Results:
@@ -1129,7 +1237,7 @@ RatReadData(int fd, char **buf, int *size, int *used)
 	    *buf = (char*)ckrealloc(*buf, *size);
 	    (*buf)[*used] = '\0';
 	}
-	len = read(fd, *buf + *used, *size - *used);
+	len = SafeRead(fd, *buf + *used, *size - *used);
 	if (len <= 0) {
 	    return;
 	}

@@ -291,7 +291,7 @@ set smsgs {
 		    {
 			TEXT PLAIN {{name attachment.txt}} 7bit
 			ATTACHMENT {{filename attachment.txt}} {}
-			{file /tmp/test_attachment.txt}}
+			{file $tmp/test_attachment.txt}}
 		}
 	    }
 	}
@@ -377,7 +377,7 @@ set smsgs {
 			{{name "This_is_a_very_long_header_value_which_needs_to_be_broken_into_exactly_two_pieces"}} 7bit
 			ATTACHMENT
 			{{filename "Detta är en väldigt lång header-rad som behöver brytas i exakt två delar"}} {}
-			{file /tmp/test_attachment.txt}}
+			{file $tmp/test_attachment.txt}}
 		}
 	    }
 	}
@@ -469,7 +469,7 @@ set smsgs {
 		    {
 			APPLICATION OCTET-STREAM {{name attachment.bin}} binary
 			ATTACHMENT {{filename attachment.bin}} {}
-			{file /tmp/test_attachment.bin}}
+			{file $tmp/test_attachment.bin}}
 		}
 	    }
 	}
@@ -566,7 +566,7 @@ set smsgs {
 			    }
 			    {TEXT PLAIN {{charset us-ascii}} 7bit "" {} {}
 				{utfblob {This is the body}}}
-			    {file /tmp/test_attachment.txt}
+			    {file $tmp/test_attachment.txt}
 			}
 		    }
 		}
@@ -687,7 +687,7 @@ set smsgs {
 				    {
 					TEXT PLAIN {{name foo}} 8bit
 					ATTACHMENT {} {}
-					{file /tmp/test_attachment.8bit}}
+					{file $tmp/test_attachment.8bit}}
 				}
 			    }
 			}
@@ -802,14 +802,14 @@ set smsgs {
 }
 
 # Create data files
-set f [open /tmp/test_attachment.txt w]
+set f [open $tmp/test_attachment.txt w]
 puts $f "Line 1 of attachment"
 puts $f "Line 2 of attachment"
 close $f
-set f [open /tmp/test_attachment.8bit w]
+set f [open $tmp/test_attachment.8bit w]
 puts $f "Räckmackan"
 close $f
-set f [open /tmp/test_attachment.bin w]
+set f [open $tmp/test_attachment.bin w]
 fconfigure $f -encoding binary
 for {set i 0} {$i < 256} {incr i} {
     puts -nonewline $f [format "%c" $i]

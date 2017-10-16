@@ -39,7 +39,7 @@ static int *font_wx, *boldfont_wx;
 static int yPos;
 static int pagenum;
 static int last_font = -1;
-#define DATEWIDTH	fontsize*6
+#define DATEWIDTH	fontsize*7
 #define PAGENUMWIDTH	fontsize*4
 #define SPACE		5
 #define HINDENT		20
@@ -286,6 +286,8 @@ static void PsPrintString(Tcl_Interp *interp, Tcl_Channel channel,
 static void PrintHeaders(Tcl_Interp *interp, Tcl_Channel channel,
 			 Tcl_Encoding enc, char *hs,
 			 MessageInfo *msgPtr);
+static void PsPrintAddrList(Tcl_Interp *interp, Tcl_Channel channel,
+                            Tcl_Encoding enc, int x, Tcl_Obj *addrList);
 static void PrintBody(Tcl_Interp *interp, Tcl_Channel channel,
 		      Tcl_Encoding enc, BodyInfo *bodyInfoPtr);
 static int PrintBodyText(Tcl_Interp *interp, Tcl_Channel channel,
@@ -592,7 +594,7 @@ Startpage(Tcl_Interp *interp, Tcl_Channel channel, Tcl_Encoding enc,
           const char *subject, MESSAGECACHE *elt, int pagenum)
 {
     char buf[1024];
-    const char *cPtr;
+    unsigned char *cPtr;
     CONST84 char *s;
     float x, y, w, h, l;
     int objc;
@@ -665,15 +667,10 @@ Startpage(Tcl_Interp *interp, Tcl_Channel channel, Tcl_Encoding enc,
     y = ps_ysize-1.7*fontsize;
     yPos = ps_ysize-fontsize*4;
     Tcl_WriteChars(channel, buf, -1);
-    s = Tcl_GetVar2(interp, "t", "mail_regarding", TCL_GLOBAL_ONLY);
-    snprintf(buf, sizeof(buf),"boldfont setfont %.2f %.2f moveto\n(%s) show\n",
-	    x, y, s);
-    Tcl_WriteChars(channel, buf, -1);
-    x += GetStringLength(FONT_BOLD, s, -1);
-    snprintf(buf, sizeof(buf),"textfont setfont %.2f %.2f moveto\n(", x+2, y);
+    snprintf(buf, sizeof(buf),"boldfont setfont %.2f %.2f moveto\n(", x+2, y);
     Tcl_WriteChars(channel, buf, -1);
     Tcl_UtfToExternalDString(enc, subject, -1, &ds);
-    for (cPtr = Tcl_DStringValue(&ds); *cPtr; cPtr++) {
+    for (cPtr = (unsigned char*)Tcl_DStringValue(&ds); *cPtr; cPtr++) {
 	if ('(' == *cPtr || ')' == *cPtr || '\\' == *cPtr) {
 	    Tcl_WriteChars(channel, "\\", 1);
 	}
@@ -829,9 +826,9 @@ static void
 PrintHeaders(Tcl_Interp *interp, Tcl_Channel channel,
 	     Tcl_Encoding enc, char *hs, MessageInfo *msgPtr)
 {
-    Tcl_Obj **fhv, **phv, *oPtr, *tPtr, *o2Ptr, **thv;
+    Tcl_Obj **fhv, **phv, *oPtr, *tPtr, *o2Ptr, **thv, *headers;
     char buf[1024], *s;
-    int i, j, l, fhc, phc;
+    int i, j, l, fhc, phc, *address;
     float maxX, *lengths;
 
     if (!strcmp("none", hs)) {
@@ -843,7 +840,9 @@ PrintHeaders(Tcl_Interp *interp, Tcl_Channel channel,
      */
     snprintf(buf, sizeof(buf), "%s headers", msgPtr->name);
     Tcl_Eval(interp, buf);
-    Tcl_ListObjGetElements(interp, Tcl_GetObjResult(interp), &fhc, &fhv);
+    headers = Tcl_GetObjResult(interp);
+    Tcl_IncrRefCount(headers);
+    Tcl_ListObjGetElements(interp, headers, &fhc, &fhv);
     if (!strcmp("selected", hs)) {
 	oPtr = Tcl_GetVar2Ex(interp, "option", "show_header_selection",
 		TCL_GLOBAL_ONLY);
@@ -865,9 +864,10 @@ PrintHeaders(Tcl_Interp *interp, Tcl_Channel channel,
 	phc = fhc;
     }
     thv = (Tcl_Obj**)ckalloc(phc * sizeof(char*));
+    address = (int*)ckalloc(phc * sizeof(int));
 
     /*
-     * Translate header names
+     * Translate header names and check for address headers
      */
     for (i=0; i<phc; i++) {
 	Tcl_ListObjIndex(interp, phv[i], 0, &oPtr);
@@ -878,6 +878,12 @@ PrintHeaders(Tcl_Interp *interp, Tcl_Channel channel,
             } else if (isupper((unsigned char)*s)) {
                 *s = tolower((unsigned char)*s);
             }
+        }
+        if (!strcmp(buf, "from") || !strcmp(buf, "to") || !strcmp(buf, "cc")
+            || !strcmp(buf, "bcc") || !strcmp(buf, "reply_to")) {
+            address[i] = 1;
+        } else {
+            address[i] = 0;
         }
         tPtr = Tcl_GetVar2Ex(interp, "t", buf, TCL_GLOBAL_ONLY);
         if (!tPtr) {
@@ -907,10 +913,14 @@ PrintHeaders(Tcl_Interp *interp, Tcl_Channel channel,
 	snprintf(buf, sizeof(buf), "%s:", Tcl_GetString(thv[i]));
 	PsPrintString(interp, channel, FONT_BOLD, enc,
 		      HINDENT + maxX - lengths[i], 0, buf, -1);
-	Tcl_ListObjIndex(interp, phv[i], 1, &oPtr);
-	PsPrintString(interp, channel, FONT_NORMAL, enc, HINDENT + maxX + 10,
-		      0, Tcl_GetString(oPtr), -1);
-	yPos -= fontsize*1.1;
+        Tcl_ListObjIndex(interp, phv[i], 1, &oPtr);
+        if (address[i]) {
+            PsPrintAddrList(interp, channel, enc, HINDENT + maxX + 10, oPtr);
+        } else {
+            PsPrintString(interp, channel, FONT_NORMAL, enc,
+                          HINDENT + maxX + 10, 0, Tcl_GetString(oPtr), -1);
+            yPos -= fontsize*1.1;
+        }
     }
 
     /*
@@ -923,7 +933,57 @@ PrintHeaders(Tcl_Interp *interp, Tcl_Channel channel,
         Tcl_DecrRefCount(thv[i]);
     }
     ckfree(thv);
+    ckfree(address);
     ckfree(lengths);
+    Tcl_DecrRefCount(headers);
+}
+
+/*
+ *----------------------------------------------------------------------
+ *
+ * PsPrintAddrList --
+ *
+ *      Prints the given address list
+ *
+ * Results:
+ *	None
+ *
+ * Side effects:
+ *	Adds data to the passed channel
+ *
+ *----------------------------------------------------------------------
+ */
+static void
+PsPrintAddrList(Tcl_Interp *interp, Tcl_Channel channel, Tcl_Encoding enc,
+                int x, Tcl_Obj *addrList)
+{
+    Tcl_Obj *objv[] = {NULL, addrList};
+    Tcl_Obj *list, *addr;
+    int num_addr, i;
+
+    if (TCL_OK != RatSplitAdrCmd(NULL, interp, 2, objv)) {
+	yPos -= fontsize*1.1;
+        return;
+    }
+    list = Tcl_GetObjResult(interp);
+    Tcl_IncrRefCount(list);
+    if (TCL_OK != Tcl_ListObjLength(interp, list, &num_addr)) {
+	yPos -= fontsize*1.1;
+        goto cleanup;
+    }
+    
+    for (i=0; i<num_addr; i++) {
+        if (TCL_OK != Tcl_ListObjIndex(interp, list, i, &addr)) {
+            continue;
+        }
+	CHECK_NEWPAGE(interp, channel);
+        PsPrintString(interp, channel, FONT_NORMAL, enc, x, 0,
+                      Tcl_GetString(addr), -1);
+	yPos -= fontsize*1.1;
+    }
+
+ cleanup:
+    Tcl_DecrRefCount(list);
 }
 
 /*

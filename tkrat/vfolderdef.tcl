@@ -75,7 +75,7 @@ proc VFolderDef {} {
 	raise $w
 	return
     }
-    upvar #0 $id hd
+    upvar \#0 $id hd
     set vf(w) $w
     set vf(done) 0
     set vf(dragging) 0
@@ -106,6 +106,8 @@ proc VFolderDef {} {
     $m add command -label $t(close) -command "VFolderWinClose 0"
     set b($m,[$m index end]) dismiss
     pack $w.mbar.a -side left -padx 5
+
+    bind $w <Escape> "VFolderWinClose 0"
 
     # This has to be created after the menubar to make the Destroy logic work
     frame $w.d

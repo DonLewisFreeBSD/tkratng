@@ -27,7 +27,7 @@ proc Print {handler which} {
 
     # Create identifier
     set id p[incr idCnt]
-    upvar #0 $id hd
+    upvar \#0 $id hd
     set w .$id
     set hd(w) $w
     set hd(oldfocus) [focus]
@@ -100,7 +100,7 @@ proc Print {handler which} {
 # indent  - Indention to add
 
 proc PrintAddBodyparts {handler w body indent} {
-    upvar #0 $handler hd
+    upvar \#0 $handler hd
     global t b
 
     set type [string tolower [$body type]]
@@ -197,7 +197,7 @@ proc Print2 {handler print} {
 # body	  - Current bodypart to maybe include
 
 proc PrintGetWhich {handler body} {
-    upvar #0 $handler hd
+    upvar \#0 $handler hd
 
     set type [string tolower [lindex [$body type] 0]]
     if {"multipart" == $type} {
@@ -330,7 +330,7 @@ proc ExecPrintCommand {fileName} {
 # op	       -	Operation
 
 proc PrintDone {name1 name2 op} {
-    upvar #0 $name1 pr
+    upvar \#0 $name1 pr
 
     file delete -force -- $pr(fileName) &
     unset pr
@@ -353,7 +353,7 @@ proc PrintSetup {} {
 	return
     }
     set id ps
-    upvar #0 $id hd
+    upvar \#0 $id hd
     set hd(w) $w
     set hd(pretty) $option(print_pretty)
     set hd(dest) $option(print_dest)
@@ -473,7 +473,7 @@ proc PrintSetup {} {
 # handler	- Handler for the print setup window
 
 proc PrintSetDest {handler} {
-    upvar #0 $handler hd
+    upvar \#0 $handler hd
 
     if {"printer" == $hd(dest)} {
 	rat_ed::enable $hd(dest_printer)
@@ -494,7 +494,7 @@ proc PrintSetDest {handler} {
 # apply   - Boolean stating if we should apply the settings or not
 
 proc PrintSetup2 {handler apply} {
-    upvar #0 $handler hd
+    upvar \#0 $handler hd
     global option
 
     if {$apply} {

@@ -266,7 +266,7 @@ proc SelectDbaseFolder {parent} {
     # Create identifier
     set id vfolderWinID[incr idCnt]
     set w .$id
-    upvar #0 $id hd
+    upvar \#0 $id hd
     set hd(done) 0
     set hd(op) and
 
@@ -349,12 +349,17 @@ proc SelectDbaseFolder {parent} {
         tkwait variable ${id}(done)
         set cont 0
         if {1 == $hd(done)} {
-            if {[catch {clock scan $hd(int_from)} hd(int_from_parsed)]} {
+            set start_s [clock format [clock seconds] -format "%Y-%m-%d 00:00"]
+            set start_i [clock scan $start_s]
+            set end_i [expr $start_i+24*60*60]
+            if {[catch {clock scan $hd(int_from) -base $start_i} \
+                     hd(int_from_parsed)]} {
                 Popup $t(illegal_from_date) $w
                 set cont 1
                 continue
             }
-            if {[catch {clock scan $hd(int_to)} hd(int_to_parsed)]} {
+            if {[catch {clock scan $hd(int_to) -base $end_i} \
+                 hd(int_to_parsed)]} {
                 Popup $t(illegal_to_date) $w
                 set cont 1
                 continue
@@ -613,8 +618,9 @@ proc VFolderDoOpen {id vfolder} {
 #		one word then it is expected to the ID of a folder to open
 
 proc VFolderOpen {handler vfolder} {
-    global t inbox vFolderDef vFolderInbox option folderWindowList vFolderLastUsedList
-    upvar #0 $handler fh
+    global t inbox vFolderDef vFolderInbox option folderWindowList \
+        vFolderLastUsedList
+    upvar \#0 $handler fh
 
     set fh(special_folder) none
     if {1 == [llength $vfolder]} {
@@ -676,7 +682,7 @@ proc VFolderInsert {handler advance delete messages vfolder} {
     RatBusy [list VFolderInsertDo $handler $advance $messages $vfolder $delete]
 }
 proc VFolderInsertDo {handler advance messages vfolder delete} {
-    upvar #0 $handler fh
+    upvar \#0 $handler fh
     global option t
 
     if {![llength $vfolder]} {
@@ -692,7 +698,7 @@ proc VFolderInsertDo {handler advance messages vfolder delete} {
     # because that means that each copied message does not need to
     # open it again.
     if {"dbase" != [lindex $vfolder 1]} {
-        set f [RatOpenFolder $vfolder]
+        set f [RatOpenFolder append $vfolder]
     }
     set toDelete {}
     foreach msg $messages {
@@ -760,7 +766,7 @@ proc InsertIntoDBase {parent} {
     # Create identifier
     set id f[incr idCnt]
     set w .$id
-    upvar #0 $id hd
+    upvar \#0 $id hd
     set hd(done) 0
 
     # Create toplevel
@@ -817,7 +823,8 @@ proc InsertIntoDBase {parent} {
 
     set hd(extype) $option(def_extype)
     set hd(exdate) $option(def_exdate)
-    bind $w <Return> "set ${id}(done) 1"
+    bind $w <Return> "$w.buttons.ok invoke"
+    bind $w <Escape> "$w.buttons.cancel invoke"
     wm protocol $w WM_DELETE_WINDOW "set ${id}(done) 0"
     ::tkrat::winctl::SetGeometry insertIntoDbase $w
     ::tkrat::winctl::ModalGrab $w $w.keywords.entry

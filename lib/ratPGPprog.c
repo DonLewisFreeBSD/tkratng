@@ -52,7 +52,7 @@ static RatPGPKeyring *keyring = NULL;
  * Local functions
  */
 static int RatRunPGP(Tcl_Interp *interp, int nopass, char *cmd, char *args,
-		     int *toPGP, char **outFile, int *errPGP);
+		     int *toPGP, char **outFile, int *errPGP, int *statusPGP);
 static Tcl_DString *RatPGPRunOld(Tcl_Interp *interp, BodyInfo *bodyInfoPtr,
 				 char *text, char *start, char *end);
 static int RatUpdatePGPKeys(Tcl_Interp *interp, RatPGPKeyring *k);
@@ -89,9 +89,9 @@ static RatPGPKeyring* RatPGPNewKeyring(Tcl_Interp *interp, const char *name,
 
 static int
 RatRunPGP(Tcl_Interp *interp, int nopass, char *command, char *args,
-	int *toPGP, char **outFile, int *errPGP)
+          int *toPGP, char **outFile, int *errPGP, int *statusPGP)
 {
-    int toPipe[2], errPipe[2], argc, pid, i, out;
+    int toPipe[2], errPipe[2], statusPipe[2], argc, pid, i, out;
     Tcl_DString cmd;
     char cmdbuf[1024];
     CONST84 char *opt_args, *pgp_path, **argv, *tmp;
@@ -115,7 +115,18 @@ RatRunPGP(Tcl_Interp *interp, int nopass, char *command, char *args,
 	Tcl_DStringAppend(&cmd, opt_args, -1);
     }
     Tcl_DStringAppend(&cmd, " ", 1);
-    Tcl_DStringAppend(&cmd, args, -1);
+    if (statusPGP != NULL) {
+        char *printed;
+        int size = strlen(args)+16;
+
+        if (pipe(statusPipe)) return 0;
+        printed = (char*)ckalloc(size);
+        snprintf(printed, size, args, statusPipe[1]);
+        Tcl_DStringAppend(&cmd, printed, -1);
+        ckfree(printed);
+    } else {
+        Tcl_DStringAppend(&cmd, args, -1);
+    }
     Tcl_SplitList(interp, Tcl_DStringValue(&cmd), &argc, &argv);
     /*fprintf(stderr, "Exec: %s %s\n", cmdbuf, Tcl_DStringValue(&cmd));*/
     Tcl_DStringFree(&cmd);
@@ -129,12 +140,17 @@ RatRunPGP(Tcl_Interp *interp, int nopass, char *command, char *args,
     if ( 0 > (out = open(name, O_WRONLY|O_CREAT|O_TRUNC, 0600))) {
 	return 0;
     }
-    pipe(toPipe);
-    pipe(errPipe);
+    if (pipe(toPipe)) return 0;
+    if (pipe(errPipe)) {
+        close(toPipe[0]);
+        close(toPipe[1]);
+        return 0;
+    }
     if (0 == (pid = fork())) {
 	getrlimit(RLIMIT_NOFILE, &rlim);
 	for (i=0; i<rlim.rlim_cur; i++) {
-	    if (i != toPipe[0] && i != out && i != errPipe[1]) {
+	    if (i != toPipe[0] && i != out && i != errPipe[1]
+                && (statusPGP == NULL || i != statusPipe[1])) {
 		close(i);
 	    }
 	}
@@ -152,7 +168,7 @@ RatRunPGP(Tcl_Interp *interp, int nopass, char *command, char *args,
 	    char buf[1024];
 	    snprintf(buf, sizeof(buf), "ERROR executing '%s %s': %s\n",
 		    cmdbuf, args, strerror(errno));
-	    write(STDERR_FILENO, buf, strlen(buf));
+	    if (0 > safe_write(STDERR_FILENO, buf, strlen(buf))) exit(-1);
 	}
 	exit(-1);
 	/* notreached */
@@ -160,6 +176,10 @@ RatRunPGP(Tcl_Interp *interp, int nopass, char *command, char *args,
     close(toPipe[0]);
     close(out);
     close(errPipe[1]);
+    if (NULL != statusPGP) {
+        close(statusPipe[1]);
+        *statusPGP = statusPipe[0];
+    }
     ckfree(argv);
     *toPGP = toPipe[1];
     *outFile = name;
@@ -263,19 +283,22 @@ RatPGPEncrypt(Tcl_Interp *interp, ENVELOPE *env, BODY **body,
 	    }
 	}
 	pid = RatRunPGP(interp, 0, command, Tcl_DStringValue(&cmdDS), &toPGP,
-			&from, &errPGP);
+			&from, &errPGP, NULL);
 	if (signer) {
-	    write(toPGP, (char*)passPhrase, strlen((char*)passPhrase));
+	    if (0 > safe_write(toPGP, (char*)passPhrase,
+                               strlen((char*)passPhrase))){
+                return TCL_ERROR;
+            }
 	    for (i=0; i<strlen((char*)passPhrase); i++) passPhrase[i] = '\0';
 	}
         if (strcmp("6", version) || signer) {
-	    write(toPGP, "\n", 1);
+	    if (1 != safe_write(toPGP, "\n", 1)) return TCL_ERROR;
 	}
 	hdrPtr = buf;
 	buf[0] = '\0';
 	rfc822_write_body_header(&hdrPtr, *body);
 	strlcat(buf, "\015\012", sizeof(buf));
-	write(toPGP, buf, strlen(buf));
+	if (0 > safe_write(toPGP, buf, strlen(buf))) return TCL_ERROR;
 	RatInitDelayBuffer();
 	rfc822_output_body(*body, RatDelaySoutr, (void*)toPGP);
 	close(toPGP);
@@ -289,7 +312,7 @@ RatPGPEncrypt(Tcl_Interp *interp, ENVELOPE *env, BODY **body,
 	fromPGP = open(from, O_RDONLY);
 	Tcl_DStringSetLength(&encDS, 0);
 	do {
-	    length = read(fromPGP, buf, sizeof(buf));
+	    length = SafeRead(fromPGP, buf, sizeof(buf));
 	    for (i=0; i < length; i += j) {
 		for (j=0; buf[i+j] != '\n' && i+j<length; j++);
 		Tcl_DStringAppend(&encDS, buf+i, j);
@@ -310,7 +333,7 @@ RatPGPEncrypt(Tcl_Interp *interp, ENVELOPE *env, BODY **body,
 	    Tcl_DStringAppendElement(&cmdDS, "RatPGPError");
 	    Tcl_DStringStartSublist(&cmdDS);
 	    do {
-		if (0 < (length = read(errPGP, buf, sizeof(buf)))) {
+		if (0 < (length = SafeRead(errPGP, buf, sizeof(buf)))) {
 		    Tcl_DStringAppend(&cmdDS, buf, length);
 		}
 	    } while (length > 0);
@@ -400,6 +423,7 @@ RatPGPSign(Tcl_Interp *interp, ENVELOPE *env, BODY **body, const char *signer)
     BODY *multiPtr;
     PARAMETER *parmPtr;
     PART *partPtr;
+    int write_failed;
 
     version = Tcl_GetVar2(interp, "option", "pgp_version", TCL_GLOBAL_ONLY);
 
@@ -409,6 +433,7 @@ RatPGPSign(Tcl_Interp *interp, ENVELOPE *env, BODY **body, const char *signer)
 	/*
 	 * Run command
 	 */
+        write_failed = 0;
 	rfc822_encode_body_7bit(NIL, *body);
 	Tcl_DStringSetLength(&cmdDS, 0);
 	if (!strcmp("gpg-1", version)) {
@@ -432,24 +457,30 @@ RatPGPSign(Tcl_Interp *interp, ENVELOPE *env, BODY **body, const char *signer)
 	Tcl_DStringAppend(&cmdDS, " -u ", -1);
 	Tcl_DStringAppendElement(&cmdDS, signer);
 	pid = RatRunPGP(interp, 0, cmd, Tcl_DStringValue(&cmdDS),
-			&toPGP, &outfile, &errPGP);
+			&toPGP, &outfile, &errPGP, NULL);
 	
         if (NULL == RatPGPPhrase(interp, passPhrase, sizeof(passPhrase))) {
 	    return TCL_ERROR;
 	}
-	write(toPGP, (char*)passPhrase, strlen((char*)passPhrase));
+	if (0 > safe_write(toPGP,(char*)passPhrase,strlen((char*)passPhrase))) {
+            return TCL_ERROR;
+        }
 	for (i=0; i<strlen((char*)passPhrase); i++) passPhrase[i] = '\0';
-	write(toPGP, "\n", 1);
+	if (0 > safe_write(toPGP, "\n", 1)) return TCL_ERROR;
 	hdrPtr = buf;
 	buf[0] = '\0';
 	rfc822_write_body_header(&hdrPtr, *body);
 	strlcat(buf, "\015\012", sizeof(buf));
-	write(toPGP, buf, strlen(buf));
+	if (strlen(buf) != safe_write(toPGP, buf, strlen(buf))) {
+            write_failed = 1;
+        }
 	RatInitDelayBuffer();
-	rfc822_output_body(*body, RatDelaySoutr, (void*)toPGP);
+	if (!rfc822_output_body(*body, RatDelaySoutr, (void*)toPGP)) {
+            write_failed = 1;
+        }
 	close(toPGP);
 	/*i = open("/tmp/sigdump", O_CREAT | O_TRUNC | O_WRONLY, FILEMODE);
-	write(i, buf, strlen(buf));
+        safe_write(i, buf, strlen(buf));
 	RatInitDelayBuffer();
 	rfc822_output_body(*body, RatDelaySoutr, (void*)i);
 	close(i);*/
@@ -463,7 +494,7 @@ RatPGPSign(Tcl_Interp *interp, ENVELOPE *env, BODY **body, const char *signer)
 	fromPGP = open(outfile, O_RDONLY);
 	Tcl_DStringSetLength(&sigDS, 0);
 	do {
-	    length = read(fromPGP, buf, sizeof(buf));
+	    length = SafeRead(fromPGP, buf, sizeof(buf));
 	    for (i=0; i < length; i += j) {
 		for (j=0; buf[i+j] != '\n' && i+j<length; j++);
 		Tcl_DStringAppend(&sigDS, buf+i, j);
@@ -479,12 +510,17 @@ RatPGPSign(Tcl_Interp *interp, ENVELOPE *env, BODY **body, const char *signer)
 	/*
 	 * Check for errors
 	 */
-	if (pid != result || WEXITSTATUS(status)) {
+	if (pid != result || WEXITSTATUS(status) || write_failed) {
+            /* We do not know why it failed, but it may be due to a
+             * bad passphrase. So to be on teh safe side we clear the
+             * cached passphrase here. */
+	    ClearPGPPass(NULL);
+
 	    Tcl_DStringSetLength(&cmdDS, 0);
 	    Tcl_DStringAppendElement(&cmdDS, "RatPGPError");
 	    Tcl_DStringStartSublist(&cmdDS);
 	    do {
-		if (0 < (length = read(errPGP, buf, sizeof(buf)))) {
+		if (0 < (length = SafeRead(errPGP, buf, sizeof(buf)))) {
 		    Tcl_DStringAppend(&cmdDS, buf, length);
 		}
 	    } while (length > 0);
@@ -647,23 +683,21 @@ RatPGPChecksig(Tcl_Interp *interp, MessageProcInfo* procInfo,
 	    }
 	}
 	if (!boundary || NULL == (start = FindBoundary((char*)text,boundary))){
-	    bodyInfoPtr->sigStatus = RAT_SIG_BAD;
-	    return;
+            goto fail;
 	}
 	start += strlen(boundary) + 4;
 	if (NULL == (end = FindBoundary(start, boundary))) {
-	    bodyInfoPtr->sigStatus = RAT_SIG_BAD;
-	    return;
+            goto fail;
 	}
 	end -= 2;
 	fd = open(textfile, O_CREAT | O_TRUNC | O_WRONLY, FILEMODE);
-	write(fd, start, end-start);
+	if (0 > safe_write(fd, start, end-start)) goto fail;
 	close(fd);
 	text = (unsigned char*)(*procInfo[bodyInfoPtr->type].fetchBodyProc)
 		(bodyInfoPtr->secPtr->firstbornPtr->nextPtr, &length);
 	fd = open(sigfile, O_CREAT | O_TRUNC | O_WRONLY, FILEMODE);
 	if (text) {
-	    write(fd, text, length);
+	    if (0 > safe_write(fd, text, length)) goto fail;
 	}
 	close(fd);
 
@@ -691,17 +725,17 @@ RatPGPChecksig(Tcl_Interp *interp, MessageProcInfo* procInfo,
 	    Tcl_SetResult(interp, "Unkown pgp version", TCL_STATIC);
 	    return;
 	}
-	pid = RatRunPGP(interp, 1, command, buf, &toPGP, &from, &errPGP);
+	pid = RatRunPGP(interp, 1, command, buf, &toPGP, &from, &errPGP, NULL);
 	close(toPGP);
 	do {
 	    result = waitpid(pid, &status, 0);
 	} while(-1 == result && EINTR == errno);
 	fromPGP = open(from, O_RDONLY);
 	Tcl_DStringInit(resultDS);
-	while (0 < (length = read(errPGP, buf, sizeof(buf)))) {
+	while (0 < (length = SafeRead(errPGP, buf, sizeof(buf)))) {
 	    Tcl_DStringAppend(resultDS, buf, length);
 	}
-	while (0 < (length = read(fromPGP, buf, sizeof(buf)))) {
+	while (0 < (length = SafeRead(fromPGP, buf, sizeof(buf)))) {
 	    Tcl_DStringAppend(resultDS, buf, length);
 	}
 	close(fromPGP);
@@ -752,6 +786,10 @@ RatPGPChecksig(Tcl_Interp *interp, MessageProcInfo* procInfo,
     } else {
 	Tcl_ResetResult(interp);
     }
+    return;
+
+fail:
+    bodyInfoPtr->sigStatus = RAT_SIG_BAD;
 }
 
 
@@ -782,7 +820,7 @@ RatPGPDecrypt(Tcl_Interp *interp, MessageProcInfo *procInfo,
     CONST84 char *version;
     BodyInfo *origPtr = *bodyInfoPtrPtr, *partInfoPtr;
     MessageInfo *msgPtr;
-    unsigned long length;
+    unsigned long length, textLength, passLength;
     Tcl_DString bodyDS, *errDSPtr = (Tcl_DString*)ckalloc(sizeof(Tcl_DString));
 
     RatLog(interp, RAT_PARSE, "decrypting", RATLOG_EXPLICIT);
@@ -795,7 +833,7 @@ RatPGPDecrypt(Tcl_Interp *interp, MessageProcInfo *procInfo,
     (*procInfo[(*bodyInfoPtrPtr)->type].makeChildrenProc)
 	    (interp, *bodyInfoPtrPtr);
     text = (*procInfo[(*bodyInfoPtrPtr)->type].fetchBodyProc)
-	    ((*bodyInfoPtrPtr)->firstbornPtr->nextPtr, &length);
+	    ((*bodyInfoPtrPtr)->firstbornPtr->nextPtr, &textLength);
     retry = 1;
     while (retry && text) {
 	if (NULL == RatPGPPhrase(interp, passPhrase, sizeof(passPhrase))) {
@@ -805,31 +843,38 @@ RatPGPDecrypt(Tcl_Interp *interp, MessageProcInfo *procInfo,
 	    pid = RatRunPGP(interp, 0, "gpg",
  			    "--decrypt -atq --no-secmem-warning "
 			    "--passphrase-fd 0 --batch",
-			    &toPGP, &from, &errPGP);
+			    &toPGP, &from, &errPGP, NULL);
 	} else if (!strcmp("2", version)) {
 	    pid = RatRunPGP(interp, 0, "pgp", "+BATCHMODE +VERBOSE=0 -f",
-		    &toPGP, &from, &errPGP);
+                            &toPGP, &from, &errPGP, NULL);
 	} else if (!strcmp("5", version)) {
 	    pid = RatRunPGP(interp, 0, "pgpv", "+batchmode=1 -f",
-		    &toPGP, &from, &errPGP);
+                            &toPGP, &from, &errPGP, NULL);
 	} else if (!strcmp("6", version)) {
 	    pid = RatRunPGP(interp, 0,
 			    "pgp", "+BATCHMODE +VERBOSE=0 +force -f",
-			    &toPGP, &from, &errPGP);
+			    &toPGP, &from, &errPGP, NULL);
 	} else {
 	    Tcl_SetResult(interp, "Unkown pgp version", TCL_STATIC);
 	    for (i=0; i<strlen((char*)passPhrase); i++) passPhrase[i] = '\0';
 	    break;
 	}
-	write(toPGP, (char*)passPhrase, strlen((char*)passPhrase));
+        passLength = strlen((char*)passPhrase);
+	if (passLength != safe_write(toPGP, (char*)passPhrase, passLength)) {
+            goto failed;
+        }
 	for (i=0; i<strlen((char*)passPhrase); i++) passPhrase[i] = '\0';
-	write(toPGP, "\n", 1);
-	write(toPGP, text, length);
-	/*fprintf(stderr, "%s:%d Dumped data to '/tmp/msgdump'\n", __FILE__,
-		__LINE__);
-	i = open("/tmp/msgdump", O_CREAT|O_TRUNC|O_WRONLY, 0600);
-	write(i, text, length);
-	close(i);*/
+	if (1 != safe_write(toPGP, "\n", 1)
+            || textLength != safe_write(toPGP, text, textLength)) {
+            goto failed;
+        }
+
+/* 	fprintf(stderr, "%s:%d Dumped data to '/tmp/msgdump'\n", __FILE__, */
+/* 		__LINE__); */
+/* 	i = open("/tmp/msgdump", O_CREAT|O_TRUNC|O_WRONLY, 0600); */
+/* 	safe_write(i, text, textLength); */
+/* 	close(i); */
+        
 	close(toPGP);
 	do {
 	    result = waitpid(pid, &status, 0);
@@ -841,13 +886,13 @@ RatPGPDecrypt(Tcl_Interp *interp, MessageProcInfo *procInfo,
 	fromPGP = open(from, O_RDONLY);
 	Tcl_DStringSetLength(&bodyDS, 0);
 	Tcl_DStringAppend(&bodyDS, "MIME-Version: 1.0\r\n", -1);
-	while (0 < (length = read(fromPGP, buf, sizeof(buf)))) {
+	while (0 < (length = SafeRead(fromPGP, buf, sizeof(buf)))) {
 	    Tcl_DStringAppend(&bodyDS, buf, length);
 	}
 	close(fromPGP);
 	unlink(from);
 	Tcl_DStringInit(errDSPtr);
-	while (0 < (length = read(errPGP, buf, sizeof(buf)))) {
+	while (0 < (length = SafeRead(errPGP, buf, sizeof(buf)))) {
 	    Tcl_DStringAppend(errDSPtr, buf, length);
 	}
 	close(errPGP);
@@ -1108,7 +1153,7 @@ RatPGPExtractKey(Tcl_Interp *interp, char *id, char *keyringName)
     }
     Tcl_DStringAppend(&cmd, "\"", 1);
     pid = RatRunPGP(interp, 1, command, Tcl_DStringValue(&cmd),
-	    &toPGP, &from, &errPGP);
+                    &toPGP, &from, &errPGP, NULL);
     Tcl_DStringFree(&cmd);
     close(toPGP);
     do {
@@ -1120,7 +1165,7 @@ RatPGPExtractKey(Tcl_Interp *interp, char *id, char *keyringName)
      */
     fromPGP = open(from, O_RDONLY);
     do {
-	if (0 < (length = read(fromPGP, buf, sizeof(buf)))) {
+	if (0 < (length = SafeRead(fromPGP, buf, sizeof(buf)))) {
 	    Tcl_AppendToObj(rPtr, buf, length);
 	}
     } while (length > 0);
@@ -1134,7 +1179,7 @@ RatPGPExtractKey(Tcl_Interp *interp, char *id, char *keyringName)
 	    || (WEXITSTATUS(status) != 0 && WEXITSTATUS(status) != 1)) {
 	Tcl_SetStringObj(rPtr, NULL, 0);
 	do {
-	    if (0 < (length = read(errPGP, buf, sizeof(buf)))) {
+	    if (0 < (length = SafeRead(errPGP, buf, sizeof(buf)))) {
 		Tcl_AppendToObj(rPtr, buf, length);
 	    }
 	} while (length > 0);
@@ -1206,11 +1251,12 @@ static Tcl_DString*
 RatPGPRunOld(Tcl_Interp *interp, BodyInfo *bodyInfoPtr, char *text,
 		char *start, char *end)
 {
-    Tcl_DString *errDSPtr = (Tcl_DString*)ckalloc(sizeof(Tcl_DString)),
-	*bodyDSPtr = (Tcl_DString*)ckalloc(sizeof(Tcl_DString)),
-	*dsPtr = NULL;
-    int needPhrase, toPGP, fromPGP, errPGP, length, preamble, pid, status,
-	result, retry, i;
+    Tcl_DString *errDSPtr = (Tcl_DString*)ckalloc(sizeof(Tcl_DString));
+    Tcl_DString *bodyDSPtr = (Tcl_DString*)ckalloc(sizeof(Tcl_DString));
+    Tcl_DString *dsPtr = NULL;
+    Tcl_DString statusDS;
+    int needPhrase, toPGP, fromPGP, errPGP, statusPGP = -1, length, preamble;
+    int pid, status, result, retry, i, failed = 0;
     char *ePtr, *cPtr, buf[1024], *from;
     volatile char passPhrase[MAXPASSLENGTH];
     CONST84 char *version;
@@ -1232,9 +1278,10 @@ RatPGPRunOld(Tcl_Interp *interp, BodyInfo *bodyInfoPtr, char *text,
     do {
 	if (needPhrase) {
 	    if (NULL == RatPGPPhrase(interp, passPhrase, sizeof(passPhrase))) {
-		RatDStringApendNoCRLF(bodyDSPtr, start, end-start);
+		RatDStringApendNoCRLF(bodyDSPtr, start, -1);
 		ckfree(errDSPtr);
 		bodyInfoPtr->pgpOutput = NULL;
+                bodyInfoPtr->sigStatus = RAT_PGP_ABORT;
 		return bodyDSPtr;
 	    }
 	} else {
@@ -1242,26 +1289,29 @@ RatPGPRunOld(Tcl_Interp *interp, BodyInfo *bodyInfoPtr, char *text,
 	}
 	if (!strcmp("gpg-1", version)) {
 	    pid = RatRunPGP(interp, 0, "gpg", "--decrypt -atq "
-		    "--passphrase-fd 0 --no-secmem-warning --batch",
-		    &toPGP, &from, &errPGP);
+                            "--passphrase-fd 0 --no-secmem-warning --batch "
+                            "--status-fd=%d",
+                            &toPGP, &from, &errPGP, &statusPGP);
 	} else if (!strcmp("2", version)) {
 	    pid = RatRunPGP(interp, 0, "pgp", "+BATCHMODE +VERBOSE=0 -f",
-		    &toPGP, &from, &errPGP);
+                            &toPGP, &from, &errPGP, NULL);
 	} else if (!strcmp("5", version)) {
 	    pid = RatRunPGP(interp, 0, "pgpv", "+batchmode=1 -f",
-		    &toPGP, &from, &errPGP);
+                            &toPGP, &from, &errPGP, NULL);
 	} else if (!strcmp("6", version)) {
 	    pid = RatRunPGP(interp, 0,
 			    "pgp", "+BATCHMODE +VERBOSE=0 +force -f",
-			    &toPGP, &from, &errPGP);
+			    &toPGP, &from, &errPGP, NULL);
 	} else {
 	    Tcl_SetResult(interp, "Unkown pgp version", TCL_STATIC);
 	    for (i=0; i<strlen((char*)passPhrase); i++) passPhrase[i] = '\0';
 	    return NULL;
 	}
-	write(toPGP, (char*)passPhrase, strlen((char*)passPhrase));
+	if (0 > safe_write(toPGP,(char*)passPhrase,strlen((char*)passPhrase))) {
+            return NULL;
+        }
 	for (i=0; i<strlen((char*)passPhrase); i++) passPhrase[i] = '\0';
-	write(toPGP, "\n", 1);
+	if (0 > safe_write(toPGP, "\n", 1)) return NULL;
 	fp = fdopen(toPGP, "w");
 	/*
 	 * Undo any encoding ant buggy MTA may have applied. Since we have this
@@ -1288,34 +1338,88 @@ RatPGPRunOld(Tcl_Interp *interp, BodyInfo *bodyInfoPtr, char *text,
 	    fputc(*cPtr, fp);
 	}
 	fclose(fp);
-
 	if (dsPtr) {
 	    Tcl_DStringFree(dsPtr);
 	}
+
+        /*
+         * Read output descriptors
+         */
+	Tcl_DStringInit(errDSPtr);
+	Tcl_DStringInit(&statusDS);
+        Tcl_DStringAppend(&statusDS, "\n", 1);
+        while (errPGP != -1 || statusPGP != -1) {
+            fd_set readfds;
+            int nfds = errPGP > statusPGP ? errPGP : statusPGP;
+
+            FD_ZERO(&readfds);
+            if (errPGP != -1)    FD_SET(errPGP, &readfds);
+            if (statusPGP != -1) FD_SET(statusPGP, &readfds);
+            if (-1 == select(nfds+1, &readfds, NULL, NULL, NULL)) {
+                if (EINTR == errno) {
+                    continue;
+                }
+                break;
+            }
+            if (errPGP > -1 && FD_ISSET(errPGP, &readfds)) {
+                length = SafeRead(errPGP, buf, sizeof(buf));
+                if (length <= 0) {
+                    close(errPGP);
+                    errPGP = -1;
+                } else {
+                    Tcl_DStringAppend(errDSPtr, buf, length);
+                }
+            }
+            if (statusPGP > -1 && FD_ISSET(statusPGP, &readfds)) {
+                length = SafeRead(statusPGP, buf, sizeof(buf));
+                if (length <= 0) {
+                    close(statusPGP);
+                    statusPGP = -1;
+                } else {
+                    Tcl_DStringAppend(&statusDS, buf, length);
+                }
+            }
+        }
+        if (errPGP != -1)    close(errPGP);
+        if (statusPGP != -1) close(statusPGP);
+
+        /* Wait for PGP process to finish */
 	do {
 	    result = waitpid(pid, &status, 0);
 	} while(-1 == result && EINTR == errno);
 
 	/*
-	 * Read result
+	 * Read output file
 	 */
 	fromPGP = open(from, O_RDONLY);
-	while (0 < (length = read(fromPGP, buf, sizeof(buf)))) {
+	while (0 < (length = SafeRead(fromPGP, buf, sizeof(buf)))) {
 	    Tcl_DStringAppend(bodyDSPtr, buf, length);
 	}
 	close(fromPGP);
 	unlink(from);
-	Tcl_DStringInit(errDSPtr);
-	while (0 < (length = read(errPGP, buf, sizeof(buf)))) {
-	    Tcl_DStringAppend(errDSPtr, buf, length);
-	}
-	close(errPGP);
+
+/*         fprintf(stderr, "%s:%d BODY <<%s>>\n", __FILE__, __LINE__, */
+/*                 Tcl_DStringValue(bodyDSPtr)); */
+/*         fprintf(stderr, "%s:%d ERR <<%s>>\n", __FILE__, __LINE__, */
+/*                 Tcl_DStringValue(errDSPtr)); */
+/*         fprintf(stderr, "%s:%d STATUS <<%s>>\n", __FILE__, __LINE__, */
+/*                 Tcl_DStringValue(&statusDS)); */
 
 	/*
 	 * Check for errors?
 	 */
-	if (pid != result
-		|| (WEXITSTATUS(status) != 0 && WEXITSTATUS(status) != 1)) {
+	if (pid != result) {
+            failed = 1;
+        } else if (0 == Tcl_DStringLength(&statusDS)) {
+            if ((WEXITSTATUS(status) != 0 && WEXITSTATUS(status) != 1)) {
+                failed = 1;
+            }
+        } else {
+            char *status = Tcl_DStringValue(&statusDS);
+            failed = !strstr(status, "\n[GNUPG:] ");
+        }
+
+        if (failed) {
 	    Tcl_DString error;
 
 	    ClearPGPPass(NULL);
@@ -1326,11 +1430,12 @@ RatPGPRunOld(Tcl_Interp *interp, BodyInfo *bodyInfoPtr, char *text,
 		    || !strcmp("ABORT", Tcl_GetStringResult(interp))) {
 		close(errPGP);
 		Tcl_DStringFree(&error);
-		Tcl_DStringFree(errDSPtr);
-		ckfree(errDSPtr);
+		Tcl_DStringFree(&statusDS);
 		RatLog(interp, RAT_PARSE, "", RATLOG_EXPLICIT);
 		RatDStringApendNoCRLF(bodyDSPtr, start, ePtr-start);
-		bodyInfoPtr->pgpOutput = NULL;
+		RatDStringApendNoCRLF(bodyDSPtr, end, -1);
+                bodyInfoPtr->pgpOutput = errDSPtr;
+                bodyInfoPtr->sigStatus = RAT_PGP_ABORT;
 		return bodyDSPtr;
 	    } else {
 		retry = 1;
@@ -1339,7 +1444,19 @@ RatPGPRunOld(Tcl_Interp *interp, BodyInfo *bodyInfoPtr, char *text,
 	    retry = 0;
 	}
     } while (0 != retry);
-    if (WEXITSTATUS(status)) {
+
+    if (Tcl_DStringLength(&statusDS) > 0) {
+        char *status = Tcl_DStringValue(&statusDS);
+        if (strstr(status, "\n[GNUPG:] GOODSIG")) {
+            bodyInfoPtr->sigStatus = RAT_SIG_GOOD;
+        } else if (strstr(status, "\n[GNUPG:] ERRSIG")) {
+            bodyInfoPtr->sigStatus = RAT_SIG_ERR;
+        } else if (strstr(status, "\n[GNUPG:] BADSIG")) {
+            bodyInfoPtr->sigStatus = RAT_SIG_BAD;
+        } else {
+	    bodyInfoPtr->sigStatus = RAT_UNSIGNED;
+        }
+    } else if (WEXITSTATUS(status)) {
 	if (needPhrase) {
 	    bodyInfoPtr->sigStatus = RAT_UNSIGNED;
 	} else {
@@ -1349,6 +1466,7 @@ RatPGPRunOld(Tcl_Interp *interp, BodyInfo *bodyInfoPtr, char *text,
 	bodyInfoPtr->sigStatus = RAT_UNCHECKED;
     }
     bodyInfoPtr->pgpOutput = errDSPtr;
+    Tcl_DStringFree(&statusDS);
 
     return bodyDSPtr;
 }
@@ -1490,7 +1608,7 @@ RatUpdatePGPKeys(Tcl_Interp *interp, RatPGPKeyring *k)
 	Tcl_DStringAppend(&cmd, k->name, -1);
     }
     pid = RatRunPGP(interp, 1, command, Tcl_DStringValue(&cmd),
-	    &toPGP, &from, &errPGP);
+                    &toPGP, &from, &errPGP, NULL);
     Tcl_DStringFree(&cmd);
     close(toPGP);
     do {
@@ -1513,7 +1631,7 @@ RatUpdatePGPKeys(Tcl_Interp *interp, RatPGPKeyring *k)
 	    || (WEXITSTATUS(status) != 0 && WEXITSTATUS(status) != 1)) {
 	rPtr = Tcl_NewObj();
 	do {
-	    if ( 0 < (length = read(errPGP, buf, sizeof(buf)))) {
+	    if ( 0 < (length = SafeRead(errPGP, buf, sizeof(buf)))) {
 		Tcl_AppendToObj(rPtr, buf, length);
 	    }
 	} while (length > 0);
@@ -1554,7 +1672,7 @@ ParsePGPListFormat(Tcl_Interp *interp, FILE *fp, Tcl_RegExp exp_id,
     Tcl_DStringInit(&tmp);
     preamble = 1;
     buf[sizeof(buf)-1] = '\0';
-    while (fgets(buf, sizeof(buf)-1, fp), !feof(fp)) {
+    while (fgets(buf, sizeof(buf)-1, fp) && !feof(fp)) {
 	if (buf[0]) {
 	    buf[strlen(buf)-1] = '\0';
 	}
@@ -1647,8 +1765,7 @@ ParseGPGListFormat(Tcl_Interp *interp, FILE *fp, RatPGPKeyring *k)
 
     buf[sizeof(buf)-1] = '\0';
     do {
-	fgets(buf, sizeof(buf)-1, fp);
-	if (feof(fp)) {
+	if (!fgets(buf, sizeof(buf)-1, fp) || feof(fp)) {
 	    buf[0] = '\0';
 	} else if (buf[0]) {
 	    buf[strlen(buf)-1] = '\0';

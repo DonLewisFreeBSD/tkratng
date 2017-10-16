@@ -61,6 +61,7 @@ RatStdMessagesInit(MessageProcInfo *messageProcInfoPtr)
     messageProcInfoPtr->fetchBodyProc = Std_FetchBodyProc;
     messageProcInfoPtr->bodyDeleteProc = Std_BodyDeleteProc;
     messageProcInfoPtr->getInternalDateProc = Std_GetInternalDateProc;
+    messageProcInfoPtr->dbinfoGetProc = NULL;
 }
 
 

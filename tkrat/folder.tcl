@@ -300,6 +300,13 @@ proc FolderWindowInit {w toopen} {
         "SetFlag $handler answered 1 \
                          \[\$${handler}(folder_handler) flagged flagged 1\]"
     set b($m,[$m index end]) mark_as_unanswered
+    $m add separator
+    $m add command -label $t(dbinfo)... \
+        -command "MsgDbInfo folder \
+                         \[\$${handler}(folder_handler) dbinfo_get\] \
+                         \$${handler}(folder_handler) \
+                         \[\$${handler}(folder_handler) flagged flagged 1\]"
+    set b($m,[$m index end]) dbinfo
 
     # Admin menu
     menubutton $w.t.mbar.admin -menu $w.t.mbar.admin.m -text $t(admin) \
@@ -334,6 +341,8 @@ proc FolderWindowInit {w toopen} {
     set b($rm,[$rm index end]) reread_mailcap
 
     menu $m.dbase
+    $m.dbase add command -label $t(info)... \
+	    -command "DbaseInfo"
     $m.dbase add command -label $t(check_dbase)... \
 	    -command "RatBusy \"DbaseCheck 0\""
     set b($m.dbase,[$m.dbase index end]) check_dbase
@@ -484,20 +493,29 @@ proc FolderWindowInit {w toopen} {
 
     # The actual text
     frame $w.b.text -relief raised -bd 1
-    scrollbar $w.b.text.scroll \
+    scrollbar $w.b.text.yscroll \
         -relief sunken \
         -command "$w.b.text.text yview" \
 	-highlightthickness 0
+    scrollbar $w.b.text.xscroll \
+        -relief sunken \
+        -command "$w.b.text.text xview" \
+	-highlightthickness 0 \
+        -orient horiz
     text $fh(text) \
-	-yscroll "RatScrollShow $w.b.text.text $w.b.text.scroll" \
+	-yscroll "RatScrollShow $w.b.text.text $w.b.text.yscroll" \
+	-xscroll "$w.b.text.xscroll set" \
         -relief raised \
         -wrap $fh(wrap_mode) \
 	-bd 0 \
 	-highlightthickness 0 \
 	-setgrid 1
     $fh(text) mark set searched 1.0
-    pack $w.b.text.scroll -side right -fill y
-    pack $w.b.text.text -side left -expand yes -fill both
+    set texth(text_frame) $w.b.text
+    set texth(text_xscroll) $w.b.text.xscroll
+    set texth(text_yscroll) $w.b.text.yscroll
+    pack $w.b.text.yscroll -side right -fill y
+    pack $w.b.text.text -side top -expand yes -fill both
 
     # Pack all the parts into the window
     pack $w.t.mbar -side top -fill x
@@ -556,7 +574,6 @@ proc FolderWindowInit {w toopen} {
     bind $fh(text) <Map> "FolderMap $handler"
     bind $fh(text) <Unmap> "FolderUnmap $handler"
     bind $fh(text) <Destroy> "DestroyFolderWin $handler 1"
-    bind $fh(text) <Configure> {ResizeBodyText %W %w}
     FolderBind $handler
     wm protocol $fh(toplevel) WM_DELETE_WINDOW "DestroyFolderWin $handler 1"
 
@@ -839,6 +856,22 @@ proc BuildMessageMenu {handler m msg} {
         $m add command -label $t(mark_as_unanswered) -state $unanswered_state \
             -command "SetFlag $handler answered 0 $fi"
         set b($m,[$m index end]) mark_as_unanswered
+    }
+
+    $m add command -label $t(flag_same_subject) -state $msgsel_state \
+        -command [list GroupSameSubject $handler $msg]
+
+    if {"dbase" == [$fh(folder_handler) type]} {
+        $m add separator
+        if {"" != $msg} {
+            set info [$msg dbinfo_get]
+        } else {
+            set info {}
+        }
+        $m add command -label $t(dbinfo)... -state $msgsel_state \
+            -command [list MsgDbInfo msg $info \
+                          $fh(folder_handler) $fi]
+        set b($m,[$m index end]) dbinfo
     }
 }
 
@@ -1229,17 +1262,23 @@ proc FolderSelect {handler index} {
 	set command {}
 	set b($fh(sigbut)) $sigstatus
 	switch $sigstatus {
-	pgp_none {
-		set state disabled
-	    }
-	pgp_unchecked {
+            pgp_none {
+                set state disabled
+            }
+            pgp_unchecked {
 		set command "FolderCheckSignature $handler"
 	    }
-	pgp_good {
+            pgp_good {
 		set command [list RatText $t(pgp_output) $pgpOutput]
 	    }
-	pgp_bad {
+            pgp_bad {
 		set command [list RatText $t(pgp_output) $pgpOutput]
+	    }
+            pgp_err {
+		set command [list RatText $t(pgp_output) $pgpOutput]
+	    }
+            pgp_abort {
+		set command "$fh(current_msg) rerunPGP \; FolderSelect $handler $index"
 	    }
 	}
 	$fh(sigbut) configure -state $state \
@@ -1866,229 +1905,6 @@ proc FolderSelectUnread {handler} {
     FolderSelect $handler $i
 }
 
-# GroupMessageList --
-#
-# Pops a message list that lets the user select messages for a group
-#
-# Arguments:
-# handler -	The handler which identifies the folder window
-
-proc GroupMessageList {handler} {
-    global b idCnt t option
-    upvar \#0 $handler fh
-
-    # Create identifier
-    set id f[incr idCnt]
-    set w .$id
-
-    # Create toplevel
-    toplevel $w -class TkRat
-    wm title $w $t(edit_group)
-    frame $w.f
-    scrollbar $w.f.scroll \
-        -relief sunken \
-        -command "$w.f.list yview" \
-	-highlightthickness 0
-    listbox $w.f.list \
-        -yscroll "$w.f.scroll set" \
-        -exportselection false \
-	-highlightthickness 0 \
-	-selectmode multiple \
-	-setgrid true
-    set b($w.f.list) group_list_editor
-    pack $w.f.scroll -side right -fill y
-    pack $w.f.list -side left -expand 1 -fill both
-    frame $w.buttons
-    button $w.buttons.ok -text $t(ok) \
-	    -command "GroupMessageListDone $w $handler 1"
-    set b($w.buttons.ok) group_window_ok
-    button $w.buttons.sel -text $t(select_all) \
-	    -command "$w.f.list selection set 0 end"
-    set b($w.buttons.sel) group_window_selall
-    button $w.buttons.unsel -text $t(deselect_all) \
-	    -command "$w.f.list selection clear 0 end"
-    set b($w.buttons.unsel) group_window_unselall
-    button $w.buttons.cancel -text $t(cancel) \
-	    -command "GroupMessageListDone $w $handler 0"
-    set b($w.buttons.cancel) cancel
-    pack $w.buttons.ok \
-	 $w.buttons.sel \
-	 $w.buttons.unsel \
-	 $w.buttons.cancel -side left -expand 1
-    pack $w.buttons -side bottom -fill x -pady 5
-    pack $w.f -expand 1 -fill both
-
-    set fi 0
-    set li 0
-    foreach e [$fh(folder_handler) list "%u $option(list_format)"] {
-	regexp {^([^ ]*) (.*)} $e unused uid list_entry
-        if {"" == $fh(filter)
-            || [string match -nocase "*$fh(filter)*" $list_entry]} {
-            lappend fh($w.uids) $uid
-            $w.f.list insert end $list_entry
-            set rmapping($fi) $li
-            incr li
-        }
-        incr fi
-    }
-    foreach i [$fh(folder_handler) flagged flagged 1] {
-        if {[info exists rmapping($i)]} {
-            $w.f.list selection set $rmapping($i)
-        }
-    }
-    lappend fh(groupMessageLists) $w
-    bind $w.f.list <Destroy> "GroupMessageListDone $w $handler 0"
-
-    ::tkrat::winctl::SetGeometry groupMessages $w $w.f.list
-}
-
-# GroupMessageListUpdate --
-#
-# Update the message list since the underlying folder was updated
-#
-# Arguments:
-# w	  -	The group selection window
-# handler -	The handler which identifies the folder window
-
-proc GroupMessageListUpdate {w handler} {
-    upvar \#0 $handler fh
-    global option
-
-    foreach c [$w.f.list curselection] {
-	set selected([lindex $fh($w.uids) $c]) 1
-    }
-    set top [lindex [$w.f.list yview] 0]
-    $w.f.list delete 0 end
-    set fh($w.uids) {}
-    foreach e [$fh(folder_handler) list "%u $option(list_format)"] {
-	regexp {^([^ ]*) (.*)} $e unused uid list_entry
-        if {"" != $fh(filter)
-            && ![string match -nocase "*$fh(filter)*" $list_entry]} {
-            continue
-        }
-	lappend fh($w.uids) $uid
-	$w.f.list insert end $list_entry
-	if {[info exists selected($uid)]} {
-	    $w.f.list selection set end
-	}
-    }
-    $w.f.list yview moveto $top
-}
-
-# GroupMessageListDone --
-#
-# Calls when the grouping is done
-#
-# Arguments:
-# w	  -	The group selection window
-# handler -	The handler which identifies the folder window
-# done    -	The users selection (1=ok, 0=cancel)
-
-proc GroupMessageListDone {w handler done} {
-    upvar \#0 $handler fh
-    global b option
-
-    bind $w.f.list <Destroy> {}
-    if {$done} {
-	set candidates [$w.f.list curselection]
-	set isset [$fh(folder_handler) flagged flagged 1]
-	set toset {}
-	set toclear {}
-        set torefresh {}
-	for {set i 0} {$i < [$w.f.list size]} {incr i} {
-	    set nv [expr {-1 != [lsearch $candidates $i]}]
-            set ov [expr {-1 != [lsearch $isset $i]}]
-            if {$nv != $ov} {
-                if {$nv} {
-                    lappend toset $fh(mapping,$i)
-                } else {
-                    lappend toclear $fh(mapping,$i)
-                }
-                lappend torefresh $i
-            }
-	}
-	$fh(folder_handler) setFlag $toset flagged 1
-	$fh(folder_handler) setFlag $toclear flagged 0
-	foreach i $torefresh {
-	    FolderListRefreshEntry $handler $i
-	}
-    }
-    ::tkrat::winctl::RecordGeometry groupMessages $w $w.f.list
-    set index [lsearch $w $fh(groupMessageLists)]
-    set fh(groupMessageLists) [lreplace $fh(groupMessageLists) $index $index]
-    destroy $w
-    unset fh($w.uids)
-    foreach a [array names b $w*] {
-	unset b($a)
-    }
-}
-
-# GroupClear --
-#
-# Removes the flag from every message
-#
-# Arguments:
-# handler -	The handler which identifies the folder window
-
-proc GroupClear {handler} {
-    upvar \#0 $handler fh
-    global option
-
-    foreach i [$fh(folder_handler) flagged flagged 1] {
-	$fh(folder_handler) setFlag $i flagged 0
-	FolderListRefreshEntry $handler $fh(rmapping,$i)
-    }
-}
-
-# SetupGroupMenu --
-#
-# Setup the entries in the group menu
-#
-# Arguments:
-# m	  -	The menu command name
-# handler -	The handler which identifies the folder window
-
-proc SetupGroupMenu {m handler} {
-    upvar \#0 $handler fh
-    global t
-
-    # Create groups
-    if {$fh(num_messages) > 0} {
-        set s normal
-    } else {
-        set s disabled
-    }
-    foreach i {1 2 3} {
-        $m entryconfigure $i -state $s
-    }
-
-    # Group operations
-    if {![info exists fh(folder_handler)]} {
-	set s disabled
-    } elseif {[set num [llength [$fh(folder_handler) flagged flagged 1]]]} {
-	set s normal
-    } else {
-	set s disabled
-    }
-    foreach i {4 6 7 8 9 11 12 13 15 16 17 18 19 20} {
-        $m entryconfigure $i -state $s
-    }
-    # Number of grouped messages
-    $m entryconfigure 4 -label "$t(clear_group) ($num)"
-
-    # Dsiable some ops in drafts folder
-    if {$s == "normal"} {
-        if {"drafts" == $fh(special_folder)} {
-            set s disabled
-        } else {
-            set s normal
-        }
-        foreach i {17 18 19 20} {
-            $m entryconfigure $i -state $s
-        }
-    }
-}
-
 # CycleShowHeader --
 #
 # Cycle through the values of the show_header option
@@ -2144,7 +1960,7 @@ proc FolderCheckSignature {handler} {
 	    }
 	}
     }
-    if {[string length $result]} {
+    if {[string length $result] && $tot != "pgp_abort"} {
 	RatText $t(pgp_output) $result
     }
     $fh(sigbut) configure -state normal \
@@ -2230,6 +2046,7 @@ proc FolderFind {handler} {
     focus $w.e
     bind $w.e <Return> [list $w.b.find_next invoke]
     bind $w.e <Destroy> "FolderFindDone $id"
+    bind $w <Escape> "$w.b.dismiss invoke"
 
     set hd(find_args) \
         [list $w.e $w.c $w.b.find_next.b $w.b.find_prev.b]
@@ -2390,6 +2207,9 @@ proc NewFolderMenu {handler m} {
         if {"" == $from} {
             $m entryconfigure $send_idx -state disabled
         } else {
+            if {[llength $from] > 1} {
+                set from [lindex $from 0]
+            }
             set exp [list and all_addresses [$from get mail]]
             set vf_sender [list $t(dbase_to_from_sender) dbase {} {} {} $exp]
             $m entryconfigure $send_idx -state normal \
@@ -2422,6 +2242,9 @@ proc NewFolderWin {vf} {
 	set vf [SelectDbaseFolder $fh(toplevel)]
 	if {"" == $vf} return
 	set manual 1
+    } elseif {"def" == [lindex $vf 0]} {
+        set vf [list RatOpenFolder [lindex $vf 1]]
+        set manual 1
     }
 
     # Create folder window
@@ -2689,6 +2512,9 @@ proc FilterClear {handler} {
     set fh(filter) ""
     set fh(last_filter) $fh(filter)
     Sync $handler update
+    if {![info exists fh(current_msg)]} {
+        FolderSelect $handler 0
+    }
     FilterChanged $handler
 
     if {[focus] == $fh(filter_entry)} {

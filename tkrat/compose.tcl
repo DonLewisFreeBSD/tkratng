@@ -21,6 +21,9 @@ set composeAutoHeaderList {in_reply_to references date}
 # List of headers which contains addresses (OBS! must be lower case OBS!)
 set composeAdrHdrList {from to cc bcc reply_to}
 
+# Fields allowed in mailto links
+set mailtoAllowedHdrs {to cc bcc reply_to subject in_reply_to references body}
+
 # Address book icon
 set book_img [image create photo -data {
 R0lGODdhEgAMAKUAANDU0KisqGBkYHB0cPj4+ICEgIiIiHh8eNDQ0MjMyJCQkIiMiLi4uLC0
@@ -262,6 +265,9 @@ proc ComposeBounce {msg role} {
     global t idCnt
 
     set msg [ComposeChoose $msg $t(bounce_which)]
+    if {"" == $msg} {
+        return
+    }
 
     set handler composeM[incr idCnt]
     upvar \#0 $handler mh
@@ -289,6 +295,10 @@ proc ComposeContinue {msg} {
 	set name [string tolower [lindex $header 0]]
         if {[regexp -nocase {x-tkrat-original-([a-z]+)} $name unused f]} {
             lappend replacements [list $f [lindex $header 1]]
+            continue
+        }
+        # Ignore address headers
+        if {-1 != [lsearch -exact {to from cc bcc} $name]} {
             continue
         }
 	switch $name {
@@ -398,6 +408,56 @@ proc ComposeClient {hl} {
     if {[llength $hl]} {
 	array set mh $hl
     }
+    return [DoCompose $handler $option(default_role) 0 1]
+}
+
+# MailtoClient --
+#
+# Executes the mailto command from the client
+#
+# Arguments:
+# m     - mailto link
+
+proc MailtoClient {mailto} {
+    global idCnt option t composeAdrHdrList mailtoAllowedHdrs
+
+    regsub "^mailto:" $mailto "" mailto
+
+    set handler clientM[incr idCnt]
+    upvar \#0 $handler mh
+
+    set s [split $mailto "?"]
+    if {2 < [llength $s]} {
+        Popup "$t(bad_mailto_url): $mailto"
+        return
+    }
+
+    # The initial implied to field
+    if {"" != [lindex $s 0]} {
+        set mh(to) [RatDecodeUrlc [lindex $s 0] 1]
+    }
+
+    # The rest of the fields
+    foreach f [split [lindex $s 1] "&"] {
+        set l [split $f "="]
+        if {2 != [llength $l]} {
+            Popup "$t(bad_mailto_url): $mailto"
+            return
+        }
+        regsub -all -- {-} [string tolower [lindex $l 0]] "_" field
+        set addr [expr -1 == [lsearch -exact $composeAdrHdrList $field]]
+        if {-1 == [lsearch -exact $mailtoAllowedHdrs $field]} {
+            Popup "$t(bad_mailto_url): $mailto"
+            return
+        }
+
+        if {"body" == $field} {
+            set field data
+            set mh(data_tags) {}
+        }
+        set mh($field) [RatDecodeUrlc [lindex $l 1] $addr]
+    }
+
     return [DoCompose $handler $option(default_role) 0 1]
 }
 
@@ -892,6 +952,7 @@ proc DoCompose {handler role edit_text add_sig} {
     lappend mh(eEditBlock) $w.buttons.hold
     menubutton $w.buttons.edit -indicatoron 1 -menu $w.buttons.edit.m \
 	    -relief raised -direction flush -textvariable ${handler}(eeditor)
+    set mh(eeditb) $w.buttons.edit
     menu $w.buttons.edit.m -tearoff 0
     set mh(eeditm) $w.buttons.edit.m
     ComposeEEditorPopulate $handler
@@ -929,8 +990,12 @@ proc DoCompose {handler role edit_text add_sig} {
     ComposeBind $handler
     wm protocol $w WM_DELETE_WINDOW "DoComposeCleanup $w $handler backup"
 
-    if { 1 == $option(always_editor) } {
-	ComposeEEdit $handler [lindex $editors 0]
+    if { 1 == $option(always_editor)} {
+        if {0 == [llength $editors]} {
+            Popup $t(always_eeditor_but_none) $mh(toplevel)
+        } else {
+            ComposeEEdit $handler [lindex $editors 0]
+        }
     }
 
     UpdateComposeRole $handler
@@ -1183,6 +1248,8 @@ proc DoBounce {handler role} {
     lappend mh(sendButtons) $w.buttons.send
     lappend mh(sendButtons) $w.buttons.sendsave
 
+    bind $w <Escape> "$w.buttons.abort invoke"
+
     # Populate headerlist and pack everything
     set first [ComposeBuildHeaderEntries $handler]
     pack $w.menu -side top -fill x
@@ -1363,8 +1430,9 @@ proc ComposeSend {mainW handler} {
     }
 
     # Check if a save folder is defined
-    if {![string length $mh(save_to)] \
-	    && "" != $option($mh(role),save_outgoing)} {
+    if {![string length $mh(save_to)]
+        && "" != $option($mh(role),save_outgoing)
+        && [info exists vFolderDef($option($mh(role),save_outgoing))]} {
 	set mh(save_to) $vFolderDef($option($mh(role),save_outgoing))
     }
 
@@ -1470,10 +1538,12 @@ proc ComposeBounceSend {mainW handler} {
     global t idCnt composeAdrHdrList option vFolderDef vFolderOutgoing
     upvar \#0 $handler mh
 
-    # By moving the focus to the text widget we force all HeaderEntries
-    # to update their variables
-    focus [lindex $mh(sendButtons) 0]
-    update
+    # Update all header entries
+    foreach hh $mh(headerHandles) {
+	set w [lindex $hh 0]
+	set hhd [lindex $hh 1]
+	ComposeHandleHE $w $hhd
+    }
 
     # Check that we have at least one recipient
     if { 0 == [string length "$mh(to)$mh(cc)$mh(bcc)"]} {
@@ -1520,6 +1590,8 @@ proc ComposeBounceSend {mainW handler} {
         foreach h {to cc bcc} {
             if {"" != $mh($h)} {
                 lappend envelope [list $h $mh($h)]
+                regsub -all "\n" $mh($h) "\n    " value
+                lappend envelope [list X-TkRat-Original-$h $value]
             }
         }
         foreach header [$msg headers] {
@@ -1531,6 +1603,13 @@ proc ComposeBounceSend {mainW handler} {
             }
         }
         lappend envelope [list message_id [RatGenerateMsgId $mh(role)]]
+
+        lappend envelope [list X-TkRat-Internal-Role $mh(role)]
+        lappend envelope [list X-TkRat-Internal-PGPActions \
+                              [list $mh(pgp_sign) $mh(pgp_encrypt)]]
+        if {[string length $mh(save_to)]} {
+            lappend envelope [list X-TkRat-Internal-Save-To $mh(save_to)]
+        }
 
         set bmsg [RatCreateMessage $mh(role) \
                       [list $envelope \
@@ -2289,7 +2368,7 @@ proc ComposeHandleHEConfigure {w handler pixwidth} {
 		+[$w cget -highlightthickness])}]
     }
     set width [expr {($pixwidth-$hd(borders))/$defaultFontWidth}]
-    if {$width == $hd(width)} {
+    if {$width == $hd(width) || $width < 1} {
 	return
     }
 
@@ -2816,6 +2895,7 @@ proc CmdList {} {
     bind $hd(text) <KeyRelease> "CmdTextCheck $w $id"
     wm protocol $w WM_DELETE_WINDOW "destroy $w"
     bind $hd(list) <Destroy> "CmdClose $w $id"
+    bind $w <Escape> "$w.b.close invoke"
 
     ::tkrat::winctl::SetGeometry cmdList $w $hd(list)
 }
@@ -2946,6 +3026,7 @@ proc ShowGeneratedHeaders {handler} {
     UpdateGH $handler $w.text
 
     bind $w.text <Destroy> "::tkrat::winctl::RecordGeometry showGH $w $w.text"
+    bind $w <Escape> "$w.b.dismiss invoke"
     ::tkrat::winctl::SetGeometry showGH $w $w.text
 }
 
@@ -2961,7 +3042,7 @@ proc ShowGeneratedHeaders {handler} {
 
 proc FixAddress {role al mode} {
     set result {}
-    foreach adr [split $al ,] {
+    foreach adr [RatSplitAdr $al] {
 	set a [RatCreateAddress $adr $role]
 	lappend result [$a get $mode]
 	rename $a ""
@@ -3010,9 +3091,9 @@ proc UpdateGH {handler w args} {
 	}
     }
     set first 1
-    RatAlias list alist
-    foreach a [split [FixAddress $hd(role) \
-			  [RatAlias expand sending $al $hd(role)] mail] ,] {
+    set adr_smtp [RatAlias expand sending $al $hd(role)]
+    set addresses [FixAddress $hd(role) $adr_smtp mail]
+    foreach a [RatSplitAdr $addresses] {
 	if {$first} {
 	    set first 0
 	} else {
@@ -3288,13 +3369,20 @@ proc EditorsEditClosed {handler} {
 
 proc ComposeEEditorPopulate {handler args} {
     upvar \#0 $handler hd
-    global editors
+    global editors t
 
     $hd(eeditm) delete 0 end
     foreach e $editors {
 	$hd(eeditm) add command -label $e \
 		-command "ComposeEEdit $handler [list $e] ; \
 			        set ${handler}(eeditor)(eeditor) [list $e]"
+    }
+    if {[llength $editors] > 0} {
+        set hd(eeditor) [lindex $editors 0]
+        $hd(eeditb) configure -state normal
+    } else {
+        set hd(eeditor) $t(external_editor)
+        $hd(eeditb) configure -state disabled
     }
 }
 
@@ -3404,7 +3492,7 @@ proc UpdateComposeRole {handler} {
 
 proc ComposeCreateMsg {handler {extra_envelope {}}} {
     global composeHeaderList composeAutoHeaderList option t charsetMapping \
-        composeAdrHdrList
+        composeAdrHdrList rat_tmp
     upvar \#0 $handler mh
 
     # Envelope
@@ -3413,7 +3501,8 @@ proc ComposeCreateMsg {handler {extra_envelope {}}} {
 	if {[info exists mh($h)] && [string length $mh($h)]} {
             lappend envelope [list $h $mh($h)]
             if {-1 != [lsearch $composeAdrHdrList $h]} {
-                lappend envelope [list X-TkRat-Original-$h $mh($h)]
+                regsub -all "\n" $mh($h) "\n    " value
+                lappend envelope [list X-TkRat-Original-$h $value]
             }
 	}
     }
@@ -3453,7 +3542,7 @@ proc ComposeCreateMsg {handler {extra_envelope {}}} {
         }
 
         # Find encoding
-        set fn [RatTildeSubst $option(tmp)/rat.[RatGenId]]
+        set fn [RatTildeSubst $rat_tmp/rat.[RatGenId]]
         set fh [open $fn w]
         if {[info exists charsetMapping($p(charset))]} {
             fconfigure $fh -encoding $charsetMapping($p(charset))
@@ -3603,6 +3692,7 @@ proc RatSaveOutgoing {msg folder} {
     grid $w.recipients_l $w.recipients_v -sticky ew
     grid $w.b - -sticky ew
 
+    bind $w <Escape> "$w.b.cancel invoke"
     bind $w.msg <Destroy> "::tkrat::winctl::RecordGeometry saveOutgoing $w"
     wm title $w $t(save_outgoing_failed_title)
     ::tkrat::winctl::SetGeometry saveOutgoing $w

@@ -47,7 +47,6 @@ if $delay {
 }
 
 # Run tests
-# Run tests
 cd $dir
 if {0 < [llength $tests]} {
     set at $tests

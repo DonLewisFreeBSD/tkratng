@@ -125,7 +125,14 @@ RatMessageCmd(ClientData clientData,Tcl_Interp *interp, int objc,
 	}
 	Tcl_SetResult(interp, msgPtr->bodyInfoPtr->cmdName, TCL_STATIC);
 	return TCL_OK;
-    
+
+    } else if (!strcmp(Tcl_GetString(objv[1]), "rerunPGP")) {
+        RatPGPBodyCheck(interp, messageProcInfo, &msgPtr->bodyInfoPtr);
+        Tcl_CreateObjCommand(interp, msgPtr->bodyInfoPtr->cmdName,
+                             RatBodyCmd, (ClientData) msgPtr->bodyInfoPtr,
+                             NULL);
+        return TCL_OK;
+
     } else if (!strcmp(Tcl_GetString(objv[1]), "rawText")) {
 	rPtr = Tcl_NewObj();
 	Tcl_AppendToObj(rPtr,
@@ -423,7 +430,7 @@ RatMessageCmd(ClientData clientData,Tcl_Interp *interp, int objc,
 	}
 
 	defPtr = objv[2];
-        infoPtr = RatGetOpenFolder(interp, defPtr);
+        infoPtr = RatGetOpenFolder(interp, defPtr, 1);
 	if (infoPtr) {
 	    name = msgPtr->name;
             result = RatFolderInsert(interp, infoPtr, 1, &name);
@@ -465,8 +472,8 @@ RatMessageCmd(ClientData clientData,Tcl_Interp *interp, int objc,
 		name = Tcl_GetString(oPtr);
 	    }
 	    if (!name) {
-		struct passwd *passwdPtr = getpwuid(getuid());
-		name = passwdPtr->pw_name;
+                struct passwd *pwPtr = GetPw();
+		name = pwPtr->pw_name;
 	    }
 	    defPtr = Tcl_NewObj();
 	    Tcl_ListObjAppendElement(interp, defPtr, dobjv[0]);
@@ -512,8 +519,7 @@ RatMessageCmd(ClientData clientData,Tcl_Interp *interp, int objc,
 	 * Open a folder and get the stream
 	 */
 	spec = RatGetFolderSpec(interp, defPtr);
-	stream = OpenStdFolder(interp, spec, NULL);
-	if (stream) {
+	if (TCL_OK == OpenStdFolder(interp, spec, NULL, 1, &stream)) {
 	    Tcl_DStringInit(&ds);
 	    RatMessageGet(interp, msgPtr, &ds, flags, sizeof(flags),
 		    date, sizeof(date));
@@ -524,8 +530,7 @@ RatMessageCmd(ClientData clientData,Tcl_Interp *interp, int objc,
 		    Tcl_DStringLength(&ds));
 
 	    RatPurgeFlags(flags, 1);
-	    if (!mail_append_full(stream, spec, flags, date,
-		    &string)){
+	    if (!mail_append_full(stream, spec, flags, date, &string)) {
 		CloseStdFolder(interp, stream);
 		Tcl_SetResult(interp, "mail_append failed", TCL_STATIC);
 		result = TCL_ERROR;
@@ -614,7 +619,7 @@ end_copy:
 	      -1);
 	Tcl_IncrRefCount(oPtr);
 	cmd = RatFrMessageCreate(interp, Tcl_GetString(oPtr),
-				 Tcl_GetCharLength(oPtr), NULL);
+				 strlen(Tcl_GetString(oPtr)), NULL);
 	Tcl_DecrRefCount(oPtr);
 	
 	Tcl_SetResult(interp, cmd, TCL_STATIC);
@@ -637,6 +642,19 @@ end_copy:
 	    return TCL_ERROR;
         }
         return RatMessageDeleteAttachments(interp, msgPtr, objv[2]);
+
+    } else if (!strcmp(Tcl_GetString(objv[1]), "dbinfo_get")) {
+        if (messageProcInfo[msgPtr->type].dbinfoGetProc != NULL) {
+            Tcl_Obj *oPtr;
+            
+            oPtr = (*messageProcInfo[msgPtr->type].dbinfoGetProc)(msgPtr);
+            Tcl_SetObjResult(interp, oPtr);
+            return TCL_OK;
+            
+        } else {
+            return TCL_ERROR;
+        }
+        
     } else {
 	Tcl_AppendResult(interp, "bad option \"", Tcl_GetString(objv[1]),
 			 "\": must be one of header, body, rawText reply, get"
@@ -1212,6 +1230,8 @@ RatBodyCmd(ClientData clientData, Tcl_Interp *interp, int objc,
 	case RAT_UNCHECKED:	status = "pgp_unchecked"; break;
 	case RAT_SIG_GOOD:	status = "pgp_good"; break;
 	case RAT_SIG_BAD:	status = "pgp_bad"; break;
+	case RAT_SIG_ERR:	status = "pgp_err"; break;
+	case RAT_PGP_ABORT:	status = "pgp_abort"; break;
 	}
 	Tcl_SetResult(interp, status, TCL_STATIC);
 	return TCL_OK;
@@ -1850,7 +1870,8 @@ RatWrapMessage(Tcl_Interp *interp, Tcl_Obj *textPtr)
 		Tcl_GetStringResult(interp));
     }
 
-    for (cPtr = Tcl_GetString(textPtr); *cPtr;) {
+    cPtr = Tcl_GetString(textPtr);
+    while (*cPtr) {
 	/*
 	 * Check if this line needs to be wrapped
 	 */
@@ -1905,7 +1926,7 @@ RatWrapMessage(Tcl_Interp *interp, Tcl_Obj *textPtr)
         if (citPtr
             && Tcl_RegExpExec(interp, bullexp, citPtr+citLength,
                               citPtr+citLength)
-            && (Tcl_RegExpRange(bullexp, 0, &s, &e), 1)
+            && (Tcl_RegExpRange(bullexp, 1, &s, &e), 1)
             && e-citPtr < sizeof(citbuf)) {
             strncpy((char*)citbuf, citPtr, e-citPtr);
             for (i=citLength; i<e-s+citLength; i++) {

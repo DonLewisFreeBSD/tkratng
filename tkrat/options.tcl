@@ -244,9 +244,6 @@ proc OptionsInit {} {
     # How long log messages should show (in ms)
     set option(log_timeout) 3
 
-    # The font size we user
-    set option(fontsize) 12
-
     # Folder window key combination
     set option(folder_key_compose) <Key-m>
     set option(folder_key_close) {<Control-Key-w> <Control-Key-c>}
@@ -473,8 +470,11 @@ proc OptionsInit {} {
     # Regexp for finding citation marks
     set option(citexp) {^[ 	]*(([a-zA-Z0-9]+>[ 	]*)|(>+[ 	]*)+)?}
 
+    # Regexp for finding indention
+    set option(indexp) "^(\[ \t\]*)\[^ \t*.-\]"
+
     # Regexp for finding bullet characters
-    set option(bullexp) {^(([0-9]+(\.[0-9]+)*\.?\)?)|[-*+o])[ 	]*}
+    set option(bullexp) "^(\[ \t\]*\[\\d*.-\]*\\)?\[ \t\]+)\[^ \t\]"
 
     # Should we wrap cited text automatically
     set option(wrap_cited) 0
@@ -491,7 +491,7 @@ proc OptionsInit {} {
 
     # Regular expression which identifies the Re: part of subjects
     # will be applied with -nocase
-    set option(re_regexp) {re:|sv:}
+    set option(re_regexp) {re:|sv:|aw:}
 
     # Printing defaults
     set option(print_pretty) 1

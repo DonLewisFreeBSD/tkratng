@@ -127,7 +127,10 @@ MailcapReload(Tcl_Interp *interp)
 		    (char**)ckrealloc(textBlock,allocTextBlocks*sizeof(char*));
 	}
 	data = textBlock[numTextBlocks++] = (char*)ckalloc(sbuf.st_size+1);
-	read(fd, data, sbuf.st_size);
+	if (sbuf.st_size != SafeRead(fd, data, sbuf.st_size)) {
+            close(fd);
+            continue;
+        }
 	close(fd);
 	data[sbuf.st_size] = '\0';
 

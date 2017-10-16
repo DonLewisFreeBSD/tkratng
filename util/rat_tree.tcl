@@ -34,7 +34,7 @@ proc rat_tree::create {win args} {
     variable dy
 
     set id [incr idCnt]
-    upvar #0 rat_tree::state_$id ts
+    upvar \#0 rat_tree::state_$id ts
 
     # Handle arguments
     set a(-sizeid) {}
@@ -87,7 +87,7 @@ proc rat_tree::create {win args} {
 	set ts(item,$top($id),$v) {}
     }
 
-    upvar #0 rat_tree::state_n$top($id)(contents) contents
+    upvar \#0 rat_tree::state_n$top($id)(contents) contents
     set contents {}
 
     proc tree$id {cmd args} "treecmd $id \$cmd \$args"
@@ -105,7 +105,7 @@ proc rat_tree::create {win args} {
 # tid - Tree id
 
 proc rat_tree::destroy {tid} {
-    upvar #0 rat_tree::state_$tid ts
+    upvar \#0 rat_tree::state_$tid ts
     variable top
 
     foreach cmd [info commands tree${tid}*] {
@@ -130,7 +130,7 @@ proc rat_tree::destroy {tid} {
 #      CMD ID getnumchanges
 
 proc rat_tree::treecmd {tid cmd alist} {
-    upvar #0 rat_tree::state_$tid ts
+    upvar \#0 rat_tree::state_$tid ts
     variable top
 
     # Possibly locate item
@@ -185,7 +185,7 @@ proc rat_tree::treecmd {tid cmd alist} {
 	delete {
 	    set nodes [uplevel #0 "info vars rat_tree::state_n*"]
 	    foreach n $nodes {
-		upvar #0 $n sn
+		upvar \#0 $n sn
 		if {-1 != [set i [lsearch -exact $sn(contents) $iid]]} {
 		    set sn(contents) [lreplace $sn(contents) $i $i]
 		    break
@@ -223,8 +223,8 @@ proc rat_tree::treecmd {tid cmd alist} {
 
 proc rat_tree::nodecmd {tid nid cmd alist} {
     variable idCnt
-    upvar #0 rat_tree::state_n$nid s
-    upvar #0 rat_tree::state_$tid ts
+    upvar \#0 rat_tree::state_n$nid s
+    upvar \#0 rat_tree::state_$tid ts
 
     switch -- $cmd {
 	add {
@@ -239,7 +239,7 @@ proc rat_tree::nodecmd {tid nid cmd alist} {
 	    array set a [lrange $alist 1 end]
 	    set id [incr idCnt]
 	    if {"folder" == $type} {
-		upvar #0 rat_tree::state_n${id}(contents) contents
+		upvar \#0 rat_tree::state_n${id}(contents) contents
 		set contents {}
 		proc tree${tid}_$id {cmd args} \
 			"nodecmd $tid $id \$cmd \$args"
@@ -306,8 +306,8 @@ proc rat_tree::nodecmd {tid nid cmd alist} {
 # nid - Node to look in
 
 proc rat_tree::getpos {id tid nid} {
-    upvar #0 rat_tree::state_$tid ts
-    upvar #0 rat_tree::state_n$nid s
+    upvar \#0 rat_tree::state_$tid ts
+    upvar \#0 rat_tree::state_n$nid s
 
     set pos 0
     foreach i $s(contents) {
@@ -334,8 +334,8 @@ proc rat_tree::getpos {id tid nid} {
 
 proc rat_tree::redraw {tid} {
     variable top
-    upvar #0 rat_tree::state_$tid ts
-    upvar #0 rat_tree::state_n$top($tid) ns
+    upvar \#0 rat_tree::state_$tid ts
+    upvar \#0 rat_tree::state_n$top($tid) ns
 
     $ts(c) delete all
     set ts(y) 0
@@ -366,8 +366,8 @@ proc rat_tree::redraw {tid} {
 # parents - List of parents
 
 proc rat_tree::draw_node {tid nid x parents} {
-    upvar #0 rat_tree::state_n$nid ns
-    upvar #0 rat_tree::state_$tid ts
+    upvar \#0 rat_tree::state_n$nid ns
+    upvar \#0 rat_tree::state_$tid ts
 
     set index 1
     set c $ts(c)
@@ -438,7 +438,7 @@ proc rat_tree::draw_node {tid nid x parents} {
 # tid - Tree id
 
 proc rat_tree::draw_selected {tid} {
-    upvar #0 rat_tree::state_$tid ts
+    upvar \#0 rat_tree::state_$tid ts
 
     if {"" == $ts(selected)} {
 	return
@@ -465,7 +465,7 @@ proc rat_tree::draw_selected {tid} {
 # i   - Index
 
 proc rat_tree::node_state_toggle {tid nid i} {
-    upvar #0 rat_tree::state_$tid ts
+    upvar \#0 rat_tree::state_$tid ts
 
     if {"open" == $ts(item,$i,state)} {
 	set ts(item,$i,state) closed
@@ -485,7 +485,7 @@ proc rat_tree::node_state_toggle {tid nid i} {
 # x, y - Select-coordinates
 
 proc rat_tree::preselect {tid w x y} {
-    upvar #0 rat_tree::state_$tid ts
+    upvar \#0 rat_tree::state_$tid ts
 
     # Find coordinates in canvas
     set cx [$w canvasx $x]
@@ -520,7 +520,7 @@ proc rat_tree::preselect {tid w x y} {
 # tid  - Tree id
 
 proc rat_tree::postselect {tid} {
-    upvar #0 rat_tree::state_$tid ts
+    upvar \#0 rat_tree::state_$tid ts
 
     if {"" == $ts(selid)} { return}
 
@@ -549,8 +549,8 @@ proc rat_tree::postselect {tid} {
 		redraw $tid
 		return
 	    }
-	    upvar #0 rat_tree::state_n$old_node_id old_node
-	    upvar #0 rat_tree::state_n$new_node_id new_node
+	    upvar \#0 rat_tree::state_n$old_node_id old_node
+	    upvar \#0 rat_tree::state_n$new_node_id new_node
 	    set p [lsearch $old_node(contents) $ts(selid)]
 	    if {$old_node_id == $new_node_id \
 		    && $p > [lindex $ts(move,dest) 1]} {
@@ -583,7 +583,7 @@ proc rat_tree::postselect {tid} {
 # x, y - Coordinates
 
 proc rat_tree::move {tid w x y} {
-    upvar #0 rat_tree::state_$tid ts
+    upvar \#0 rat_tree::state_$tid ts
 
     # Should we do this?
     if {0 == [llength $ts(move,dropin)]} {return}
@@ -663,7 +663,7 @@ proc rat_tree::move {tid w x y} {
 # tid  - Tree id
 
 proc rat_tree::configure_event {tid} {
-    upvar #0 rat_tree::state_$tid ts
+    upvar \#0 rat_tree::state_$tid ts
 
     set bbox [$ts(c) bbox all]
     # Check if we need vertical scrollbar

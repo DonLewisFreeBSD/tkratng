@@ -185,6 +185,10 @@ typedef void (RatSetInfoProc) (Tcl_Interp *interp, ClientData clientData,
 typedef char* (RatCreateProc) (RatFolderInfoPtr infoPtr,
 	Tcl_Interp *interp, int index);
 typedef int (RatSyncProc) (RatFolderInfoPtr infoPtr, Tcl_Interp *interp);
+typedef Tcl_Obj* (RatDbInfoGetProc) (RatFolderInfoPtr infoPtr);
+typedef int (RatDbInfoSetProc) (Tcl_Interp *interp, RatFolderInfoPtr infoPtr,
+                                Tcl_Obj *indexes, Tcl_Obj *keywords,
+                                Tcl_Obj *ex_date, Tcl_Obj *ex_type);
 
 /*
  * An instance of the structure below is created for each folder. It is then
@@ -196,6 +200,7 @@ typedef struct RatFolderInfo {
 				 * may be ckfree():ed) */
     char *type;			/* Type of folder */
     char *ident_def;		/* Definition id of folder */
+    int append_only;            /* Is this open in appeld-only mode? */
     int refCount;		/* Reference count (<=0 means closing) */
     SortOrder sortOrder;	/* Sort order for folder */
     Tcl_Obj *role;		/* Role to use */
@@ -230,6 +235,8 @@ typedef struct RatFolderInfo {
     RatSetInfoProc *setInfoProc;
     RatCreateProc *createProc;
     RatSyncProc *syncProc;
+    RatDbInfoGetProc *dbinfoGetProc;
+    RatDbInfoSetProc *dbinfoSetProc;
     ClientData private, private2;  /* Data private for each folder type */
     struct RatFolderInfo *nextPtr; /* Pointer to next folder (if any)*/
 } RatFolderInfo;
@@ -275,7 +282,9 @@ typedef struct MessageInfo {
 typedef enum { RAT_UNSIGNED,
 	       RAT_UNCHECKED,
 	       RAT_SIG_GOOD,
-	       RAT_SIG_BAD } RatSigStatus;
+	       RAT_SIG_BAD,
+	       RAT_SIG_ERR,
+               RAT_PGP_ABORT} RatSigStatus;
 
 /*
  * The ClientData for each bodypart entity
@@ -312,6 +321,7 @@ typedef char* (RatFetchBodyProc) (BodyInfo *bodyPtr, unsigned long *lengthPtr);
 typedef void (RatBodyDeleteProc) (BodyInfo *bodyPtr);
 typedef MESSAGECACHE* (RatGetInternalDateProc) (Tcl_Interp *interp,
 	MessageInfo *msgPtr);
+typedef Tcl_Obj* (RatMsgDbInfoProc) (MessageInfo *msgPtr);
 
 /*
  * The following structure defines which functions to call for to
@@ -329,6 +339,7 @@ typedef struct {
     RatFetchBodyProc *fetchBodyProc;
     RatBodyDeleteProc *bodyDeleteProc;
     RatGetInternalDateProc *getInternalDateProc;
+    RatMsgDbInfoProc *dbinfoGetProc;
 } MessageProcInfo;
 
 /*
@@ -356,8 +367,10 @@ typedef enum {
 } RatManagementAction;
 
 /* ratFolder.c (note that this file also exports functions in rat.h) */
-extern RatFolderInfo *RatGetOpenFolder(Tcl_Interp *interp, Tcl_Obj *defPtr);
-extern RatFolderInfo* RatOpenFolder(Tcl_Interp *interp, Tcl_Obj *def);
+extern RatFolderInfo *RatGetOpenFolder(Tcl_Interp *interp, Tcl_Obj *defPtr,
+                                       int append_only);
+extern RatFolderInfo* RatOpenFolder(Tcl_Interp *interp, int append_only,
+                                    Tcl_Obj *def);
 extern char* RatFolderCmdGet(Tcl_Interp *interp, RatFolderInfo *infoPtr,
 			     int index);
 extern void RatFolderCmdSetFlag(Tcl_Interp *interp, RatFolderInfo *infoPtr,
@@ -379,8 +392,10 @@ extern Tcl_Obj *RatExtractRef(CONST84 char *text);
 
 /* ratStdFolder.c */
 extern int RatStdFolderInit(Tcl_Interp *interp);
-extern RatFolderInfo *RatStdFolderCreate(Tcl_Interp *interp, Tcl_Obj *defPtr);
-extern MAILSTREAM* OpenStdFolder(Tcl_Interp *interp, char *spec, void *stdPtr);
+extern RatFolderInfo *RatStdFolderCreate(Tcl_Interp *interp, int append_only,
+                                         Tcl_Obj *defPtr);
+extern int OpenStdFolder(Tcl_Interp *interp, char *spec, void *voidPtr,
+                         int append_only, MAILSTREAM **stream_out);
 extern void CloseStdFolder(Tcl_Interp *interp, MAILSTREAM *stream);
 extern int RatStdManageFolder(Tcl_Interp *interp, RatManagementAction op,
 			      int mbx, Tcl_Obj *fptr);
@@ -388,14 +403,16 @@ void RatStdCheckNet(Tcl_Interp *interp);
 
 /* ratDbFolder.c */
 extern int RatDbFolderInit (Tcl_Interp *interp);
-extern RatFolderInfo *RatDbFolderCreate(Tcl_Interp *interp, Tcl_Obj *defPtr);
+extern RatFolderInfo *RatDbFolderCreate(Tcl_Interp *interp, int append_only,
+                                        Tcl_Obj *defPtr);
 extern RatInfoProc Db_InfoProc;
 extern Tcl_Obj* Db_InfoProcInt(Tcl_Interp *interp, RatFolderInfo *infoPtr,
 	RatFolderInfoType type, int rIndex);
 
 /* ratDisFolder.c */
 extern int RatDisFolderInit (Tcl_Interp *interp);
-extern RatFolderInfo *RatDisFolderCreate(Tcl_Interp *interp, Tcl_Obj *defPtr);
+extern RatFolderInfo *RatDisFolderCreate(Tcl_Interp *interp, int append_only,
+                                         Tcl_Obj *defPtr);
 extern char* RatDisFolderDir(Tcl_Interp *interp, Tcl_Obj *defPtr);
 extern int RatDisOnOffTrans(Tcl_Interp *interp, int newState);
 extern void RatDisManageFolder(Tcl_Interp *interp, RatManagementAction op,

@@ -19,7 +19,7 @@ ETAGS = @etags@
 all: build
 
 build:
-	if test -e imap/OSTYPE ; then \
+	if test -r imap/OSTYPE ; then \
 	    if test "Makefile" = `ls -t Makefile imap/OSTYPE|head -1` ; then \
 		cd imap; ${MAKE} clean; \
 	    fi; \

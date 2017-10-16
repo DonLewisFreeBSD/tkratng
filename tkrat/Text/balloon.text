@@ -2965,20 +2965,6 @@ a editar e '%x' pelas coordenadas do canto superior esquerdo da
 janela a abrir. A janela de redacção permanecerá bloqueada enquanto
 o editor externo estiver em execução}
 
-label pref_always_editor
-sv {Om denna inställning är sann så kommer
-alltid den externa editorn att användas.}
-en {If true, the external editor will always be used to edit messages}
-de {Mit dieser Option legen Sie fest, ob der externe Editor immer
-zum Schreiben von Nachrichten verwendet werden soll.}
-fr {Si vrai, l'éditeur externe sera toujours
-utilisé pour rédiger de nouveaux messages.}
-sr {Ako je potvrðeno, za rad sa pismima
-æe se uvek koristiti spoljni editor}
-pl {Je¶li tak, edytor zewnêtrzny bêdzie u¿ywany zawsze}
-pt {Se seleccionado, o editor externo será sempre
-utilizado para redigir novas mensagens}
-
 label pref_attribution
 sv {Denna raden (om den är definierad) läggs in först i varje svar.
 Raden har samma syntax som "Listformat"-inställningen}
@@ -5553,3 +5539,47 @@ label find_prev
 sv {Hitta tidigare}
 en {Find previous}
 de {Rückwärts suchen.}
+
+label pref_always_editor
+sv {Om denna inställning är sann så kommer
+alltid den första externa editorn att användas.}
+en {If true, the first external editor will always be used to edit messages}
+#de {Mit dieser Option legen Sie fest, ob der externe Editor immer
+#zum Schreiben von Nachrichten verwendet werden soll.}
+#fr {Si vrai, l'éditeur externe sera toujours
+#utilisé pour rédiger de nouveaux messages.}
+#sr {Ako je potvrðeno, za rad sa pismima
+#æe se uvek koristiti spoljni editor}
+#pl {Je¶li tak, edytor zewnêtrzny bêdzie u¿ywany zawsze}
+#pt {Se seleccionado, o editor externo será sempre
+#utilizado para redigir novas mensagens}
+
+label pgp_err
+sv {Misslyckades att verifiera signaturen}
+en {Failed to verify the signature}
+
+label pgp_abort
+sv {PGP operationen avbröts.
+Tryck för att försöka igen}
+en {PGP operation was aborted.
+Press to retry}
+
+label dbinfo
+en {Show information about how the message(s) are stored in the database}
+sv {Visa information om hur meddelandet är sparat i databasen}
+
+label reset
+en {Reset to default values}
+sv {Återställ till standardvärden}
+
+label dbinfo_apply_msg
+en {Apply these values to the current message}
+sv {Applicera dessa värden på det aktuella meddelandet}
+
+label dbinfo_apply_folder
+en {Apply these values to the current group of messages}
+sv {Applicera dessa värden på den nuvarande gruppen av brev}
+
+label dbinfo_apply_first_msg
+en {Apply these values to the current group of messages}
+sv {Applicera dessa värden på den nuvarande gruppen av brev}

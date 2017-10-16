@@ -1,6 +1,6 @@
-.TH TkRat 1 "June 5 2002" "TkRat 2.1 distribution"
+.TH TkRat 1 "July 9 2006" "TkRat 2.2 distribution"
 .SH NAME
-tkrat \- a window-based Mail User Agent
+tkrat \- a graphical Mail User Agent
 .SH SYNOPSIS
 .B tkrat
 .RB [ "\-confdir \fIdirectory\fP" ]
@@ -10,6 +10,7 @@ tkrat \- a window-based Mail User Agent
 .RB [ \-compose " [" \fIpredef\fP  ]]
 .RB [ \-netsync " [" \fIset\fP  ]]
 .RB [ \-blank ]
+.RB [ mailto:\fImailto_link\fP ]
 .SH DESCRIPTION
 TkRat is a graphical Mail User Agent (MUA) which is based on the c-client and
 tcl/tk toolkits. Its primary purpose is to allow the user to read and send
@@ -88,6 +89,11 @@ Runs the command specified by the user
 .B \-blank
 Opens a blank folder window. This is useful if you want to start without
 opening any folders.
+.TP
+.B [ mailto:\fImailto_link\fP ]
+Opens a compose window with the relevant parts filled in from the
+mailto link. The mailto link should follow RFC2368, which is what most
+browsers produce.
 .SH EXAMPLES
 Three different ways of opening the users incoming mailbox:
 .RS
@@ -96,14 +102,20 @@ Three different ways of opening the users incoming mailbox:
 .B tkrat -open
 .PP
 .B tkrat -open INBOX
-.I This assumes that the inbox is named \fBINBOX\fP in the users list
-.I of folders
+.RE
+.PP
+This assumes that the inbox is named \fBINBOX\fP in the users list
+of folders
 .RE
 .PP
 To start composing a message to \fBfoo@bar.com\fP with the subject
 \fBGurka i lungan\fP use:
 .RS
 \fBtkrat -compose "to foo@bar.com subject 'Gurka i lungan'"\fP
+.RE
+or
+.RS
+\fBtkrat mailto:foo@bar.com?subject=Gurka%20i%20lungan\fP
 .RE
 .SH FILES
 .I $HOME/.ratatosk

@@ -102,6 +102,7 @@ proc ShowSource {body} {
     $w.text.text insert end $data
     $w.text.text configure -state disabled
 
+    bind $w <Escape> "$w.dismiss invoke"
     bind $w.text.text <Destroy> \
         "::tkrat::winctl::RecordGeometry showSource $w $w.text.text"
     ::tkrat::winctl::SetGeometry showSource $w $w.text.text

@@ -9,6 +9,7 @@
         SHELL = /bin/sh
 
 # Installation directories
+   datarootdir = @datarootdir@
         prefix = @prefix@
    exec_prefix = @exec_prefix@
        MAN_DIR = @mandir@
@@ -45,7 +46,8 @@ INSTALL_PREFIX = @INSTALL_PREFIX@
               preferences.tcl print.tcl show.tcl source.tcl start.tcl \
               vfolder.tcl vfolderdef.tcl watcher.tcl winctl.tcl html.tcl \
               mime.tcl vfolderwizard.tcl firstwizard.tcl addrlist.tcl \
-	      delattachments.tcl .messages/languages.tcl @TEXTFILES@
+	      delattachments.tcl group.tcl .messages/languages.tcl html3.tcl \
+	      @TEXTFILES@
 
   LANGUAGES = .messages/languages.tcl
     LANGSRC = Text/balloon.text Text/changes.text Text/help.text \

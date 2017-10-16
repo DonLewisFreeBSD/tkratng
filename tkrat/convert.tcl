@@ -791,7 +791,7 @@ proc UpgradeVFolderList7to8  {} {
 # Arguments:
 
 proc FixOldOptions {} {
-    upvar #0 option newOption
+    upvar \#0 option newOption
 
     source $newOption(ratatosk_dir)/ratatoskrc.gen
     set changed 0
@@ -928,17 +928,17 @@ proc ConvertHold {dir var} {
 # mgh - handler of the extracted message
 
 proc ConvertHoldMsg {mgh} {
-    global charsetMapping option t composeHeaderList
-    upvar #0 $mgh mh
+    global charsetMapping option t composeHeaderList rat_tmp
+    upvar \#0 $mgh mh
 
     if {[info exists mh(body)]} {
-	upvar #0 $mh(body) bh
+	upvar \#0 $mh(body) bh
 	if {![string compare "$bh(type)/$bh(subtype)" text/plain]} {
 	    set edit $mh(body)
 	    set children {}
 	} elseif {![string compare "$bh(type)" multipart]} {
 	    set children $bh(children)
-	    upvar #0 [lindex $children 0] ch1
+	    upvar \#0 [lindex $children 0] ch1
 	    if {![string compare "$ch1(type)/$ch1(subtype)" text/plain]} {
 		set edit [lindex $children 0]
 		set children [lreplace $children 0 0]
@@ -954,7 +954,7 @@ proc ConvertHoldMsg {mgh} {
 	    set mh(pgp_encrypt) $bh(pgp_encrypt)
 	}
 	if {[string length $edit]} {
-	    upvar #0 $edit bp
+	    upvar \#0 $edit bp
 	    set fh [open $bp(filename) r]
 	    if {[info exists bp(parameter)]} {
 		foreach lp $bp(parameter) {
@@ -1028,7 +1028,7 @@ proc ConvertHoldMsg {mgh} {
     }
 
     # Find encoding
-    set fn [RatTildeSubst $option(tmp)/rat.[RatGenId]]
+    set fn [RatTildeSubst $rat_tmp/rat.[RatGenId]]
     set fh [open $fn w]
     if {[info exists charsetMapping($p(charset))]} {
 	fconfigure $fh -encoding $charsetMapping($p(charset))
@@ -1214,7 +1214,7 @@ proc NewVersionUpdate {} {
 	    && [info exists option(fontsize)]} {
 
 	if {$option(fontsize) != 12} {
-	    foreach o {prop_norm prop_light fixed_norm fixed_bold} {
+	    foreach o {prop_norm fixed_norm} {
 		set option($o) [lreplace $option($o) 2 2 $option(fontsize)]
 	    }
 	}
@@ -1315,7 +1315,8 @@ proc NewVersionUpdate {} {
     }
 
     # Adjust size of norm italic font
-    if {$option(last_version_date) < 20030213} {
+    if {$option(last_version_date) < 20030213 
+        && [info exists option(fixed_italic)]} {
 	set option(fixed_italic) \
 	    [lreplace $option(fixed_italic) 2 2 [lindex $option(fixed_norm) 2]]
     }

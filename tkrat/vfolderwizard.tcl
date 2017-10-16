@@ -160,6 +160,7 @@ proc VFolderWizardTestImport {id} {
     grid columnconfigure $w 0 -weight 1
     grid columnconfigure $w 1 -weight 1
     grid rowconfigure $w 2 -weight 1
+    bind $w <Escape> "$w.close invoke"
     ::tkrat::winctl::SetGeometry testImportResult $w $w.f.list
     bind $w.f.list <Destroy> \
         "::tkrat::winctl::RecordGeometry testImportResult $w $w.f.list"
@@ -809,6 +810,8 @@ proc VFolderWizardPOP {id {mode wizard}} {
     # Defaults
     if {![info exists hd(user)]} {
 	set hd(user) $env(USER)
+    }
+    if {![info exists hd(method)]} {
 	set hd(method) tcp_default
 	set hd(ssh_cmd) $option(ssh_template)
 	set hd(priv) tls
@@ -897,10 +900,11 @@ proc VFolderWizardPOP {id {mode wizard}} {
 	    -command "VFolderWizardPOPDone $id"
 	rat_scrollframe::recalc $hd(bodym)
 	focus $hd(body).name_e
+        SetupShortcuts [list $hd(next) $hd(prev)]
+        $hd(prev) configure -state normal
     } else {
 	focus $hd(body).host_e
     }
-    SetupShortcuts [list $hd(next) $hd(prev)]
 
     foreach w [list $hd(body).host_e $hd(body).user_e $hd(body).ssh_e \
                   $hd(body).conn_tcpcust.e] {
@@ -908,7 +912,6 @@ proc VFolderWizardPOP {id {mode wizard}} {
 	bind $w <Return> "VFolderWizardServerCheck $id"
     }
     VFolderWizardServerCheck $id
-    $hd(prev) configure -state normal
 }
 
 proc VFolderWizardPOPDone {id} {

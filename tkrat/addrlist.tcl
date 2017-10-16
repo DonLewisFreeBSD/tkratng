@@ -153,6 +153,28 @@ proc AddrListHandleDestroy {w} {
     unset hd
 }
 
+# AddrListAlias --
+#
+# Get matching aliases
+#
+# Arguments:
+# match - String to match
+# max   - Maximum number of entries to return
+
+proc AddrListAlias {match max} {
+    RatAlias list aliases nocase
+    set result {}
+    foreach n [lrange [array names aliases "$match*"] 0 [expr $max - 1]] {
+        set content [lindex $aliases($n) 2]
+        if {-1 != [string first "," $content]} {
+            lappend result $content
+        } else {
+            lappend result "[lindex $aliases($n) 1] <$content>"
+        }
+    }
+    return $result
+}
+
 # AddrListHandleKeyRelease --
 #
 # Handle KeyRelease events
@@ -199,6 +221,12 @@ proc AddrListHandleKeyRelease {w} {
     }
     set matches [GetMatchingAddrs $addr \
                      $option(automplete_addr_num_suggestions)]
+    set rem [expr $option(automplete_addr_num_suggestions) - [llength $matches]]
+    if {$rem > 0} {
+        foreach a [AddrListAlias $addr $rem] {
+            lappend matches $a
+        }
+    }
 
     if {0 == [llength $matches]} {
         if {[info exists hd(w)]} {
@@ -225,7 +253,7 @@ proc AddrListHandleKeyRelease {w} {
     foreach m $matches {
         $hd(list) insert end $m
     }
-    if {[llength $matches] > 10} {
+    if {[$hd(list) size] > 10} {
         $hd(list) configure -height 10
         if {![winfo ismapped $hd(scroll)]} {
             pack $hd(scroll) -side right -fill y

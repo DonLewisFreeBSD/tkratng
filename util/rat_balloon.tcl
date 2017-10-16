@@ -86,7 +86,7 @@ proc rat_balloon::Event {w y} {
     variable afterID
     variable last
     variable ignore
-    upvar #0 $winsVar wins
+    upvar \#0 $winsVar wins
     global option
 
     if {$ignore} {
@@ -133,8 +133,8 @@ proc rat_balloon::Show {w {i {}}} {
     variable last_text
     variable winsVar
     variable textsVar
-    upvar #0 $winsVar wins
-    upvar #0 $textsVar texts
+    upvar \#0 $winsVar wins
+    upvar \#0 $textsVar texts
 
     if {[string compare {} $i]} {
 	set text $texts($wins($w,$i))

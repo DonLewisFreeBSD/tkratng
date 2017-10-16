@@ -20,7 +20,7 @@
 #	files by clicking on the file icons or by entering a filename
 #	in the "Filename:" entry.
 #
-# RCS: @(#) $Id: rat_fbox.tcl,v 1.33 2005-07-03 19:04:05 maf Exp $
+# RCS: @(#) $Id: rat_fbox.tcl,v 1.36 2006/07/30 10:09:26 maf Exp $
 #
 # Copyright (c) 1994-1998 Sun Microsystems, Inc.
 #
@@ -50,7 +50,7 @@ namespace eval rat_fbox {
 #	Creates an IconList widget.
 #
 proc ratIconList {w args} {
-    upvar #0 $w data
+    upvar \#0 $w data
 
     ratIconList_Config $w $args
     ratIconList_Create $w
@@ -62,7 +62,7 @@ proc ratIconList {w args} {
 #	line arguments.
 #
 proc ratIconList_Config {w argList} {
-    upvar #0 $w data
+    upvar \#0 $w data
 
     # 1: the configuration specs
     #
@@ -83,7 +83,7 @@ proc ratIconList_Config {w argList} {
 #	operations.
 #
 proc ratIconList_Create {w} {
-    upvar #0 $w data
+    upvar \#0 $w data
     global tklead
 
     frame $w
@@ -148,7 +148,7 @@ proc ratIconList_Create {w} {
 # w -		The IconList window.
 #
 proc ratIconList_AutoScan {w} {
-    upvar #0 $w data
+    upvar \#0 $w data
     global ratPriv
 
     if {![winfo exists $w]} return
@@ -178,8 +178,8 @@ proc ratIconList_AutoScan {w} {
 # state.
 #
 proc ratIconList_DeleteAll {w} {
-    upvar #0 $w data
-    upvar #0 ${w}_itemList itemList
+    upvar \#0 $w data
+    upvar \#0 ${w}_itemList itemList
 
     $data(canvas) delete all
     catch {unset data(selected)}
@@ -200,9 +200,9 @@ proc ratIconList_DeleteAll {w} {
 # Adds an icon into the IconList with the designated image and text
 #
 proc ratIconList_Add {w image text} {
-    upvar #0 $w data
-    upvar #0 ${w}_itemList itemList
-    upvar #0 ${w}_textList textList
+    upvar \#0 $w data
+    upvar \#0 ${w}_itemList itemList
+    upvar \#0 ${w}_textList textList
 
     set iTag [$data(canvas) create image 0 0 -image $image -anchor nw]
     set tTag [$data(canvas) create text  0 0 -text  $text  -anchor nw \
@@ -238,7 +238,7 @@ proc ratIconList_Add {w image text} {
 # Places the icons in a column-major arrangement.
 #
 proc ratIconList_Arrange {w} {
-    upvar #0 $w data
+    upvar \#0 $w data
 
     if {![info exists data(list)]} {
 	if {[info exists data(canvas)] && [winfo exists $data(canvas)]} {
@@ -328,7 +328,7 @@ proc ratIconList_Arrange {w} {
 # or pressing the Return key).
 #
 proc ratIconList_Invoke {w} {
-    upvar #0 $w data
+    upvar \#0 $w data
 
     if {$data(-command) != "" && [info exists data(selected)]} {
 	uplevel #0 $data(-command)
@@ -340,8 +340,8 @@ proc ratIconList_Invoke {w} {
 #	If the item is not (completely) visible, scroll the canvas so that
 #	it becomes visible.
 proc ratIconList_See {w rTag} {
-    upvar #0 $w data
-    upvar #0 ${w}_itemList itemList
+    upvar \#0 $w data
+    upvar \#0 ${w}_itemList itemList
 
     if {$data(noScroll)} {
 	return
@@ -389,15 +389,15 @@ proc ratIconList_See {w rTag} {
 }
 
 proc ratIconList_SelectAtXY {w x y} {
-    upvar #0 $w data
+    upvar \#0 $w data
 
     ratIconList_Select $w [$data(canvas) find closest \
 	    [$data(canvas) canvasx $x] [$data(canvas) canvasy $y]]
 }
 
 proc ratIconList_Select {w rTag {callBrowse 1}} {
-    upvar #0 $w data
-    upvar #0 ${w}_itemList itemList
+    upvar \#0 $w data
+    upvar \#0 ${w}_itemList itemList
 
     if {![info exists itemList($rTag)]} {
 	return
@@ -424,7 +424,7 @@ proc ratIconList_Select {w rTag {callBrowse 1}} {
 }
 
 proc ratIconList_Unselect {w} {
-    upvar #0 $w data
+    upvar \#0 $w data
 
     if {[info exists data(rect)]} {
 	$data(canvas) delete $data(rect)
@@ -439,7 +439,7 @@ proc ratIconList_Unselect {w} {
 # Returns the selected item
 #
 proc ratIconList_Get {w} {
-    upvar #0 $w data
+    upvar \#0 $w data
 
     if {[info exists data(selected)]} {
 	return $data(selected)
@@ -450,7 +450,7 @@ proc ratIconList_Get {w} {
 
 
 proc ratIconList_Btn1 {w x y} {
-    upvar #0 $w data
+    upvar \#0 $w data
 
     focus $data(canvas)
     ratIconList_SelectAtXY $w $x $y
@@ -467,7 +467,7 @@ proc ratIconList_Motion1 {w x y} {
 }
 
 proc ratIconList_Double1 {w x y} {
-    upvar #0 $w data
+    upvar \#0 $w data
 
     if {[string compare $data(curItem) {}]} {
 	ratIconList_Invoke $w
@@ -487,7 +487,7 @@ proc ratIconList_Leave1 {w x y} {
 }
 
 proc ratIconList_FocusIn {w} {
-    upvar #0 $w data
+    upvar \#0 $w data
 
     if {![info exists data(list)]} {
 	return
@@ -507,7 +507,7 @@ proc ratIconList_FocusIn {w} {
 # amount -	+1 to move down one item, -1 to move back one item.
 #
 proc ratIconList_UpDown {w amount} {
-    upvar #0 $w data
+    upvar \#0 $w data
 
     if {![info exists data(list)]} {
 	return
@@ -538,7 +538,7 @@ proc ratIconList_UpDown {w amount} {
 # amount -	+1 to move right one column, -1 to move left one column.
 #
 proc ratIconList_LeftRight {w amount} {
-    upvar #0 $w data
+    upvar \#0 $w data
 
     if {![info exists data(list)]} {
 	return
@@ -580,8 +580,8 @@ proc ratIconList_KeyPress {w key} {
 }
 
 proc ratIconList_Goto {w text} {
-    upvar #0 $w data
-    upvar #0 ${w}_textList textList
+    upvar \#0 $w data
+    upvar \#0 ${w}_textList textList
     global ratPriv
     
     if {![info exists data(list)]} {
@@ -654,7 +654,7 @@ proc ratIconList_Reset {w} {
 proc rat_fbox::run {args} {
     variable state
     set dataName __rat_filedialog
-    upvar #0 $dataName data
+    upvar \#0 $dataName data
 
     rat_fbox::config $dataName $args
 
@@ -711,10 +711,23 @@ proc rat_fbox::run {args} {
 	$data(prevMenuLab) config -state disabled
     }
 
+    # Dialog boxes should be transient with respect to their parent,
+    # so that they will always stay on top of their parent window.  However,
+    # some window managers will create the window as withdrawn if the parent
+    # window is withdrawn or iconified.  Combined with the grab we put on the
+    # window, this can hang the entire application.  Therefore we only make
+    # the dialog transient if the parent is viewable.
+
+    if {[winfo viewable [winfo toplevel $data(-parent)]]} {
+	wm transient $w $data(-parent)
+    }
+
     rat_fbox::updateWhenIdle $w
 
     upvar \#0 $data(icons) icons
     ::tkrat::winctl::SetGeometry fbox $w $icons(canvas)
+    wm title $w $data(-title)
+    wm iconname $w $data(-title)
 
     # Set a grab and claim the focus too.
 
@@ -754,7 +767,7 @@ proc rat_fbox::run {args} {
 #	Configures the TK filedialog according to the argument list
 #
 proc rat_fbox::config {dataName argList} {
-    upvar #0 $dataName data
+    upvar \#0 $dataName data
     global env tklead
 
     # 0: Delete all variable that were set on data(selectPath) the
@@ -838,7 +851,7 @@ proc rat_fbox::config {dataName argList} {
 
 proc rat_fbox::create {w} {
     set dataName [lindex [split $w .] end]
-    upvar #0 $dataName data
+    upvar \#0 $dataName data
     global tk_library t tklead
     variable state
 
@@ -894,7 +907,7 @@ proc rat_fbox::create {w} {
 
     # The font to use for the icons. The default Canvas font on Unix
     # is just deviant.
-    upvar #0 $w.icons(font) font
+    upvar \#0 $w.icons(font) font
     set font [$data(ent) cget -font]
 
     # f3: the frame with the Previous directory field
@@ -973,7 +986,7 @@ proc rat_fbox::create {w} {
 #	due to multiple concurrent events.
 #
 proc rat_fbox::updateWhenIdle {w} {
-    upvar #0 [winfo name $w] data
+    upvar \#0 [winfo name $w] data
 
     if {[info exists data(updateId)]} {
 	return
@@ -997,7 +1010,7 @@ proc rat_fbox::doUpdate {w} {
     }
 
     set dataName [winfo name $w]
-    upvar #0 $dataName data
+    upvar \#0 $dataName data
     global tk_library 
     variable state
     catch {unset data(updateId)}
@@ -1109,7 +1122,7 @@ rSASvJTGhnhcV3EJlo3kh53ltF5nAhQAOw==}]
 # 	Sets data(selectPath) without invoking the trace procedure
 #
 proc rat_fbox::setPathSilently {w path} {
-    upvar #0 [winfo name $w] data
+    upvar \#0 [winfo name $w] data
     
     trace vdelete  data(selectPath) w "rat_fbox::setPath $w"
     set data(selectPath) $path
@@ -1121,7 +1134,7 @@ proc rat_fbox::setPathSilently {w path} {
 #
 proc rat_fbox::setPath {w name1 name2 op} {
     if {[winfo exists $w]} {
-	upvar #0 [winfo name $w] data
+	upvar \#0 [winfo name $w] data
 	set data(selectPath) $data($name2)
 	rat_fbox::updateWhenIdle $w
     }
@@ -1229,7 +1242,7 @@ proc rat_fbox::resolveFile {context text defaultext} {
 # entry box is the selection.
 #
 proc rat_fbox::entFocusIn {w} {
-    upvar #0 [winfo name $w] data
+    upvar \#0 [winfo name $w] data
 
     if {[string compare [$data(ent) get] ""]} {
 	$data(ent) selection from 0
@@ -1245,7 +1258,7 @@ proc rat_fbox::entFocusIn {w} {
 }
 
 proc rat_fbox::entFocusOut {w} {
-    upvar #0 [winfo name $w] data
+    upvar \#0 [winfo name $w] data
 
     $data(ent) selection clear
 }
@@ -1254,7 +1267,7 @@ proc rat_fbox::entFocusOut {w} {
 # Gets called when user presses Return in the "File name" entry.
 #
 proc rat_fbox::activateEnt {w from} {
-    upvar #0 [winfo name $w] data
+    upvar \#0 [winfo name $w] data
 
     set text [$data(ent) get]
     set list [rat_fbox::resolveFile $data(selectPath) $text \
@@ -1277,7 +1290,7 @@ proc rat_fbox::activateEnt {w from} {
 	}
 	FILE {
 	    if {![string compare $data(-mode) open]} {
-		tk_messageBox -icon warning -type ok -parent $data(-parent) \
+		tk_messageBox -icon warning -type ok -parent $w \
 		    -message "File \"[file join $path $file]\" does not exist."
 		$data(ent) select from 0
 		$data(ent) select to   end
@@ -1289,14 +1302,14 @@ proc rat_fbox::activateEnt {w from} {
 	    }
 	}
 	PATH {
-	    tk_messageBox -icon warning -type ok -parent $data(-parent) \
+	    tk_messageBox -icon warning -type ok -parent $w \
 		-message "Directory \"$path\" does not exist."
 	    $data(ent) select from 0
 	    $data(ent) select to   end
 	    $data(ent) icursor end
 	}
 	CHDIR {
-	    tk_messageBox -type ok -parent $data(-parent) -message \
+	    tk_messageBox -type ok -parent $w -message \
 	       "Cannot change to the directory \"$path\".\nPermission denied."\
 		-icon warning
 	    $data(ent) select from 0
@@ -1304,7 +1317,7 @@ proc rat_fbox::activateEnt {w from} {
 	    $data(ent) icursor end
 	}
 	ERROR {
-	    tk_messageBox -type ok -parent $data(-parent) -message \
+	    tk_messageBox -type ok -parent $w -message \
 	       "Invalid file name \"$path\"."\
 		-icon warning
 	    $data(ent) select from 0
@@ -1317,7 +1330,7 @@ proc rat_fbox::activateEnt {w from} {
 # Gets called when user presses the Alt-s or Alt-o keys.
 #
 proc rat_fbox::invokeBtn {w key} {
-    upvar #0 [winfo name $w] data
+    upvar \#0 [winfo name $w] data
     global tklead
 
     if {![string compare [$data(okBtn) cget -text] $key]} {
@@ -1328,7 +1341,7 @@ proc rat_fbox::invokeBtn {w key} {
 # Gets called when user presses the "parent directory" button
 #
 proc rat_fbox::upDirCmd {w} {
-    upvar #0 [winfo name $w] data
+    upvar \#0 [winfo name $w] data
 
     if {[string compare $data(selectPath) "/"]} {
 	set data(selectPath) [file dirname $data(selectPath)]
@@ -1361,7 +1374,7 @@ proc rat_fbox::joinFile {path file} {
 # Gets called when user presses the "OK" button
 #
 proc rat_fbox::okCmd {w from} {
-    upvar #0 [winfo name $w] data
+    upvar \#0 [winfo name $w] data
 
     set text [ratIconList_Get $data(icons)]
     if {[string compare $text ""]} {
@@ -1379,7 +1392,7 @@ proc rat_fbox::okCmd {w from} {
 # Gets called when user presses the "Cancel" button
 #
 proc rat_fbox::cancelCmd {w} {
-    upvar #0 [winfo name $w] data
+    upvar \#0 [winfo name $w] data
     variable state
 
     set state(selectFilePath) ""
@@ -1389,7 +1402,7 @@ proc rat_fbox::cancelCmd {w} {
 # keys, etc)
 #
 proc rat_fbox::listBrowse {w text} {
-    upvar #0 [winfo name $w] data
+    upvar \#0 [winfo name $w] data
     global t
 
     if {$text == ""} {
@@ -1411,7 +1424,7 @@ proc rat_fbox::listBrowse {w text} {
 # Return key, etc)
 #
 proc rat_fbox::listInvoke {w text} {
-    upvar #0 [winfo name $w] data
+    upvar \#0 [winfo name $w] data
 
     if {$text == ""} {
 	return
@@ -1421,7 +1434,7 @@ proc rat_fbox::listInvoke {w text} {
 
     if {[file isdirectory $file]} {
 	if {[catch {set appPWD [pwd]; cd $file} msg]} {
-	    tk_messageBox -type ok -parent $data(-parent) -message $msg \
+	    tk_messageBox -type ok -parent $w -message $msg \
 		-icon warning
 	} else {
 	    cd $appPWD
@@ -1442,7 +1455,7 @@ proc rat_fbox::listInvoke {w text} {
 #	script that calls tk_getOpenFile or tk_getSaveFile
 #
 proc rat_fbox::done {w {selectFilePath ""}} {
-    upvar #0 [winfo name $w] data
+    upvar \#0 [winfo name $w] data
     variable state
 
     if {![string compare $selectFilePath ""]} {
@@ -1454,7 +1467,7 @@ proc rat_fbox::done {w {selectFilePath ""}} {
 	if {[file exists $selectFilePath]} {
 	    if {![string compare $data(-mode) save]} {
 		set reply [tk_messageBox -icon warning -type yesno\
-			       -parent $data(-parent) -message "File\
+			       -parent $w -message "File\
 			\"$selectFilePath\" already exists.\nDo\
 			you want to overwrite it?"]
 		if {![string compare $reply "no"]} {
@@ -1462,7 +1475,7 @@ proc rat_fbox::done {w {selectFilePath ""}} {
 		}
 	    } elseif {![string compare $data(-mode) noexists]} {
 		set reply [tk_messageBox -icon warning -type ok \
-			       -parent $data(-parent) -message "File\
+			       -parent $w -message "File\
 			\"$selectFilePath\" already exists."]
 		return
 	    }

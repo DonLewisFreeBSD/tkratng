@@ -344,11 +344,11 @@ proc test_pgp::test_keylist {} {
 }
 
 proc test_pgp::test_pgp {} {
-    global option
+    global option tmp
 
     RatLibSetOnlineMode 1
     set option(pgp_version) gpg-1
-    set option(pgp_args) "--no-default-keyring --keyring [pwd]/../pgp_pub --secret-keyring [pwd]/../pgp_sec --always-trust --no-options --homedir /tmp"
+    set option(pgp_args) "--no-default-keyring --keyring [pwd]/../pgp_pub --secret-keyring [pwd]/../pgp_sec --always-trust --no-options --homedir $tmp"
     #test_signing
     #test_encrypting
     test_keylist

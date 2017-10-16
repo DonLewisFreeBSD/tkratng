@@ -265,6 +265,10 @@ ParseExpression(char **sPtr, char **errPtr, int inParen)
 		exp2Ptr->negate = negated;
 		exp2Ptr->arg1.info = tokPtr->info;
 		tokPtr = GetToken(sPtr);
+                if (tokPtr && tokPtr->token == T_Not) {
+                    exp2Ptr->negate = 1;
+                    tokPtr = GetToken(sPtr);
+                }
 		if (!tokPtr || tokPtr->type != TT_Operator) {
 		    *errPtr = "Expected operator";
 		    ckfree(exp2Ptr);
@@ -589,7 +593,7 @@ RatExpMatchDo(Tcl_Interp *interp, Expression *expPtr, RatInfoProc *infoProc,
 	ClientData clientData, int index)
 {
     char *sLower, *cPtr;
-    int opIndex, val;
+    int opIndex, val = 0;
     static Tcl_Obj *sPtr = NULL;
     Tcl_Obj *oPtr;
 
@@ -603,10 +607,6 @@ RatExpMatchDo(Tcl_Interp *interp, Expression *expPtr, RatInfoProc *infoProc,
 	    val = RatExpMatchDo(interp, expPtr->arg2.expPtr, infoProc,
 		    clientData, index);
 	}
-	if (expPtr->negate) {
-	    val = val ? 0 : 1;
-	}
-	return val;
     } else {
 	oPtr = (*infoProc)(interp, clientData, expPtr->arg1.info, index);
 	if (!oPtr) {
@@ -626,15 +626,18 @@ RatExpMatchDo(Tcl_Interp *interp, Expression *expPtr, RatInfoProc *infoProc,
 	    }
 	    val = Tcl_RegExpMatch(interp, sLower, expPtr->arg2.string);
 	    ckfree(sLower);
-	    return val;
 	} else if (expPtr->arg1.info == RAT_FOLDER_SIZE) {
 	    Tcl_GetIntFromObj(interp, oPtr, &val);
 	    if (T_Gt == tokenList[opIndex].token) {
-		return val > atoi(expPtr->arg2.string);
+		val = val > atoi(expPtr->arg2.string);
 	    } else {
-		return val < atoi(expPtr->arg2.string);
+		val = val < atoi(expPtr->arg2.string);
 	    }
 	}
     }
-    return 0;
+
+    if (expPtr->negate) {
+        val = val ? 0 : 1;
+    }
+    return val;
 }

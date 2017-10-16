@@ -88,6 +88,7 @@ static int numChanges = 0;	/* Number of changes in the changes file */
 static int version;		/* Version read */
 static long firstDate = 0;      /* The earliest date in the dbase */
 static long lastDate = 0;       /* The last date in the dbase */
+static long totSize = 0;        /* Total size of dbase file */
 
 /*
  * This structure is used while checking the dbase
@@ -273,7 +274,7 @@ Read(Tcl_Interp *interp)
 		"\": ", Tcl_PosixError(interp), (char *) NULL);
 	goto error;
     }
-    size = sbuf.st_size;
+    totSize = size = sbuf.st_size;
     if (size > 0) {
 	char *indexPtr;	/* Pointer to read version of the indexfile */
 
@@ -288,7 +289,7 @@ Read(Tcl_Interp *interp)
 	    goto error;
 	}
 	fhIndex = open(buf, O_RDONLY);
-	if (size != read(fhIndex, indexPtr, size)) {
+	if (size != SafeRead(fhIndex, indexPtr, size)) {
 	    Tcl_SetResult(interp, "error reading index", TCL_STATIC);
 	    close(fhIndex);
 	    goto error;
@@ -312,6 +313,7 @@ Read(Tcl_Interp *interp)
 		}
 		*cPtr++ = '\0';
 	    }
+            totSize += atol(entryPtr[i].content[RSIZE]);
 	    /*
 	     * This is a KLUDGE to work around a bug which existed for a
 	     * short time /MaF 960218
@@ -406,7 +408,9 @@ Lock(Tcl_Interp *interp)
 	    }
 	}
     } while (-1 == fhLock);
-    write(fhLock, ident, strlen(ident));
+    if (-1 == safe_write(fhLock, ident, strlen(ident))) {
+        fprintf(stderr, "Failed to write dbase lock\n");
+    }
     close(fhLock);
     if (msgPost) {
 	RatLog(interp, RAT_INFO, "", RATLOG_TIME);
@@ -519,8 +523,8 @@ Sync(Tcl_Interp *interp, int force)
     changeSize = sbuf.st_size;
     while(1) {
 	if (2 != fscanf(fpChanges, "%c %d ", &command, &cmdArg) ||
-		('d'!=command && 'a'!=command && 's'!=command)
-		|| ('s' == command &&
+		('d'!=command && 'a'!=command && 's'!=command && 'k'!=command)
+		|| (('s' == command || 'k' == command) &&
 		buf != fgets(buf, sizeof(buf), fpChanges))) {
 	    if (feof(fpChanges)) {
 		break;
@@ -556,6 +560,29 @@ Sync(Tcl_Interp *interp, int force)
 			(char *) ckalloc(strlen(buf)+1);
 		strcpy(entryPtr[cmdArg].content[STATUS], buf);
 	    }
+	} else if ('k' == command) {
+            Tcl_Obj *line, **elemv, **indexes;
+            int elemc, indexc, i, index;
+            char *keywords, *ex_time, *ex_type;
+
+            line = Tcl_NewStringObj(buf, -1);
+            if (TCL_OK != Tcl_ListObjGetElements(interp, line, &elemc,&elemv)
+                || elemc != 4
+                || TCL_OK != Tcl_ListObjGetElements(interp, elemv[0],
+                                                    &indexc, &indexes)) {
+                continue;
+            }
+            keywords = cpystr(Tcl_GetString(elemv[1]));
+            ex_time  = cpystr(Tcl_GetString(elemv[2]));
+            ex_type  = cpystr(Tcl_GetString(elemv[3]));
+            for (i=0; i<indexc; i++) {
+                Tcl_GetIntFromObj(interp, indexes[i], &index);
+                entryPtr[index].content[KEYWORDS] = keywords;
+                entryPtr[index].content[EX_TIME] = ex_time;
+                entryPtr[index].content[EX_TYPE] = ex_type;
+            }
+            Tcl_DecrRefCount(line);
+            
 	} else {
 	    if (numRead == numAlloc) {
 		numAlloc += EXTRA_ENTRIES;
@@ -585,7 +612,9 @@ Sync(Tcl_Interp *interp, int force)
 		 */
 		size = sbuf.st_size - cmdArg;
 		indexBuf = (char*)ckalloc(size + 1);
-		fread(indexBuf, size, 1, fpIndex);
+		if (!fread(indexBuf, size, 1, fpIndex)) {
+                    size = 0;
+                }
 		fclose(fpIndex);
 		indexBuf[size] = '\0';
 		indexOffset = cmdArg;
@@ -602,6 +631,7 @@ Sync(Tcl_Interp *interp, int force)
 		}
 		*cPtr++ = '\0';
 	    }
+            totSize += atol(entryPtr[numRead].content[RSIZE]);
             l = atol(entryPtr[numRead].content[DATE]);
             if (l < firstDate || 0 == firstDate) {
                 firstDate = l;
@@ -653,6 +683,7 @@ Sync(Tcl_Interp *interp, int force)
 		return TCL_ERROR;
 	    }
 
+            totSize = 0;
 	    for (i=0, numEntries=0 ; i < numRead; i++) {
 		if (0 != entryPtr[i].content[FROM]) {
 		    numEntries++;
@@ -667,6 +698,7 @@ Sync(Tcl_Interp *interp, int force)
 			    return TCL_ERROR;
 			}
 		    }
+                    totSize += atol(entryPtr[i].content[RSIZE]);
 		} else {
 		    snprintf(buf, sizeof(buf), "%s/dbase/%s", dbDir,
 			    entryPtr[i].content[FILENAME]);
@@ -674,6 +706,7 @@ Sync(Tcl_Interp *interp, int force)
 		}
 	    }
 	    (void)fclose(fpIndex);
+            totSize += ftell(fpNewIndex);
 	    if (0 != fclose(fpNewIndex)) {
 		Tcl_AppendResult(interp,"error closing file \"", newIndex,
 				 "\": ", Tcl_PosixError(interp),
@@ -848,9 +881,10 @@ RatDbInsert (Tcl_Interp *interp, const char *to, const char *from,
     FILE *seqFP;		/* Filepointer to seq file */
     int seq;			/* sequence number */
     FILE *indchaFP;		/* File pointer to the index.changes file */
-    Tcl_Channel dataChannel;	/* Data channel */
+    Tcl_Channel data;	        /* Data channel */
     ADDRESS *adrPtr;		/* Address list */
     int i;
+    int fd;
 
     if (0 == isRead) {
 	if (TCL_OK != Read(interp)) {
@@ -980,15 +1014,16 @@ RatDbInsert (Tcl_Interp *interp, const char *to, const char *from,
      * Create the actual entry in the database.
      */
     snprintf(buf, sizeof(buf), "%s/dbase/%s", dbDir, fname);
-    if (NULL == (dataChannel = Tcl_OpenFileChannel(interp, buf, "w", 0666))) {
+    if (0 > (fd = open(buf, O_WRONLY|O_CREAT|O_TRUNC, 0666))
+        || NULL == (data = Tcl_MakeFileChannel((ClientData)fd,TCL_WRITABLE))) {
 	Tcl_AppendResult(interp, "error creating file \"", buf,
 		"\": ", Tcl_PosixError(interp), (char *) NULL);
 	goto losing;
     }
     /* The casts here are needed to build on tcl <8.4 */
-    Tcl_Write(dataChannel, (char*)fromline, strlen(fromline));
-    RatTranslateWrite(dataChannel, (char*)mail, length);
-    if (TCL_OK != Tcl_Close(interp, dataChannel)) {
+    Tcl_Write(data, (char*)fromline, strlen(fromline));
+    RatTranslateWrite(data, (char*)mail, length);
+    if (TCL_OK != Tcl_Close(interp, data)) {
 	Tcl_AppendResult(interp, "error closing file \"", buf,
 		"\": ", Tcl_PosixError(interp), (char *) NULL);
 	goto losing_but_nearly_got_it;
@@ -1024,7 +1059,7 @@ losing_but_nearly_got_it:
 
 losing:
     (void)snprintf(buf, sizeof(buf), "%s/index", dbDir);
-    (void)truncate(buf, indexPos);
+    i = truncate(buf, indexPos); /* Ignore result */
     Unlock(interp);
 
     return TCL_ERROR;
@@ -1147,6 +1182,7 @@ RatDbSearch(Tcl_Interp *interp, Tcl_Obj *exp, int *numFoundPtr,
     char *message = NULL;	/* Actual message */
     int messageSize = 0;	/* Size of message area */
     struct stat sbuf;		/* Buffer for stat calls */
+    ssize_t l;
     char *s;
     
     /*
@@ -1278,7 +1314,7 @@ RatDbSearch(Tcl_Interp *interp, Tcl_Obj *exp, int *numFoundPtr,
 	match = 0;
 	for(j=0; j < numExp && !(j != 0 && or == match); j++) {
 	    Tcl_ListObjGetElements(interp, valuePtr[j], &objc, &objv);
-	    for (k=0, matchl=0; k<objc && 0 == matchl; k++) {
+	    for (k=0, matchl=0; k<objc; k++) {
 		if (fieldPtr[j] == SEARCH_ALL) {
 		    snprintf(fname, sizeof(fname), "%s/dbase/%s", dbDir,
 			    entryPtr[i].content[FILENAME]);
@@ -1298,10 +1334,12 @@ RatDbSearch(Tcl_Interp *interp, Tcl_Obj *exp, int *numFoundPtr,
 			ckfree(message);
 			message = (char*)ckalloc(messageSize = sbuf.st_size+1);
 		    }
-		    read(bodyfd, message, sbuf.st_size);
-		    message[sbuf.st_size] = '\0';
-		    (void)close(bodyfd);
-		    matchl = RatSearch(Tcl_GetString(objv[k]), message);
+		    l = SafeRead(bodyfd, message, sbuf.st_size);
+                    if (l > 0) {
+                        message[l] = '\0';
+                        (void)close(bodyfd);
+                        matchl = RatSearch(Tcl_GetString(objv[k]), message);
+                    }
                 } else if (fieldPtr[j] == SEARCH_ALL_ADDRESSES) {
 		    matchl = RatSearch(Tcl_GetString(objv[k]),
                                        entryPtr[i].content[TO])
@@ -1319,6 +1357,9 @@ RatDbSearch(Tcl_Interp *interp, Tcl_Obj *exp, int *numFoundPtr,
 		    matchl = RatSearch(Tcl_GetString(objv[k]),
                                        entryPtr[i].content[fieldPtr[j]]);
 		}
+                if ((or && matchl) || (!or && !matchl)) {
+                    break;
+                }
 	    }
             if (1 == notPtr[j]) {
                 match = matchl ? 0 : 1;
@@ -1416,6 +1457,7 @@ RatDbGetMessage(Tcl_Interp *interp, int index, char **buffer)
     int messfd;		/* Message file descriptor */
     struct stat sbuf;	/* Buffer for stat call (to find out size of message)*/
     char *message;	/* Pointer to actual message */
+    ssize_t l;
 
     /*
      * Check the index for validity.
@@ -1450,8 +1492,11 @@ RatDbGetMessage(Tcl_Interp *interp, int index, char **buffer)
 	return NULL;
     }
     *buffer = message = (char*)ckalloc(sbuf.st_size+1);
-    read(messfd, message, sbuf.st_size);
-    message[sbuf.st_size] = '\0';
+    l = SafeRead(messfd, message, sbuf.st_size);
+    if (l < 0) {
+        return NULL;
+    }
+    message[l] = '\0';
     (void)close(messfd);
 
     Unlock(interp);
@@ -1596,9 +1641,12 @@ RatDbGetFrom(Tcl_Interp *interp, int index)
 	return NULL;
     }
     Unlock(interp);
-    fgets(header, sizeof(header)-1, messFp);
+    if (fgets(header, sizeof(header)-1, messFp)) {
+        header[sizeof(header)-1] = '\0';
+    } else {
+        header[0] = '\0';
+    }
     fclose(messFp);
-    header[sizeof(header)-1] = '\0';
     return header;
 }
 
@@ -1658,7 +1706,7 @@ RatDbGetText(Tcl_Interp *interp, int index)
 		fname, "\": ", Tcl_PosixError(interp), (char*)NULL);
 	return NULL;
     }
-    while (fgets(buf, sizeof(buf), messFp), !feof(messFp)) {
+    while (fgets(buf, sizeof(buf), messFp) != NULL && !feof(messFp)) {
 	if ('\n' == buf[0] || '\r' == buf[0]) {
 	    break;
 	}
@@ -1927,8 +1975,8 @@ RatDbExpire(Tcl_Interp *interp, char *infolder, char *backupDirectory)
 		fdSrc = open(buf, O_RDONLY);
 		fdDst = open(buf2, O_WRONLY|O_TRUNC|O_CREAT, 0666);
 		do {
-		    len = read(fdSrc, buf, sizeof(buf));
-		    if (0 > write(fdDst, buf, len)) {
+		    len = SafeRead(fdSrc, buf, sizeof(buf));
+		    if (0 > safe_write(fdDst, buf, len)) {
 			error = errno;
 			len = 0;
 		    }
@@ -2054,6 +2102,7 @@ RatDbExpire(Tcl_Interp *interp, char *infolder, char *backupDirectory)
     if (numInbox) {
 	char *data = NULL, *msg, *cPtr;
 	int fd, allocated = 0;
+        ssize_t l;
 
 	snprintf(buf, sizeof(buf), "%s/inbox", dbDir);
 	dirPtr = opendir(buf);
@@ -2067,8 +2116,11 @@ RatDbExpire(Tcl_Interp *interp, char *infolder, char *backupDirectory)
 		data = (char*)ckrealloc(data, allocated);
 	    }
 	    fd = open(buf2, O_RDONLY);
-	    read(fd, data, sbuf.st_size);
+	    l = SafeRead(fd, data, sbuf.st_size);
 	    close(fd);
+            if (l <= 0) {
+                continue;
+            }
 	    data[sbuf.st_size] = '\0';
 	    unlink(buf2);
 	    for (cPtr = data; *cPtr != '\n'; cPtr++);
@@ -2177,7 +2229,8 @@ RatDbBuildList(Tcl_Interp *interp, Tcl_DString *dsPtr, char *prefix, char *dir,
 	Tcl_HashTable *tablePtr, int fix)
 {
     char buf[1024], path[1024];
-    int seq = -1, i;
+    unsigned long  seq = 0, maxnum = 0, num, fact;
+    int i;
     Tcl_HashEntry *entryPtr;
     RatDbItem *itemPtr;
     struct dirent *entPtr;
@@ -2207,7 +2260,9 @@ RatDbBuildList(Tcl_Interp *interp, Tcl_DString *dsPtr, char *prefix, char *dir,
 		    }
 		}
 	    } else {
-		fscanf(fp, "%d", &seq);
+		if (1 != fscanf(fp, "%ld", &seq)) {
+                    seq = -1;
+                }
 		fclose(fp);
 	    }
 	}
@@ -2261,6 +2316,15 @@ RatDbBuildList(Tcl_Interp *interp, Tcl_DString *dsPtr, char *prefix, char *dir,
 	    }
 	    entryPtr = Tcl_CreateHashEntry(tablePtr, buf, &i);
 	    Tcl_SetHashValue(entryPtr, (ClientData)itemPtr);
+
+            /* Check sequence number */
+            num = 0;
+            for (i=0, fact=1; isdigit(entPtr->d_name[i]); i++, fact *= 10) {
+                num += (entPtr->d_name[i]-'0') * fact;
+            }
+            if (num > maxnum) {
+                maxnum = num;
+            }
 	} else if (S_IFDIR == (sbuf.st_mode&S_IFMT)) {
 	    if (prefix && *prefix) {
 		snprintf(path, sizeof(path), "%s/%s", prefix, entPtr->d_name);
@@ -2275,6 +2339,19 @@ RatDbBuildList(Tcl_Interp *interp, Tcl_DString *dsPtr, char *prefix, char *dir,
 	}
     }
     closedir(dirPtr);
+
+    if (maxnum > seq) {
+        snprintf(buf, sizeof(buf),
+                 "Bad sequence number was %ld but expected %ld", seq, maxnum);
+        Tcl_DStringAppendElement(dsPtr, buf);
+        if (fix) {
+            snprintf(path, sizeof(buf), "%s/.seq", dir);
+            if (NULL != (fp = fopen(path, "w"))) {
+                fprintf(fp, "%ld", maxnum);
+                fclose(fp);
+            }
+        }
+    }
 }
 
 
@@ -2301,7 +2378,7 @@ RatDbBuildList(Tcl_Interp *interp, Tcl_DString *dsPtr, char *prefix, char *dir,
 int
 RatDbCheck(Tcl_Interp *interp, int fix)
 {
-    int numFound = 0, numMal = 0, numAlone = 0, numUnlinked = 0, totSize = 0,
+    int numFound = 0, numMal = 0, numAlone = 0, numUnlinked = 0, size = 0,
         fd, lines, start, index, i, j, extraNum = 0, extraAlloc = 0,
 	msgLen = 0, date = 0, listArgc, elemArgc, indexInfo = 0, numDel = 0;
     char buf[8092], *indexPtr = NULL, **linePtrPtr = NULL, *cPtr,
@@ -2315,6 +2392,7 @@ RatDbCheck(Tcl_Interp *interp, int fix)
     RatDbItem *itemPtr;
     struct stat sbuf;
     MESSAGECACHE elt;
+    ssize_t l;
     struct tm tm;
     FILE *fp;
 
@@ -2364,7 +2442,9 @@ RatDbCheck(Tcl_Interp *interp, int fix)
 	Tcl_SetResult(interp, "Failed to open index.info file", TCL_STATIC);
 	return TCL_ERROR;
     } else {
-	fscanf(fp, "%d %d", &i, &indexInfo);
+	if (2 != fscanf(fp, "%d %d", &i, &indexInfo)) {
+            i = -1;
+        }
 	fclose(fp);
 	if (i != DBASE_VERSION) {
 	    Tcl_SetResult(interp, "Wrong version of dbase", TCL_STATIC);
@@ -2392,7 +2472,7 @@ RatDbCheck(Tcl_Interp *interp, int fix)
      */
     snprintf(buf, sizeof(buf), "%s/index.changes", dbDir);
     if (NULL != (fp = fopen(buf, "r"))) {
-	while (fgets(buf, sizeof(buf), fp), !feof(fp)) {
+	while (fgets(buf, sizeof(buf), fp) != NULL && !feof(fp)) {
 	    switch (buf[0]) {
 	    case 'a':
 		indexInfo++;
@@ -2428,7 +2508,10 @@ RatDbCheck(Tcl_Interp *interp, int fix)
 	 */
 	fstat(fd, &sbuf);
 	indexPtr = (char*)ckalloc(sbuf.st_size+1);
-	read(fd, indexPtr, sbuf.st_size);
+        if (sbuf.st_size != SafeRead(fd, indexPtr, sbuf.st_size)) {
+            close(fd);
+            return TCL_ERROR;
+        }
 	close(fd);
 	indexPtr[sbuf.st_size] = '\0';
 	for (lines = 0, cPtr = indexPtr; *cPtr; cPtr++) {
@@ -2542,7 +2625,7 @@ RatDbCheck(Tcl_Interp *interp, int fix)
 	    entryPtr;
 	    entryPtr = Tcl_NextHashEntry(&search)) {
 	itemPtr = (RatDbItem*)Tcl_GetHashValue(entryPtr);
-	totSize += itemPtr->fileSize;
+	size += itemPtr->fileSize;
 	if (itemPtr->entry.content[0]) {
 	    continue;
 	}
@@ -2567,8 +2650,11 @@ RatDbCheck(Tcl_Interp *interp, int fix)
 	    if (-1 == (fd = open(buf, O_RDONLY))) {
 		continue;
 	    }
-	    read(fd, msgBuf, itemPtr->fileSize);
-	    msgBuf[itemPtr->fileSize] = '\0';
+	    l = SafeRead(fd, msgBuf, itemPtr->fileSize);
+            if (l <= 0) {
+                continue;
+            }
+	    msgBuf[l] = '\0';
 	    close(fd);
 	    if (NULL == (cPtr = strstr(msgBuf, "\n\n"))) {
 		if (NULL == (cPtr = strstr(msgBuf, "\r\n\r"))) {
@@ -2713,7 +2799,7 @@ RatDbCheck(Tcl_Interp *interp, int fix)
     Tcl_AppendElement(interp, buf);
     sprintf(buf, "%d", numUnlinked);
     Tcl_AppendElement(interp, buf);
-    sprintf(buf, "%d", totSize);
+    sprintf(buf, "%d", size);
     Tcl_AppendElement(interp, buf);
     Tcl_AppendElement(interp, Tcl_DStringValue(&reportDS));
     Tcl_DStringFree(&reportDS);
@@ -2873,7 +2959,7 @@ int
 RatDbaseInfoCmd(ClientData dummy, Tcl_Interp *interp, int objc,
                 Tcl_Obj *const objv[])
 {
-    Tcl_Obj *robjv[3];
+    Tcl_Obj *robjv[4];
 
     if (0 == isRead) {
 	if (TCL_OK != Read(interp)) {
@@ -2888,9 +2974,157 @@ RatDbaseInfoCmd(ClientData dummy, Tcl_Interp *interp, int objc,
     robjv[0] = Tcl_NewLongObj(numRead);
     robjv[1] = Tcl_NewLongObj(firstDate);
     robjv[2] = Tcl_NewLongObj(lastDate);
-    Tcl_SetObjResult(interp, Tcl_NewListObj(3, robjv));
+    robjv[3] = Tcl_NewLongObj(totSize);
+    Tcl_SetObjResult(interp, Tcl_NewListObj(4, robjv));
     return TCL_OK;
 
  losing:
     return TCL_ERROR;
+}
+
+/*
+ *----------------------------------------------------------------------
+ *
+ * RatDbKeywordsCmd --
+ *
+ *	See ../doc/interface for a descriptions of arguments and result.
+ *
+ * Results:
+ *      A standard tcl result.
+ *
+ * Side effects:
+ *      None.
+ *
+ *
+ *----------------------------------------------------------------------
+ */
+
+int
+RatDbaseKeywordsCmd(ClientData dummy, Tcl_Interp *interp, int objc,
+                Tcl_Obj *const objv[])
+{
+    Tcl_HashTable keywords;
+    Tcl_HashEntry *entry;
+    Tcl_HashSearch search;
+    int i, j, new, num, argc;
+    Tcl_Obj *result, *robjv[2];
+    char *s, buf[1024];
+    const char **argv;
+
+    Tcl_InitHashTable(&keywords, TCL_STRING_KEYS);
+    
+    /* Loop over messages */
+    for (i = 0; i<numRead; i++) {
+	if (!entryPtr[i].content[FROM]) {	/* Entry deleted */
+	    continue;
+	}
+
+        /* Loop over keywords of message*/
+        s = entryPtr[i].content[KEYWORDS];
+        if ('{' == s[0] && '}' == s[strlen(s)-1]) {
+            strlcpy(buf, s+1, sizeof(buf));
+            if ('}' == buf[strlen(buf)-1]) {
+                buf[strlen(buf)-1] = '\0';
+            }
+            s = buf;
+        }
+        if (TCL_OK != Tcl_SplitList(interp, s, &argc, &argv)) {
+            continue;
+        }
+        for (j=0; j<argc; j++) {
+            entry = Tcl_CreateHashEntry(&keywords, argv[j], &new);
+            if (new) {
+                Tcl_SetHashValue(entry, 1);
+            } else {
+                num = (int)Tcl_GetHashValue(entry);
+                Tcl_SetHashValue(entry, num+1);
+            }
+        }
+    }
+
+    /* Build result */
+    result = Tcl_NewObj();
+    for (entry = Tcl_FirstHashEntry(&keywords, &search); entry;
+         entry = Tcl_NextHashEntry(&search)) {
+        robjv[0] = Tcl_NewStringObj(Tcl_GetHashKey(&keywords, entry), -1);
+        robjv[1] = Tcl_NewIntObj((int)Tcl_GetHashValue(entry));
+        Tcl_ListObjAppendElement(interp, result, Tcl_NewListObj(2, robjv));
+    }
+    Tcl_SetObjResult(interp, result);
+    return TCL_OK;
+}
+
+/*
+ *----------------------------------------------------------------------
+ *
+ * RatDbSetInfo --
+ *
+ *      Update keywords, expiration_time and expiration action for a
+ *      number of messages.
+ *
+ * Results:
+ *      A standard TCL result.
+ *
+ * Side effects:
+ *      None.
+ *
+ *----------------------------------------------------------------------
+ */
+int RatDbSetInfo(Tcl_Interp *interp, int *indexes, int num_indexes,
+                 Tcl_Obj *keywords, Tcl_Obj *ex_time, Tcl_Obj *ex_type)
+{
+    char buf[1024];	/* Name of index.changes file */
+    FILE *indexFP;	/* FIle pointer to index.changes file */
+    Tcl_Obj *indlist, *line, *lobjv[4];
+    int i;
+    
+    /*
+     * Check indexes for validity and build list of indexes
+     */
+    indlist = Tcl_NewObj();
+    for (i=0; i<num_indexes; i++) {
+        if (indexes[i] >= numRead || indexes[i] < 0) {
+            Tcl_DecrRefCount(indlist);
+            return TCL_ERROR;
+        }
+        Tcl_ListObjAppendElement(interp, indlist, Tcl_NewIntObj(indexes[i]));
+    }
+
+    /*
+     * Prepare line
+     */
+    lobjv[0] = indlist;
+    lobjv[1] = keywords;
+    lobjv[2] = ex_time;
+    lobjv[3] = ex_type;
+    line = Tcl_NewListObj(4, lobjv);
+
+    /*
+     * Write entry to index.changes
+     */
+    Lock(interp);
+    snprintf(buf, sizeof(buf), "%s/index.changes", dbDir);
+    if (NULL == (indexFP = fopen(buf, "a"))) {
+	Tcl_AppendResult(interp, "error opening (for append)\"", buf,
+		"\": ", Tcl_PosixError(interp), (char *) NULL);
+	Unlock(interp);
+	return TCL_ERROR;
+    }
+    if (0 > fprintf(indexFP, "k 0 %s\n", Tcl_GetString(line))) {
+	Tcl_AppendResult(interp, "Failed to write to file \"", buf, "\"",
+		(char*) NULL);
+	(void)fclose(indexFP);
+	Unlock(interp);
+	return TCL_ERROR;
+    }
+    if (0 != fclose(indexFP)) {
+	Tcl_AppendResult(interp, "error closing file \"", buf,
+		"\": ", Tcl_PosixError(interp), (char *) NULL);
+	Unlock(interp);
+	return TCL_ERROR;
+    }
+
+    Sync(interp, 0);
+    Unlock(interp);
+    return TCL_OK;
 }

@@ -47,7 +47,7 @@ RatReleaseWatchdog(const char *tmpdir)
      * The leash is used to release the watchdog (child) when the parent
      * dies.
      */
-    pipe(leash);
+    if (pipe(leash)) return;
     
     if (0 == fork()) {
 	/*
@@ -75,7 +75,7 @@ RatReleaseWatchdog(const char *tmpdir)
 	 * dies (since the server never will write to it).
 	 */
 	do {
-	    i = read(leash[0], &c, 1);
+	    i = SafeRead(leash[0], &c, 1);
 	} while (0 != i);
 
 	/*

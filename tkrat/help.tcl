@@ -92,6 +92,7 @@ proc Help {{subject intro}} {
     bind $w <Key-BackSpace> "$hd(text) yview scroll -1 pages"
     bind $hd(list) <ButtonRelease-1> "SelectHelp $id"
     bind $hd(text) <Destroy> "DismissHelp $id"
+    bind $w <Escape> "DismissHelp $id"
 
     # Populate list
     foreach topic $helporder {

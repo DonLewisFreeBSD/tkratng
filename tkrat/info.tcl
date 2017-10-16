@@ -67,6 +67,7 @@ proc Version {} {
 	 $w.more -side top -padx 5
     pack $w.ok -side top -padx 5 -pady 5
 
+    bind $w <Escape> "$w.ok invoke"
     bind $w.ok <Destroy> "::tkrat::winctl::RecordGeometry about $w"
     ::tkrat::winctl::SetGeometry about $w
 }
@@ -99,6 +100,7 @@ proc Ratatosk {} {
     message $w.message -aspect 400 -text $t(ratatosk)
     pack $w.message $w.ok -side top -padx 5 -pady 5
 
+    bind $w <Escape> "$w.ok invoke"
     bind $w.ok <Destroy> "::tkrat::winctl::RecordGeometry ratatosk $w"
     ::tkrat::winctl::SetGeometry ratatosk $w
 }
@@ -175,6 +177,7 @@ proc InfoWelcome {} {
 	}
     }
 
+    bind .welcome <Escape> ".welcome.b.cont invoke"
     ::tkrat::winctl::SetGeometry welcome .welcome
     tkwait window .welcome
 
@@ -279,6 +282,7 @@ proc InfoFeatures {featureIndexes} {
     pack .changes.message -side top -expand 1 -fill both -padx 5 -pady 5
     pack .changes.b -fill x
 
+    bind .changes ".changes.b.cont invoke"
     ::tkrat::winctl::SetGeometry infoChanges .changes
 
     # Populate textwindow
@@ -329,6 +333,7 @@ proc SeeLog {} {
     ::tkrat::winctl::SetGeometry seeLog $w $w.list
 
     bind $w.list <Destroy> "::tkrat::winctl::RecordGeometry seeLog $w $w.list"
+    bind $w <Escape> "$w.button invoke"
 }
 
 # SendBugReport --
@@ -385,6 +390,7 @@ proc SendBugReport {{attachments {}}} {
     ::tkrat::winctl::SetGeometry sendBug $w $w.text
 
     bind $w.text <Destroy> "::tkrat::winctl::RecordGeometry sendBug $w $w.text; unset $id"
+    bind $w <Escape> "$w.f.cancel invoke"
 }
 
 
@@ -495,6 +501,7 @@ proc Warn {tag} {
     pack $w.dismiss -pady 5
 
     ::tkrat::winctl::SetGeometry warning $w
+    bind $w <Escape> "$w.dismiss invoke"
 
     tkwait window $w
 
@@ -542,4 +549,34 @@ proc StartupInfo {} {
     } else {
         return 0
     }
+}
+
+
+# dumpenv --
+#
+# Dump environment (commands and globals) to file
+set dumpno 0
+proc dumpenv {} {
+    global dumpno
+
+    set name [format "dump_%03d" [incr dumpno]]
+    set f [open $name w]
+
+    # Dump commands
+    foreach c [lsort [info commands]] {
+        puts $f "cmd:$c"
+    }
+
+    # Dump globals
+    foreach g [lsort [info globals]] {
+        puts $f "global:$g"
+        upvar \#0 $g v
+        if {[array exists v]} {
+            foreach n [lsort [array names v]] {
+                puts $f "  $n"
+            }
+        }
+    }
+
+    close $f
 }

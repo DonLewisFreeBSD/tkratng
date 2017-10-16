@@ -54,6 +54,7 @@ proc ::tkrat::delattachments::delete {msg handler} {
     pack $w.buttons.delete \
 	 $w.buttons.cancel -side left -expand 1
     bind $w <Return> "$w.buttons.delete invoke"
+    bind $w <Escape> "$w.buttons.cancel invoke"
     set hd(delete_button) $w.buttons.delete
 
     pack $w.msg $w.f $w.buttons -side top -fill x -expand 1

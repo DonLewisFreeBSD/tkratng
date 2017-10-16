@@ -113,7 +113,7 @@ ReadDisk(Tcl_Interp *interp)
     if (NULL == (fp = fopen(filename, "r"))) {
 	return;
     }
-    while (fgets(buf, sizeof(buf), fp), !feof(fp)) {
+    while (fgets(buf, sizeof(buf), fp) && !feof(fp)) {
 	if (TCL_OK != Tcl_SplitList(interp, buf, &argc, &argv)
 	    || (argc != 2 && argc != 5)) {
 	    continue;
@@ -178,7 +178,7 @@ WriteDisk(Tcl_Interp *interp)
 	fstat(fd, &sbuf);
 	c = 0;
 	for (i=0; i<sbuf.st_size; i++) {
-	    write(fd, &c, 1);
+	    if (0 > safe_write(fd, &c, 1)) break;
 	}
 	close(fd);
 	unlink(filename);

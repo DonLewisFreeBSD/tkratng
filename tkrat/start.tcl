@@ -131,6 +131,7 @@ proc TkRatStart {} {
     package require rat_scrollframe 1.0
     package require rat_textspell 1.0
     package require rat_find 1.0
+    package require rat_table 1.0
 
     # Change the color
     if {$option(override_color)} {
@@ -366,6 +367,7 @@ proc OkButtons {w t1 t2 cmd} {
     pack $w.buttons.ok \
 	 $w.buttons.cancel -side left -expand 1
     bind $w <Return> "$cmd 1"
+    bind $w <Escape> "$cmd 0"
     wm protocol [winfo toplevel $w] WM_DELETE_WINDOW "$cmd 0"
 }
 
@@ -882,6 +884,9 @@ proc RatExec {cmds} {
 	    }
 	    compose {
 		return [ComposeClient $arg]
+	    }
+	    mailto {
+		return [MailtoClient $arg]
 	    }
 	    netsync {
 		return [RatExecNetsync $arg]

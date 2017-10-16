@@ -161,11 +161,13 @@ RatHoldList(Tcl_Interp *interp, const char *dir, Tcl_Obj *fileListPtr)
 	    && 'c' == direntPtr->d_name[l-1]) {
 	    snprintf(buf, sizeof(buf), "%s/%s", dir, direntPtr->d_name);
 	    fPtr = fopen(buf, "r");
-	    fgets(buf, sizeof(buf), fPtr);
+	    if (!fgets(buf, sizeof(buf), fPtr)) {
+                buf[0] = '\0';
+            }
 	    fclose(fPtr);
 	    buf[strlen(buf)-1] = '\0';
 	    Tcl_ListObjAppendElement(interp, oPtr, Tcl_NewStringObj(buf, -1));
-	    snprintf(buf, sizeof(buf), direntPtr->d_name);
+	    snprintf(buf, sizeof(buf), "%s", direntPtr->d_name);
 	    if (fileListPtr) {
 		Tcl_ListObjAppendElement(interp, fileListPtr,
 					 Tcl_NewStringObj(buf, strlen(buf)-5));

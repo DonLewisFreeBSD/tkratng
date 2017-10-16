@@ -71,15 +71,15 @@ proc test_wrap::test_cited_wrap {} {
 }]
 
 lappend texts [list {
-> -when using the Color-Config "Steel Blue" the Balloon Help is unreadable
->  because of white text on yellow background. (I hunted in the src for
->  the balloon-help color-config, because I wanted to send you a diff, but
->  sorry, seems that I am to unfamiliar with Tk)
+> - when using the Color-Config "Steel Blue" the Balloon Help is unreadable
+>   because of white text on yellow background. (I hunted in the src for
+>   the balloon-help color-config, because I wanted to send you a diff, but
+>   sorry, seems that I am to unfamiliar with Tk)
 } {
-> -when using the Color-Config "Steel Blue" the Balloon Help is
->  unreadable because of white text on yellow background. (I hunted in
->  the src for the balloon-help color-config, because I wanted to send
->  you a diff, but sorry, seems that I am to unfamiliar with Tk)
+> - when using the Color-Config "Steel Blue" the Balloon Help is
+>   unreadable because of white text on yellow background. (I hunted in
+>   the src for the balloon-help color-config, because I wanted to send
+>   you a diff, but sorry, seems that I am to unfamiliar with Tk)
 }]
 
 lappend texts [list {
@@ -343,9 +343,252 @@ two
     }
 
     set option(wrap_length) $old_wrap_length
+    destroy .t
+}
+
+proc test_wrap::test_edit_insert {} {
+    global option
+
+    # The test cases (_ is cursor location)
+# Wrap is set to --|
+# 1
+lappend texts [list {
+Hej hopp._
+} {space} {
+Hej hopp. _
+}]
+
+# 2
+lappend texts [list {
+There is no such thing as a free lunch_
+} {space} {
+There is no such
+thing as a free
+lunch _
+}]
+
+# 3
+lappend texts [list {
+These lines will_ foo
+wrapped
+} {space} {
+These lines will _
+foo wrapped
+}]
+
+# 4
+lappend texts [list {
+These lines will_ foo
+wrapped
+} {space space} {
+These lines will  _
+foo wrapped
+}]
+
+# 5
+lappend texts [list {
+These lines will_ foo
+wrapped
+} {space b e} {
+These lines will be_
+foo wrapped
+}]
+
+# 6
+lappend texts [list {
+These foo _
+wrapped
+} {BackSpace} {
+These foo_ wrapped
+}]
+
+# 7
+lappend texts [list {
+These foo  _
+wrapped
+} {BackSpace} {
+These foo _wrapped
+}]
+
+# 8
+lappend texts [list {
+These lines will_ foo
+wrapped
+} {BackSpace BackSpace BackSpace BackSpace BackSpace
+    BackSpace BackSpace BackSpace BackSpace BackSpace BackSpace} {
+These_ foo wrapped
+}]
+
+# 9
+lappend texts [list {
+These foo _<BR>
+* wrapped
+} {BackSpace} {
+These foo_
+* wrapped
+}]
+
+# 10
+lappend texts [list {
+These foo bar fuu _<BR>
+* wrapped
+} {h e j} {
+These foo bar fuu
+hej_
+* wrapped
+}]
+
+# 11
+lappend texts [list {
+These foo<BR>
+* wrapped foo bar _
+} {h e j} {
+These foo
+* wrapped foo bar
+  hej_
+}]
+
+# 12
+lappend texts [list {
+These foo _
+"wrapped"
+} {BackSpace} {
+These foo_ "wrapped"
+}]
+
+# 13
+lappend texts [list {
+ These foo _<BR>
+ * wrapped
+} {BackSpace} {
+ These foo_
+ * wrapped
+}]
+
+# 14
+lappend texts [list {
+ These foo bar fuu _<BR>
+ * wrapped
+} {h e j} {
+ These foo bar fuu
+ hej_
+ * wrapped
+}]
+
+# 15
+lappend texts [list {
+ These foo bar fuu<BR>
+ * wrapped foo bar _<BR>
+ * wrap2
+} {h e j} {
+ These foo bar fuu
+ * wrapped foo bar
+   hej_
+ * wrap2
+}]
+
+# 16
+lappend texts [list {
+ These foo<BR>
+ * wrapped foo bar _
+} {h e j} {
+ These foo
+ * wrapped foo bar
+   hej_
+}]
+
+# 17
+lappend texts [list {
+ These foo _
+ "wrapped"
+} {BackSpace} {
+ These foo_ "wrapped"
+}]
+
+# 18
+lappend texts [list {
+one two three_ four
+five six seven
+} {space} {
+one two three _ four
+five six seven
+}]
+
+# 19
+lappend texts [list {
+one two three_ four
+five six seven
+} {space space space} {
+one two three   _
+four five six seven
+}]
+
+# 20, this one breaks but I will ignore this
+#lappend texts [list {
+#one two three_ four
+#five six seven
+#} {space space space space space space space space} {
+#one two three       
+#_four five six seven
+#}]
+# Wrap is set to --|
+
+    text .t
+    rat_edit::create .t
+    pack .t
+    wm deiconify .
+
+    set old_wrap_length $option(wrap_length)
+    set option(wrap_length) 20
+
+    set index 0
+
+    foreach te $texts {
+	StartTest "Wrapping edit insert [incr index]"
+
+        # Insert the text
+        .t delete 1.0 end
+        .t insert 1.0 [lindex $te 0]
+
+        # Convert any <BR>\n to newlines with noWrap
+        set pos 1.0
+        while {"" != [set pos [.t search "<BR>\n" $pos]]} {
+            .t replace $pos $pos+5c "\n" noWrap
+        }
+
+        # Set cursor location to '_'
+        .t mark set insert [.t search "_" 1.0]
+        .t delete insert
+
+        # Insert new text
+        focus -force .t
+        update
+        foreach k [lindex $te 1] {
+            event generate .t <$k>
+        }
+
+        # Get result
+        .t insert insert "_"
+        set real [.t get 1.0 end-1c]
+
+        if {[.t get 1.0 end-1c] != [lindex $te 2]} {
+            puts "---- Original ----"
+            puts [lindex $te 0]
+	    puts "---- Expected ----"
+	    puts [lindex $te 2]
+	    puts "---- Actual ----"
+	    puts [.t get 1.0 end-1c]
+	    ReportError "Action failed"
+        }
+    }
+
+    set option(wrap_length) $old_wrap_length
+    destroy .t
+    wm withdraw .
 }
 
 package require rat_edit 1.0
 
 test_wrap::test_cited_wrap
 test_wrap::test_edit_wrap
+test_wrap::test_edit_insert

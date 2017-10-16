@@ -131,7 +131,6 @@ static Tcl_ObjCmdProc RatCreateAddressCmd;
 static Tcl_ObjCmdProc RatAddressCmd;
 static Tcl_CmdDeleteProc RatDeleteAddress;
 static Tcl_ObjCmdProc RatAliasCmd;
-static Tcl_ObjCmdProc RatSplitAdrCmd;
 static Tcl_ObjCmdProc RatGenerateAddressesCmd;
 
 /*
@@ -294,7 +293,6 @@ RatAddressCmd(ClientData clientData, Tcl_Interp *interp, int objc,
 {
     ADDRESS *adrPtr = (ADDRESS*)clientData;
     Tcl_CmdInfo info;
-    Tcl_Obj *oPtr;
     int useup;
 
     if (objc < 2) goto usage;
@@ -332,21 +330,8 @@ RatAddressCmd(ClientData clientData, Tcl_Interp *interp, int objc,
     } else if (!strcmp(Tcl_GetString(objv[1]), "get")) {
 	if (objc != 3) goto usage;
 	if (!strcasecmp(Tcl_GetString(objv[2]), "rfc822")) {
-	    if (adrPtr->personal) {
-		char *personal;
-
-		oPtr = Tcl_NewStringObj(adrPtr->personal, -1);
-		Tcl_IncrRefCount(oPtr);
-		personal = RatEncodeHeaderLine(interp, oPtr, 0);
-		Tcl_DecrRefCount(oPtr);
-		oPtr = Tcl_NewObj();
-		Tcl_AppendStringsToObj(oPtr, personal, " <", NULL);
-		Tcl_AppendToObj(oPtr, RatAddressMail(adrPtr), -1);
-		Tcl_AppendToObj(oPtr, ">", 1);
-		Tcl_SetObjResult(interp, oPtr);
-	    } else {
-		Tcl_SetResult(interp, RatAddressMail(adrPtr), TCL_VOLATILE);
-	    }
+            char *out = RatAddressFull(interp, adrPtr, NULL);
+            Tcl_SetResult(interp, out, TCL_VOLATILE);
 	    return TCL_OK;
 
 	} else if (!strcmp(Tcl_GetString(objv[2]), "mail")) {
@@ -970,10 +955,13 @@ RatAliasCmd(ClientData dummy,Tcl_Interp *interp,int objc,Tcl_Obj *CONST objv[])
 	Tcl_HashEntry *entryPtr;
 	Tcl_HashSearch search;
 	AliasInfo *aliasPtr;
+        char *key, keybuf[1024];
 
-	if (objc != 3) {
+	if ((objc != 3 && objc != 4)
+            || (objc == 4 && strcmp("nocase", Tcl_GetString(objv[3])))) {
 	    Tcl_AppendResult(interp, "wrong # args: should be \"",
-		    Tcl_GetString(objv[0]), " list var\"", (char *) NULL);
+                             Tcl_GetString(objv[0]),
+                             " list var ?nocase?\"", (char*)NULL);
 	    return TCL_ERROR;
 	}
 
@@ -988,8 +976,13 @@ RatAliasCmd(ClientData dummy,Tcl_Interp *interp,int objc,Tcl_Obj *CONST objv[])
 	    Tcl_ListObjAppendElement(interp, oPtr, aliasPtr->pgp_key);
 	    Tcl_ListObjAppendElement(interp, oPtr,
 				     RatGetFlagsList(interp, aliasPtr));
-	    Tcl_SetVar2Ex(interp, Tcl_GetString(objv[2]),
-		    Tcl_GetHashKey(&aliasTable, entryPtr), oPtr, 0);
+            key = Tcl_GetHashKey(&aliasTable, entryPtr);
+            if (objc == 4) {
+                strlcpy(keybuf, key, sizeof(keybuf));
+                lcase((unsigned char*)keybuf);
+                key = keybuf;
+            }
+	    Tcl_SetVar2Ex(interp, Tcl_GetString(objv[2]), key, oPtr, 0);
 	}
 	return TCL_OK;
 	
@@ -1271,7 +1264,7 @@ RatAddressFull(Tcl_Interp *interp, ADDRESS *adrPtr, char *role)
  *----------------------------------------------------------------------
  */
  
-static int
+int
 RatSplitAdrCmd(ClientData clientData, Tcl_Interp *interp, int objc,
 		     Tcl_Obj *const objv[])
 {
@@ -1581,7 +1574,8 @@ RatExpandAlias(Tcl_Interp *interp, ADDRESS *address, Tcl_DString *list,
         } else {
             ta = address;
         }
-        if (ae->mark != NULL && !strcmp(ae->mark, address->host)) {
+        if (ae->mark != NULL && address->host
+            && !strcmp(ae->mark, address->host)) {
             if (EXPAND_DISPLAY == ae->target) {
                 address->host[0] = '\0';
             } else {

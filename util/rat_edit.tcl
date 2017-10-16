@@ -476,8 +476,8 @@ proc rat_edit::wrap {w loc} {
     $w mark set wrap insert
     set line [expr {int([$w index $loc])}]
 
-    set exp_norm "^(\[ \t\]*)\[^ \t*.-\]"
-    set exp_list "^(\[\\d*.-\]*\\)?\[ \t\]+)\[^ \t*.-\]"
+    set exp_norm $option(indexp)
+    set exp_list $option(bullexp)
 
     # Start by joining with the previous line (if any)
     if {$line > 1 &&
@@ -494,8 +494,8 @@ proc rat_edit::wrap {w loc} {
 	} else {
 	    set exp $exp_list
 	}
-	regexp $exp [$w get $lp.0 $lp.$option(wrap_length)] {} indent]
-	set ilen [RatLL $indent]
+	regexp $exp [$w get $lp.0 $lp.end] {} indent
+        set ilen [RatLL $indent]
 	set len [RatLL [string trimright [$w get $lp.0 $lp.end]]]
 	set i [wrap_join $w $lp $ilen $len]
 	if {$i != "$lp.0"} {
@@ -513,13 +513,14 @@ proc rat_edit::wrap {w loc} {
         set exp $exp_list
     }
     set indent ""
-    regexp $exp [$w get $line.0 $line.$option(wrap_length)] {} indent
+    set m [regexp $exp [$w get $line.0 $line.end] {} indent]
     set ilen [RatLL $indent]
-    set len [RatLL [string trimright [$w get $line.0 $line.end]]]
+    set len [RatLL [$w get $line.0 $line.end]]
 
+    # Do the actual wrapping
     if {$option(wrap_length) < $len} {
 	set i [wrap_wrap $w $line $ilen]
-    } elseif {"" != [string trim [$w get $line.0-1l "$line.0-1l lineend"]]} {
+    } elseif {"" != [string trim [$w get $line.0+1l "$line.0+1l lineend"]]} {
 	set i [wrap_join $w $line $ilen $len]
     } else {
 	set i $line.0
@@ -530,6 +531,7 @@ proc rat_edit::wrap {w loc} {
 }
 
 # rat_edit::wrap_wrap --
+#
 # Wraps the given line and following
 #
 # Arguments:
@@ -543,6 +545,7 @@ proc rat_edit::wrap_wrap {w line indent} {
     while {1} {
 	while {$option(wrap_length) <
 	       [RatLL [string trimright [$w get $line.0 $line.end]]]} {
+            # Find a suitable break point
 	    set p [$w search -backwards " " \
 		       $line.$option(wrap_length)+1c $line.$indent+1c]
             if {"" == $p} {
@@ -551,14 +554,23 @@ proc rat_edit::wrap_wrap {w line indent} {
 	    if {"" == $p} {
 		return $line.0
 	    }
+
+            # Find region of white space to delete
 	    set start [$w search -regexp -backwards {[^ 	]} $p]
 	    set end [$w search -regexp {[^ 	]} $p]
+            
+            # If insertion cursor is in this region, then modify the region
+            if {[$w compare insert > $start] && [$w compare insert < $end]} {
+                set start insert-1c
+            }
+
+            # Delete the region and start a new line
 	    $w delete $start+1c $end
 	    $w insert $start+1c "\n[RatGen $indent]" {}
 	    incr line
 	}
 	set ln [expr {$line+1}]
-	if {![regexp "^(\[ \t\]*)\[^ \t\]" [$w get $ln.0 $ln.$indent+1c] {} s]
+	if {![regexp $option(indexp) [$w get $ln.0 $ln.$indent+1c] {} s]
 		|| [RatLL $s] != $indent
 		|| -1 != [lsearch [$w tag names $ln.0-1c] noWrap]
 		|| -1 != [lsearch [$w tag names $ln.0] noWrap]
@@ -574,6 +586,7 @@ proc rat_edit::wrap_wrap {w line indent} {
 }
 
 # rat_edit::wrap_join --
+#
 # Joins the given line and following
 #
 # Arguments:
@@ -588,23 +601,25 @@ proc rat_edit::wrap_join {w line indent len} {
     while {1} {
 	set ln [expr {$line+1}]
 	set r [expr {$option(wrap_length)-$len-1}]
-	if {[regexp "^(\[ \t\]*)(\[\[:alpha:\]\\(\])" \
-		[$w get $ln.0 $ln.$indent+1c] {} s]
-	&& [RatLL $s] == $indent
-	&& "" != [$w get $ln.0 $ln.end]
-	&& -1 == [lsearch [$w tag names $line.end] noWrap]
-	&& -1 == [lsearch [$w tag names $ln.0] noWrap]
-	&& (([$w compare $ln.[expr {$r+$indent}]+1c > $ln.end]
-	&& "" != [set p $ln.end])
-	|| "" != [set p [$w search -backwards " " \
-		$ln.[expr {$r+$indent}]+1c $ln.$indent]])} {
+	if {[regexp $option(indexp) [$w get $ln.0 $ln.$indent+1c] {} s]
+            && [RatLL $s] == $indent
+            && -1 != [set il [string length $s]]
+            && "" != [$w get $ln.0 $ln.end]
+            && -1 == [lsearch [$w tag names $line.end] noWrap]
+            && -1 == [lsearch [$w tag names $ln.0] noWrap]
+            && (([$w compare $ln.[expr {$r+$indent}]+1c > $ln.end]
+                 && "" != [set p $ln.end])
+                || "" != [set p [$w search -backwards " " \
+                                     $ln.[expr {$r+$il}]+1c $ln.$il]])} {
 	    if {"$ln.end" != $p} {
 		set start [$w search -regexp -backwards {[^ 	]} $p]
 		set end [$w search -regexp {[^ 	]} $p]
 		$w delete $start+1c $end
 		$w insert $start+1c "\n" {} $s
 	    }
-	    $w insert $line.end " "
+            if {![string is space [$w get $line.end-1c]]} {
+                $w insert $line.end " "
+            }
 	    $w delete $line.end $ln.[string length $s]
 	} else {
 	    return $line.0
@@ -638,7 +653,7 @@ proc rat_edit::wrap_paragraph {w} {
     }
 
     # 2. Move the start point to the start of the paragraph it exists in.
-    set line [expr {int([$w index $start])-1}]
+    set line [expr int([$w index $start])]
     while {$line > 1 &&
            "" != [string trim [$w get $line.0 $line.end]]} {
 	incr line -1

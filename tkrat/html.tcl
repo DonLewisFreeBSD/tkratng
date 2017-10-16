@@ -50,7 +50,7 @@ bind Html <Destroy> {
 # Contains the list of most recently used images
 set htmlImageList [list]
 
-# ShowTextHtml --
+# ShowTextHtml2 --
 #
 # Show text/html entities, should handle different fonts...
 #
@@ -58,7 +58,7 @@ set htmlImageList [list]
 # handler -	The handler which identifies the show text widget
 # body    -	The bodypart to show
 # msg     -	The message name
-proc ShowTextHtml {handler body msg} {
+proc ShowTextHtml2 {handler body msg} {
     global idCnt
     upvar \#0 $handler fh \
         msgInfo_$msg msgInfo
@@ -212,48 +212,29 @@ proc HtmlFontCmd {size args} {
 #   The name of an image if it could be constructed correctly, an empty string
 #   otherwise
 proc HtmlImageCmd {frm src width height args} {
-    global option
     global htmlImageList
     global htmlImageArray
-    global option HtmlImages
+    global HtmlImages
     
     # Don't do anything if the html widget has been destroyed
     if {![winfo exists $frm]} {
 	return
     }
 
-    if {$option(html_show_images) == 0} {
-        return ""
-    }
-    
-    if {$width < $option(html_min_image_size) 
-	&& $height < $option(html_min_image_size)} {
-        # Images that are too small may signal some spam-type of stuff
-	return ""
-    }
-
-    if {![string match http://* $src]} {
-	if {![string match http://* [$frm cget -base]]} {
-            # Can't get image because it isn't http
-	    return ""
-	} else {
-	    set src [$frm cget -base]/$src
-	}
-    }
-    
+    # Check cached images
     if {[lsearch $htmlImageList $src] != -1} {
 	return $htmlImageArray($src)
     }
-    
-    if {[catch {::http::geturl $src} token]} {
-	return ""
+
+    if {[string match foo/cid:* $src]} {
+        set filename [HtmlGetEmbeddedImage $src]
+    } else {
+        set filename [HtmlGetExternalImage $frm $src $width $height]
     }
-    
-    set filename $option(tmp)/rat.[RatGenId]
-    set fid [open $filename w 0600]
-    fconfigure $fid -encoding binary
-    puts -nonewline $fid [::http::data $token]
-    close $fid
+
+    if {"" == $filename} {
+        return ""
+    }
     
     if {[catch {image create photo -file $filename} img]} {
 	file delete -force -- $filename
@@ -274,6 +255,81 @@ proc HtmlImageCmd {frm src width height args} {
     }
     
     return $retVal
+}
+
+# HtmlGetEmbeddedImage --
+#
+# Extract an image from an related bodypart
+#
+# Arguments:
+# src: SRC element of the <IMG> tag
+#
+# Returns:
+#   The name of a file which contains the image data. Or an empty string
+#   if no image was downloaded.
+proc HtmlGetEmbeddedImage {src} {
+    global related option rat_tmp
+
+    if {![regsub "foo/cid:" $src {} id]
+        || ![info exists related($id)]} {
+        return ""
+    }
+
+    set filename $rat_tmp/rat.[RatGenId]
+    set fid [open $filename w 0600]
+    fconfigure $fid -encoding binary
+    $related($id) saveData $fid false false
+    close $fid
+
+    return $filename
+}
+
+# HtmlGetExternalImage --
+#
+# Fetches an external image to display in a HTML message
+#
+# Arguments:
+# frm: The HTML widget used to display images
+# src: SRC element of the <IMG> tag
+# width: width of the image (added automatically, could be empty)
+# height: height of the image (added automatically, could be empty)
+#
+# Returns:
+#   The name of a file which contains the image data. Or an empty string
+#   if no image was downloaded.
+proc HtmlGetExternalImage {frm src width height} {
+    global option rat_tmp
+
+    if {$option(html_show_images) == 0} {
+        return ""
+    }
+    
+    if {$width < $option(html_min_image_size) 
+	&& $height < $option(html_min_image_size)} {
+        # Images that are too small may signal some spam-type of stuff
+	return ""
+    }
+
+    if {![string match http://* $src]} {
+	if {![string match http://* [$frm cget -base]]} {
+            # Can't get image because it isn't http
+	    return ""
+	} else {
+	    set src [$frm cget -base]/$src
+	}
+    }
+    
+    if {[catch {::http::geturl $src} token]} {
+	return ""
+    }
+    
+    set filename $rat_tmp/rat.[RatGenId]
+    set fid [open $filename w 0600]
+    fconfigure $fid -encoding binary
+    puts -nonewline $fid [::http::data $token]
+    close $fid
+
+    return $filename
 }
 
 # HtmlResolverCmd --

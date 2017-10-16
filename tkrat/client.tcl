@@ -16,7 +16,7 @@ proc TkRatClientUsage {} {
 
     puts "Usage: $argv0 \[-confdir dir\] \[-appname name\] \[-open ?name?\] \\"
     puts "\t\[-opennew ?name?\] \[-compose ?args?\] \[-netsync ?set?\] \\"
-    puts "\t\[-blank\]"
+    puts "\t\[mailto-link\] \[-blank\]"
     exit 0
 }
 
@@ -64,6 +64,9 @@ proc TkRatClientStart {} {
 			incr i
 		    }
 		}
+            mailto:.* {
+                lappend cmds [list mailto [lindex $argv $i]]
+            }
 	    default {
 		TkRatClientUsage
 	    }

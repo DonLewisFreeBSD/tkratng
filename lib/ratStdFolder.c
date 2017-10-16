@@ -219,6 +219,9 @@ Std_StreamOpen(Tcl_Interp *interp, char *spec, long options,
 	    }
 	    connPtr->closing = 0;
 	}
+    } else if (options & OP_HALFOPEN) {
+        /* Halfopen is only applicable to IMAP-streams */
+        return NULL;
     }
     if (stream && options & OP_HALFOPEN) {
 	return stream;
@@ -369,14 +372,16 @@ Std_StreamCloseAllCached(Tcl_Interp *interp)
  *----------------------------------------------------------------------
  */
 
-MAILSTREAM*
-OpenStdFolder(Tcl_Interp *interp, char *spec, void *voidPtr)
+int
+OpenStdFolder(Tcl_Interp *interp, char *spec, void *voidPtr, int append_only,
+              MAILSTREAM **stream_out)
 {
     MAILSTREAM *stream = NULL;
     RatStdFolderType type;
     StdFolderInfo *stdPtr = (StdFolderInfo*)voidPtr;
     struct stat sbuf;
     char *to_free = NULL;
+    long options;
 
     type = Std_GetType(spec);
     if (RAT_UNIX == type) {
@@ -388,30 +393,38 @@ OpenStdFolder(Tcl_Interp *interp, char *spec, void *voidPtr)
 	close(fd);
     }
     logLevel = RAT_BABBLE;
-    stream = Std_StreamOpen(interp, spec, 0, (stdPtr ? &stdPtr->error : NULL),
+    if (append_only) {
+        options = OP_HALFOPEN;
+    } else {
+        options = 0;
+    }
+    stream = Std_StreamOpen(interp, spec, options,
+                            (stdPtr ? &stdPtr->error : NULL),
 			    (stdPtr ? &stdPtr->handlers : NULL));
     if (logLevel > RAT_WARN) {
 	Tcl_SetResult(interp, logMessage, TCL_VOLATILE);
-	return NULL;
+	return TCL_ERROR;
     }
-    if (NIL == stream) {
+    if (NIL == stream && (!append_only || '{' == spec[0])) {
 	Tcl_AppendResult(interp, "Failed to open std mailbox \"",
 			 spec, "\"", (char *) NULL);
-	return NULL;
+	return TCL_ERROR;
     }
-    if (!strcmp(stream->dtb->name, "mbx")) {
+    if (stream && !strcmp(stream->dtb->name, "mbx")) {
 	type = RAT_MBX;
     }
     if (stdPtr) {
 	stdPtr->stream = stream;
 	stdPtr->referenceCount = 1;
-	stdPtr->exists = stream->nmsgs;
+	stdPtr->exists = (stream ? stream->nmsgs : 0);
 	stdPtr->type = type;
+	stdPtr->mailbox = cpystr(spec);
     }
     if (to_free) {
 	ckfree(to_free);
     }
-    return stream;
+    *stream_out = stream;
+    return TCL_OK;
 }
 
 
@@ -435,7 +448,7 @@ OpenStdFolder(Tcl_Interp *interp, char *spec, void *voidPtr)
  */
 
 RatFolderInfo*
-RatStdFolderCreate(Tcl_Interp *interp, Tcl_Obj *defPtr)
+RatStdFolderCreate(Tcl_Interp *interp, int append_only, Tcl_Obj *defPtr)
 {
     RatFolderInfo *infoPtr;
     StdFolderInfo *stdPtr;
@@ -457,9 +470,10 @@ RatStdFolderCreate(Tcl_Interp *interp, Tcl_Obj *defPtr)
     stdPtr->handlers.state = (void*)stdPtr;
     stdPtr->handlers.exists = Std_HandleExists;
     stdPtr->handlers.expunged = Std_HandleExpunged;
+    stdPtr->mailbox = NULL;
 
     if (NULL == (spec = RatGetFolderSpec(interp, defPtr))
-	|| NULL == (stream = OpenStdFolder(interp, spec, stdPtr))) {
+	|| TCL_OK != OpenStdFolder(interp, spec, stdPtr, append_only,&stream)){
 	ckfree(stdPtr);
 	return NULL;
     }
@@ -470,10 +484,10 @@ RatStdFolderCreate(Tcl_Interp *interp, Tcl_Obj *defPtr)
     Tcl_ListObjIndex(interp, defPtr, 0, &oPtr);
     infoPtr->name = cpystr(Tcl_GetString(oPtr));
     infoPtr->size = -1;
-    infoPtr->number = stream->nmsgs;
-    infoPtr->recent = stream->recent;
+    infoPtr->number = (stream ? stream->nmsgs : 0);
+    infoPtr->recent = (stream ? stream->recent : 0);
     infoPtr->unseen = 0;
-    if (stream->nmsgs) {
+    if (infoPtr->number) {
 	sprintf(buf, "1:%ld", stream->nmsgs);
 	mail_fetchfast_full(stream, buf, NIL);
 	for (i = 1; i <= stream->nmsgs; i++)
@@ -490,6 +504,8 @@ RatStdFolderCreate(Tcl_Interp *interp, Tcl_Obj *defPtr)
     infoPtr->setInfoProc = Std_SetInfoProc;
     infoPtr->createProc = Std_CreateProc;
     infoPtr->syncProc = NULL;
+    infoPtr->dbinfoGetProc = NULL;
+    infoPtr->dbinfoSetProc = NULL;
     infoPtr->private = (ClientData) stdPtr;
 
     return infoPtr;
@@ -591,12 +607,15 @@ Std_CloseProc(RatFolderInfoPtr infoPtr, Tcl_Interp *interp, int expunge)
     int i, j;
 
     if (stdPtr->stream) {
-	if (expunge) {
+	if (expunge && !infoPtr->append_only) {
 	    logIgnore++;
 	    mail_expunge(stdPtr->stream);
 	    logIgnore--;
 	}
 	Std_StreamClose(interp, stdPtr->stream);
+    }
+    if (stdPtr->mailbox) {
+        ckfree(stdPtr->mailbox);
     }
     if (0 == --stdPtr->referenceCount) {
 	for (i=0; i<infoPtr->number; i++) {
@@ -640,9 +659,13 @@ static int
 Std_UpdateProc(RatFolderInfoPtr infoPtr, Tcl_Interp *interp,RatUpdateType mode)
 {
     StdFolderInfo *stdPtr = (StdFolderInfo *) infoPtr->private;
-    int numNew = 0, oldExists, i;
+    int numNew = 0, oldExists, i, nmsgs;
     char sequence[16];
 
+    if (infoPtr->append_only) {
+        return 0;
+    }
+    
     if (RAT_SYNC == mode) {
 	MESSAGECACHE *cachePtr;
 	MessageInfo *msgPtr;
@@ -698,8 +721,9 @@ Std_UpdateProc(RatFolderInfoPtr infoPtr, Tcl_Interp *interp,RatUpdateType mode)
 	mail_fetchfast_full(stdPtr->stream, sequence, NIL);
     }
     infoPtr->number = stdPtr->exists;
-    infoPtr->recent = stdPtr->stream->recent;
-    for (i = 1,infoPtr->unseen=0; i <= stdPtr->stream->nmsgs; i++) {
+    infoPtr->recent = (stdPtr->stream ? stdPtr->stream->recent : 0);
+    nmsgs = (stdPtr->stream ? stdPtr->stream->nmsgs : 0);
+    for (i = 1,infoPtr->unseen=0; i <= nmsgs; i++) {
 	if (!mail_elt(stdPtr->stream,i)->seen) infoPtr->unseen++;
     }
     return numNew;
@@ -733,9 +757,9 @@ Std_InsertProc(RatFolderInfoPtr infoPtr, Tcl_Interp *interp, int argc,
     STRING string;
     int i;
 
-    if (NIL == stdPtr->stream) {
+    if (NIL == stdPtr->stream && '{' == stdPtr->mailbox[0]) {
 	Tcl_AppendResult(interp, "Failed to open std mailbox \"",
-		argv[2], "\"", (char *) NULL);
+		argv[2], "\" for insert", (char *) NULL);
 	return TCL_ERROR;
     }
     Tcl_DStringInit(&ds);
@@ -745,13 +769,13 @@ Std_InsertProc(RatFolderInfoPtr infoPtr, Tcl_Interp *interp, int argc,
 		      &ds, flags, sizeof(flags), date, sizeof(date));
 	INIT(&string,mail_string,Tcl_DStringValue(&ds),Tcl_DStringLength(&ds));
 	RatPurgeFlags(flags, 1);
-	if (!mail_append_full(stdPtr->stream, stdPtr->stream->mailbox,
+	if (!mail_append_full(stdPtr->stream, stdPtr->mailbox,
 			      flags, date, &string)){
 	    Tcl_SetResult(interp, "mail_append failed", TCL_STATIC);
 	    return TCL_ERROR;
 	}
 	Tcl_DStringSetLength(&ds, 0);
-	if (!stdPtr->exists) {
+	if (!stdPtr->exists && stdPtr->stream) {
 	    if (T != mail_ping(stdPtr->stream)) {
 		char buf[1024];
 		Tcl_DStringFree(&ds);
@@ -796,11 +820,10 @@ Std_SetFlagProc(RatFolderInfoPtr infoPtr, Tcl_Interp *interp, int *ilist,
     StdFolderInfo *stdPtr = (StdFolderInfo *) infoPtr->private;
     MessageInfo *msgPtr;
     MESSAGECACHE *cachePtr;
-    char s[64];
+    char s[128];
     int i;
     
-    if (!stdPtr->stream
-	|| stdPtr->stream->rdonly) {
+    if (!stdPtr->stream || stdPtr->stream->rdonly) {
 	return TCL_OK;
     }
 
@@ -824,7 +847,7 @@ Std_SetFlagProc(RatFolderInfoPtr infoPtr, Tcl_Interp *interp, int *ilist,
 	    for (i++; ilist[i] == ilist[i+1]-1 && i<count; i++);
 	    snprintf(s+strlen(s), sizeof(s)-strlen(s), ":%d", ilist[i]+1);
 	}
-	if (i == count-1 || strlen(s) >= sizeof(s)-8) {
+	if (i == count-1 || strlen(s) >= sizeof(s)-32) {
 	    if (value) {
 		mail_setflag_full(stdPtr->stream, s,
 				  flag_name[flag].imap_name, NIL);
@@ -856,7 +879,7 @@ Std_SetFlagProc(RatFolderInfoPtr infoPtr, Tcl_Interp *interp, int *ilist,
 	case RAT_RECENT:   cachePtr->recent = value; break;
         case RAT_FLAG_END: break;
 	}
-	infoPtr->recent = stdPtr->stream->recent;
+	infoPtr->recent = (stdPtr->stream ? stdPtr->stream->recent : 0);
 	if (logLevel > RAT_WARN) {
 	    Tcl_SetResult(interp, logMessage, TCL_VOLATILE);
 	    return TCL_ERROR;

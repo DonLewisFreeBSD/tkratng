@@ -139,6 +139,7 @@ proc Aliases {} {
     # Track list slections
     bind $hd(listbox) <<ListboxSelect>> "AliasUpdateState $id"
     bind $hd(listbox) <Double-1> "AliasEdit $id"
+    bind $w <Escape> "$w.b.close invoke"
 
     ::tkrat::winctl::SetGeometry alias $w $hd(listbox)
     lappend aliasWindows $id
@@ -827,7 +828,7 @@ proc AddrbookDelete {} {
     # Create identifier
     set id al[incr idCnt]
     set w .$id
-    upvar #0 $id hd
+    upvar \#0 $id hd
 
     # Create toplevel
     toplevel $w -class TkRat
@@ -876,7 +877,7 @@ proc AddrbookDelete {} {
 # action   -	What to do
 
 proc AddrbookDeleteDone {handler action} {
-    upvar #0 $handler hd
+    upvar \#0 $handler hd
     global option aliasBook bookMod t b
 
     if {$action} {
@@ -1153,7 +1154,7 @@ proc AliasExtract {handler msgs} {
 # action  - Which action we should take
 
 proc AliasExtractDone {handler action} {
-    upvar #0 $handler hd
+    upvar \#0 $handler hd
     global t b aliasBook
 
     # Find which entries we should use
@@ -1199,7 +1200,7 @@ proc AliasExtractDone {handler action} {
 # handler - The handler of the extract window
 
 proc AliasExtractClearSelection {handler} {
-    upvar #0 $handler hd
+    upvar \#0 $handler hd
 
     foreach i [array names hd *,use] {
 	set hd($i) 0
@@ -1220,7 +1221,7 @@ proc AliasChooser {master} {
     # Create identifier
     set id al[incr idCnt]
     set w .$id
-    upvar #0 $id hd
+    upvar \#0 $id hd
 
     # Create toplevel
     toplevel $w -class TkRat
@@ -1298,7 +1299,7 @@ proc AliasChooser {master} {
 # direction - Which direction we should move the selection.
 
 proc AliasChooserMoveSel {handler direction} {
-    upvar #0 $handler hd
+    upvar \#0 $handler hd
 
     set cur [$hd(list) curselection]
     $hd(list) selection clear $cur
@@ -1333,7 +1334,7 @@ proc AliasChooserMoveSel {handler direction} {
 # key	    - The pressed key
 
 proc AliasChooserSearch {handler key} {
-    upvar #0 $handler hd
+    upvar \#0 $handler hd
 
     if {1 != [scan $key "%s" key2]} {
 	return

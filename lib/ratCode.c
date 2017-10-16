@@ -296,72 +296,78 @@ Tcl_DString*
 RatDecode(Tcl_Interp *interp, int cte, const char *data, int length,
 	  const char *charset)
 {
-    char *dst, buf[64], lbuf[4];
+    char *dst, lbuf[4], d[3];
     const char *src;
-    int allocated, dataIndex = 0, index, srcLength, len;
-    Tcl_Encoding enc = NULL;
-    Tcl_DString *dsPtr = (Tcl_DString*)ckalloc(sizeof(Tcl_DString)),
-		tmpDs;
+    int dataIndex = 0, index, srcLength, len;
+    Tcl_DString *dsPtr = (Tcl_DString*)ckalloc(sizeof(Tcl_DString)), decoded;
 
-    Tcl_DStringInit(dsPtr);
-    if (charset) {
-        enc = RatGetEncoding(interp, charset);
+    Tcl_DStringInit(&decoded);
+
+    if (cte == ENCBASE64) {
+        /* Handle base64 */
+
+        while (dataIndex < length) {
+            for (index=0; dataIndex<length && index<4; dataIndex++) {
+                if (strchr(alphabet64, data[dataIndex])) {
+                    lbuf[index++] = strchr(alphabet64, data[dataIndex])
+                        - alphabet64;
+                }
+            }
+            if (4 == index) {
+                index=0;
+                d[index++] = lbuf[0] << 2 | ((lbuf[1]>>4)&0x3);
+                if (strchr(alphabet64, '=')-alphabet64 != lbuf[2]) {
+                    d[index++] = lbuf[1] << 4 | ((lbuf[2]>>2)&0xf);
+                    if (strchr(alphabet64, '=')-alphabet64 != lbuf[3]) {
+                        d[index++] = lbuf[2] << 6 | (lbuf[3]&0x3f);
+                    }
+                }
+                Tcl_DStringAppend(&decoded, d, index);
+            }
+        }
+        src = Tcl_DStringValue(&decoded);
+        srcLength = Tcl_DStringLength(&decoded);
+
+    } else if (cte == ENCQUOTEDPRINTABLE) {
+        /* Handle quoted-printable */
+
+        while (dataIndex < length) {
+            if ('=' == data[dataIndex]) {
+                if ('\r' == data[dataIndex+1]) {
+                    dataIndex += 3;
+                } else if ('\n' == data[dataIndex+1]) {
+                    dataIndex += 2;
+                } else {
+                    d[0] = (HexValue(data[dataIndex+1])<<4)
+                        + HexValue(data[dataIndex+2]);
+                    Tcl_DStringAppend(&decoded, d, 1);
+                    dataIndex += 3;
+                }
+            } else {
+                Tcl_DStringAppend(&decoded, &data[dataIndex++], 1);
+            }
+        }
+        src = Tcl_DStringValue(&decoded);
+        srcLength = Tcl_DStringLength(&decoded);
+
+    } else {
+        /* Handle unencoded */
+
+        src = data;
+        srcLength = length;
+        dataIndex = length;
     }
-    while (dataIndex < length) {
-	if (cte == ENCBASE64) {
-	    src = buf;
-	    for (srcLength = 0; dataIndex < length
-		    && srcLength < sizeof(buf)-2;) {
-		for (index=0; dataIndex<length && index<4; dataIndex++) {
-		    if (strchr(alphabet64, data[dataIndex])) {
-			lbuf[index++] = strchr(alphabet64, data[dataIndex])
-				- alphabet64;
-		    }
-		}
-		if (0 == index) {
-		    continue;
-		}
-		buf[srcLength++] = lbuf[0] << 2 | ((lbuf[1]>>4)&0x3);
-		if (strchr(alphabet64, '=')-alphabet64 != lbuf[2]) {
-		    buf[srcLength++] = lbuf[1] << 4 | ((lbuf[2]>>2)&0xf);
-		    if (strchr(alphabet64, '=')-alphabet64 != lbuf[3]) {
-			buf[srcLength++] = lbuf[2] << 6 | (lbuf[3]&0x3f);
-		    }
-		}
-	    }
-	} else if (cte == ENCQUOTEDPRINTABLE) {
-	    src = buf;
-	    for (srcLength = 0; dataIndex < length &&
-		    srcLength < sizeof(buf); ) {
-		if ('=' == data[dataIndex]) {
-		    if ('\r' == data[dataIndex+1]) {
-			dataIndex += 3;
-		    } else if ('\n' == data[dataIndex+1]) {
-			dataIndex += 2;
-		    } else {
-			buf[srcLength++] = (HexValue(data[dataIndex+1])<<4)
-			    + HexValue(data[dataIndex+2]);
-			dataIndex += 3;
-		    }
-		} else {
-		    buf[srcLength++] = data[dataIndex++];
-		}
-	    }
-	} else {
-	    src = data;
-	    srcLength = length;
-	    dataIndex = length;
-	    allocated = 0;
-	}
-	if (charset) {
-	    Tcl_ExternalToUtfDString(enc, src, srcLength, &tmpDs);
-	    Tcl_DStringAppend(dsPtr,
-		    Tcl_DStringValue(&tmpDs), Tcl_DStringLength(&tmpDs));
-	    Tcl_DStringFree(&tmpDs);
-	} else {
-	    Tcl_DStringAppend(dsPtr, src, srcLength);
-	}
+
+    /* Convert charset to utf-8 if needed */
+    if (charset && strcasecmp(charset, "utf-8")) {
+        Tcl_Encoding enc = RatGetEncoding(interp, charset);
+        Tcl_ExternalToUtfDString(enc, src, srcLength, dsPtr);
+    } else {
+        Tcl_DStringInit(dsPtr);
+        Tcl_DStringAppend(dsPtr, src, srcLength);
     }
+
+    /* Fix line endings for text */
     if (charset) {
 	len = Tcl_DStringLength(dsPtr);
 	for (src = dst = Tcl_DStringValue(dsPtr); *src; src++) {
@@ -373,6 +379,10 @@ RatDecode(Tcl_Interp *interp, int cte, const char *data, int length,
 	}
 	Tcl_DStringSetLength(dsPtr, len);
     }
+
+    /* Free temporary storage */
+    Tcl_DStringFree(&decoded);
+    
     return dsPtr;
 }
 
@@ -1511,6 +1521,52 @@ RatDecodeParameters(Tcl_Interp *interp, PARAMETER *inparam)
 	    Tcl_DStringFree(&value);
 	}
     }
+}
+
+/*
+ *----------------------------------------------------------------------
+ *
+ * ratDecodeUrlcCmd --
+ *
+ *	See ../doc/interface for a descriptions of arguments and result.
+ *
+ * Results:
+ *      See above
+ *
+ * Side effects:
+ *      None.
+ *
+ *
+ *----------------------------------------------------------------------
+ */
+
+int
+RatDecodeUrlcCmd(ClientData dummy, Tcl_Interp *interp, int objc,
+	Tcl_Obj *const objv[])
+{
+    char *decoded, *src, *d, *header;
+    int addr;
+    
+    if (objc != 3 || Tcl_GetBooleanFromObj(interp, objv[2], &addr)) {
+ 	Tcl_AppendResult(interp, "Bad usage", TCL_STATIC);
+	return TCL_ERROR;
+    }
+    src = Tcl_GetString(objv[1]);
+    decoded = (char*)ckalloc(strlen(src)+1);
+    for (d=decoded; *src; src++) {
+        if ('%' == *src && src[1] && src[2]) {
+            *d++ = (HexValue(src[1])<<4) + HexValue(src[2]);
+            src += 2;
+        } else {
+            *d++ = *src;
+        }
+    }
+    *d = '\0';
+
+    header = RatDecodeHeader(interp, decoded, addr);
+    Tcl_SetObjResult(interp, Tcl_NewStringObj(header, -1));
+    ckfree(decoded);
+    return TCL_OK;
 }
 
 /*

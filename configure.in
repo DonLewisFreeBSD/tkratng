@@ -113,8 +113,12 @@ if test "x$required_tcl_version" != "x"; then
 	AC_MSG_ERROR('Can not find tcl/tk $required_tcl_version in path')
     fi
 else
-    AC_PATH_PROG(tclsh, tclsh8.5, , $PATH)
-    tv=8.5
+    AC_PATH_PROG(tclsh, tclsh8.6, , $PATH)
+    tv=8.6
+    if test "x$tclsh" = "x"; then
+	AC_PATH_PROG(tclsh, tclsh8.5, , $PATH)
+	tv=8.5
+    fi
     if test "x$tclsh" = "x"; then
 	AC_PATH_PROG(tclsh, tclsh8.4, , $PATH)
 	tv=8.4
@@ -553,7 +557,7 @@ else
 	# results, and the version is kept in special file).
     
 	if test -r /etc/.relid -a "X`uname -n`" = "X`uname -s`" ; then
-	    system=MP-RAS-`awk '{print $3}' /etc/.relid'`
+	    system=MP-RAS-`awk '{print $3}' /etc/.relid`
 	fi
 	if test "`uname -s`" = "AIX" ; then
 	    system=AIX-`uname -v`.`uname -r`
@@ -623,6 +627,13 @@ changequote([, ])dnl
 	SHLIB_CFLAGS=""
         SHLIB_LD="libtool -dynamic -single_module -flat_namespace -undefined suppress -multiply_defined suppress"
 	SHLIB_LD_LIBS='-lSystem -lcc_dynamic'
+	SHLIB_SUFFIX=".dylib"
+	test -e /sw/include/openssl && OSTYPE=fnk || OSTYPE=osx
+	;;
+    Darwin-8.*)
+	SHLIB_CFLAGS=""
+        SHLIB_LD="libtool -dynamic -single_module -flat_namespace -undefined suppress -multiply_defined suppress"
+	SHLIB_LD_LIBS='-lSystemStubs'
 	SHLIB_SUFFIX=".dylib"
 	test -e /sw/include/openssl && OSTYPE=fnk || OSTYPE=osx
 	;;

@@ -46,17 +46,19 @@ proc RatType {fname} {
     if {"" == $mimetype} {
         set mimetype [eval exec $option(mimeprog) [list $fname] 2>/dev/null]
     }
-    
+
     # Parse the result
-    if {[regexp {^[^ ]+/[^ ]+$} $mimetype]} {
+    if {[regexp {^[-a-z0-9A-Z]+/[-a-z0-9A-Z]+$} $mimetype]} {
 	# Cool, the MIME type is set for us. Nothing to do!
-    } elseif {[regexp {^([^ ]+)/([^;, ]+),.*$} $mimetype -> partA partB]}  {
+    } elseif {[regexp {^([-a-z0-9A-Z]+)/([-a-z0-9A-Z]+),.*$} \
+                   $mimetype -> partA partB]}  {
 	# Almost ok. The MIME type returns with stuff at the end. Strip the
 	# stuff and just keep the MIME type. "stuff" is anything after the
 	# first comma
 	set mimetype "$partA/$partB"
-    } elseif {[regexp {^([^:]+): ([^ ]+)/([^;, ]+).*$} $mimetype -> name \
-	    partA partB] && [string equal $name $fname]} {
+    } elseif {[regexp {^([^:]+): ([-a-z0-9A-Z]+)/([-a-z0-9A-Z]+).*$} \
+                   $mimetype -> name partA partB] \
+                  && [string equal $name $fname]} {
 	# Hmm... not cool. We get back the filename followed by the mime type.
 	# We'll assume that there may or may not be a comma after the MIME
 	# type.
@@ -77,4 +79,3 @@ proc RatType {fname} {
     
     return [list $mimetype $encoding]
 }
-

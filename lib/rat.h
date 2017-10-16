@@ -94,6 +94,10 @@
 #   define CONST84
 #endif
 
+#ifndef CONST85
+#   define CONST85
+#endif
+
 /*
  * Sigh, tcl uses different prototypes for its replacement functions for
  * malloc, realloc and free than in the original functions. Also tcl
@@ -210,6 +214,8 @@ extern char *RatReadAndCanonify(Tcl_Interp *interp, char *filename,
 				unsigned long *size, int canonify);
 extern void RatCanonalize(Tcl_DString *ds);
 extern char* RatGenId();
+extern ssize_t SafeRead(int fd, void *buf, size_t count);
+extern struct passwd* GetPw(void);
 
 /* RatSender.c */
 extern void RatNudgeSender(Tcl_Interp *interp);
@@ -240,6 +246,7 @@ extern unsigned char *RatDecodeQP(unsigned char *line);
 extern Tcl_ObjCmdProc RatDecodeQPCmd;
 extern void RatEncodeParameters(Tcl_Interp *interp, PARAMETER *p);
 extern void RatDecodeParameters(Tcl_Interp *interp, PARAMETER *p);
+extern Tcl_ObjCmdProc RatDecodeUrlcCmd;
 
 /* ratAddress.c */
 extern void RatInitAddressHandling(Tcl_Interp *interp);
@@ -255,6 +262,7 @@ extern void RatGenerateAddresses(Tcl_Interp *interp, const char *role,
 				 char *msgh, ADDRESS **from, ADDRESS **sender);
 extern CONST84 char *RatFindCharInHeader(CONST84 char *header, char m);
 extern void RatInitAddessHandling(Tcl_Interp *interp);
+extern Tcl_ObjCmdProc RatSplitAdrCmd;
 
 /* ratDbase.c */
 extern int RatDbInsert (Tcl_Interp *interp, const char *to, const char *from,
@@ -277,6 +285,9 @@ extern int RatDbExpire (Tcl_Interp *interp, char *infolder,
 extern void RatDbClose(void);
 extern int RatDbCheck(Tcl_Interp *interp, int fix);
 extern Tcl_ObjCmdProc RatDbaseInfoCmd;
+extern Tcl_ObjCmdProc RatDbaseKeywordsCmd;
+extern int RatDbSetInfo(Tcl_Interp *interp, int *indexes, int num_indexes,
+                        Tcl_Obj *keywords, Tcl_Obj *ex_time, Tcl_Obj *ex_type);
 
 /* ratMessage.c */
 extern int RatMessageGetHeader(Tcl_Interp *interp, char *srcHeader);

@@ -217,6 +217,7 @@ proc rat_ispell::CheckTextWidget {tw} {
     $f.lang configure -width $lwidth
     set hd(langbutton) $f.lang
 
+    bind $w <Escape> "$f.quit invoke"
     bind $lbx <ButtonRelease-1> "rat_ispell::SyncListBoxAndRepString $w $lbx"
     bind $lbx <Double-1> "set rat_ispell::${w}(returnString) CheckWord-replace"
 

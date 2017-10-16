@@ -37,7 +37,7 @@ proc rat_list::create {listvar identifier addproc editproc deleteproc \
 	dismissproc title add edit delete dismiss} {
     variable openLists
     variable idCnt
-    upvar #0 $listvar list
+    upvar \#0 $listvar list
     
     # Make sure the list exists
     if {![info exists list]} {
@@ -55,7 +55,7 @@ proc rat_list::create {listvar identifier addproc editproc deleteproc \
     # Create identifier
     set id l[incr idCnt]
     set w .rat_list_$id
-    upvar #0 rat_list::$id hd
+    upvar \#0 rat_list::$id hd
 
     set hd(identifier) $identifier
     set hd(w) $w
@@ -84,10 +84,11 @@ proc rat_list::create {listvar identifier addproc editproc deleteproc \
     pack $w.f.scroll -side right -fill y
     pack $w.f.list -side left -expand 1 -fill both
 
-    button $w.add -text $add -command "eval $addproc {{rat_list::add $id}}"
-    button $w.edit -text $edit -command "rat_list::edit $id"
-    button $w.delete -text $delete -command "rat_list::delete $id"
-    button $w.dismiss -text $dismiss -command "rat_list::dismiss $id"
+    button $w.add -text $add \
+        -command [concat $addproc [list [list rat_list::add $id]]]
+    button $w.edit -text $edit -command [list rat_list::edit $id]
+    button $w.delete -text $delete -command [list rat_list::delete $id]
+    button $w.dismiss -text $dismiss -command [list rat_list::dismiss $id]
 
     pack $w.f -side left -expand 1 -fill both
     pack $w.add \
@@ -95,6 +96,7 @@ proc rat_list::create {listvar identifier addproc editproc deleteproc \
 	 $w.delete \
 	 $w.dismiss -side top -padx 5 -fill x -expand 1
 
+    bind $w <Escape> "$w.dismiss invoke"
     bind $w.f.list <Double-1> "rat_list::edit $id"
     bind $w.f.list <ButtonRelease-1> "rat_list::setState $id"
     bind $w.f.list <KeyPress> "rat_list::setState $id"
@@ -112,7 +114,7 @@ proc rat_list::create {listvar identifier addproc editproc deleteproc \
 }
 
 proc rat_list::setState {id} {
-    upvar #0 rat_list::$id hd
+    upvar \#0 rat_list::$id hd
 
     set w $hd(w)
     set l [llength [$hd(list) curselection]]
@@ -131,8 +133,8 @@ proc rat_list::setState {id} {
 }
 
 proc rat_list::changeName {id old new} {
-    upvar #0 rat_list::$id hd
-    upvar #0 $hd(listvar) list
+    upvar \#0 rat_list::$id hd
+    upvar \#0 $hd(listvar) list
 
     set i [lsearch -exact $list $old]
     $hd(list) delete $i
@@ -142,8 +144,8 @@ proc rat_list::changeName {id old new} {
 }
 
 proc rat_list::add {id elem} {
-    upvar #0 rat_list::$id hd
-    upvar #0 $hd(listvar) list
+    upvar \#0 rat_list::$id hd
+    upvar \#0 $hd(listvar) list
 
     if {"" != $elem} {
 	lappend list $elem
@@ -154,15 +156,15 @@ proc rat_list::add {id elem} {
 }
 
 proc rat_list::edit {id} {
-    upvar #0 rat_list::$id hd
+    upvar \#0 rat_list::$id hd
 
     set current [$hd(list) get [$hd(list) curselection]]
     eval $hd(editproc) [list $current [list rat_list::changeName $id $current]]
 }
 
 proc rat_list::delete {id} {
-    upvar #0 rat_list::$id hd
-    upvar #0 $hd(listvar) list
+    upvar \#0 rat_list::$id hd
+    upvar \#0 $hd(listvar) list
 
     foreach elemIndex [lsort -decreasing -integer [$hd(list) curselection]] {
 	eval $hd(deleteproc) [list [$hd(list) get $elemIndex]]
@@ -173,7 +175,7 @@ proc rat_list::delete {id} {
 }
 
 proc rat_list::dismiss {id} {
-    upvar #0 rat_list::$id hd
+    upvar \#0 rat_list::$id hd
     variable openLists
 
     if {[string length $hd(dismissproc)]} {

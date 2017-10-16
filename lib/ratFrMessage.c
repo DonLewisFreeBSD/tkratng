@@ -95,6 +95,7 @@ RatFrMessagesInit(MessageProcInfo *messageProcInfoPtr)
     messageProcInfoPtr->fetchBodyProc = Fr_FetchBodyProc;
     messageProcInfoPtr->bodyDeleteProc = Fr_BodyDeleteProc;
     messageProcInfoPtr->getInternalDateProc = Fr_GetInternalDateProc;
+    messageProcInfoPtr->dbinfoGetProc = NULL;
 }
 
 
@@ -381,7 +382,8 @@ RatFrCreateBody(BODY *b, Tcl_Interp *interp, char *role, Tcl_Obj *body_data,
     }
     /* Content-type & parameters */
     for (i=0;
-	 i < TYPEMAX-1 && strcasecmp(body_types[i],Tcl_GetString(objv[0]));
+	 i < TYPEMAX-1 && body_types[i] &&
+             strcasecmp(body_types[i], Tcl_GetString(objv[0]));
 	 i++);
     b->type = i;
     b->subtype = (char*)ucase((unsigned char*)cpystr(Tcl_GetString(objv[1])));

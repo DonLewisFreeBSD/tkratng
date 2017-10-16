@@ -88,6 +88,7 @@ typedef struct StdFolderInfo {
     int error;                  /* Error status */
     RatStdFolderType type;	/* The exact type of this folder */
     FolderHandlers handlers;	/* The event handlers */
+    char *mailbox;              /* Mailbox specifier */
 } StdFolderInfo;
 
 /*

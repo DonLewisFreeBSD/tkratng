@@ -9,13 +9,15 @@ namespace eval test_disonline {
 }
 
 proc test_disonline::verify_map {mf map} {
+    global tmp
+
     foreach e $map {
 	set expected($e) 1
     }
     if {[catch {open $mf r} f]} {
 	return 0
     }
-    file copy -force $mf /tmp/map
+    file copy -force $mf $tmp/map
     while {-1 != [gets $f line]} {
 	if {[catch {unset expected($line)}]} {
 	    close $f

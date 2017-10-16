@@ -22,7 +22,7 @@ proc RatGetPGPPassPhrase {} {
     # Create identifier
     set id pgpPass[incr idCnt]
     set w .$id
-    upvar #0 $id hd
+    upvar \#0 $id hd
 
     # Create toplevel
     toplevel $w -class TkRat
@@ -40,6 +40,7 @@ proc RatGetPGPPassPhrase {} {
 
     ::tkrat::winctl::SetGeometry pgpPhrase $w
     ::tkrat::winctl::ModalGrab $w $w.entry
+    bind $w <Escape> "$w.button_cancel invoke"
 
     tkwait variable ${id}(done)
 
@@ -64,11 +65,10 @@ proc RatPGPError {error} {
     # Create identifier
     set id pgpProblem[incr idCnt]
     set w .$id
-    upvar #0 $id hd
+    upvar \#0 $id hd
 
     # Create toplevel
     toplevel $w -class TkRat
-    wm transient $w .
     wm title $w $t(pgp_problem) 
 
     # Populate window
@@ -104,8 +104,9 @@ proc RatPGPError {error} {
     wm protocol $w WM_DELETE_WINDOW "set ${id}(done) ABORT"
 
     ::tkrat::winctl::SetGeometry pgpError $w $w.f.t.text
-
     ::tkrat::winctl::ModalGrab $w
+    bind $w <Escape> "$w.f.b.abort invoke"
+
     tkwait variable ${id}(done)
 
     ::tkrat::winctl::RecordGeometry pgpError $w $w.f.t.text
@@ -135,7 +136,7 @@ proc RatPGPGetIds {proc arg} {
     # Create identifier
     set id pgpGet[incr idCnt]
     set w .$id
-    upvar #0 $id hd
+    upvar \#0 $id hd
 
     # Create toplevel
     toplevel $w -class TkRat
@@ -178,6 +179,8 @@ proc RatPGPGetIds {proc arg} {
 
     ::tkrat::winctl::SetGeometry pgpGet \
         $w [rat_textlist::textwidget $hd(list)]
+
+    bind $w <Escape> "$w.buttons.cancel invoke"
 }
 
 # RatPGPGetIdsDone --
@@ -192,7 +195,7 @@ proc RatPGPGetIds {proc arg} {
 # arg	  -	argument to procedure (before list of ids)
 
 proc RatPGPGetIdsDone {w handler done proc arg} {
-    upvar #0 $handler hd
+    upvar \#0 $handler hd
     global option
 
     if {$done} {
@@ -222,7 +225,7 @@ proc RatPGPAddKeys {keys {keyring ""}} {
 
     # Create identifier
     set id pgpInt[incr idCnt]
-    upvar #0 $id hd
+    upvar \#0 $id hd
 
     # Setup file
     set hd(fileName) $rat_tmp/rat.[RatGenId]
@@ -262,7 +265,7 @@ proc RatPGPAddKeys {keys {keyring ""}} {
 # op           -        Operation
 
 proc RatPGPAddKeysDone {name1 name2 op} {
-    upvar #0 $name1 hd
+    upvar \#0 $name1 hd
 
     file delete -force -- $hd(fileName) &
     unset hd
@@ -371,6 +374,7 @@ proc PGPDetails {handler} {
     pack $w.my $w.recipients -side top -padx 2 -pady 2 -fill x
     pack $w.close -padx 2 -pady 2
 
+    bind $w <Escape> "$w.close invoke"
     bind $w.close <Destroy> "::tkrat::winctl::RecordGeometry pgpDetails $w"
     ::tkrat::winctl::SetGeometry pgpDetails $w
     ::tkrat::winctl::ModalGrab $w

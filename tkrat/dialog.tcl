@@ -12,7 +12,7 @@ proc RatLogin {host trial user prot port} {
 
     set id login[incr idCnt]
     set w .$id
-    upvar #0 $id hd
+    upvar \#0 $id hd
     set hd(user) $user
     set hd(store) 0
 
@@ -228,6 +228,7 @@ proc RatText {title text} {
     $w.text insert end $text\n
     $w.text configure -state disabled
 
+    bind $w <Escape> "$w.button invoke"
     bind $w.text <Destroy> "::tkrat::winctl::RecordGeometry ratText $w $w.text"
     ::tkrat::winctl::SetGeometry ratText $w $w.text
 }
@@ -270,6 +271,8 @@ proc bgerror {err} {
     pack $w.text -side left -expand yes -fill both
     $w.text insert 0.0 $info
     $w.text mark set insert 0.0
+
+    bind $w <Escape> "$w.ok invoke"
 
     # Center the window on the screen.
 

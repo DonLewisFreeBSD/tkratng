@@ -27,6 +27,7 @@ set mimeHandler(text/enriched)		{ ShowTextEnriched $handler $body $msg}
 set mimeHandler(text)			{ ShowTextOther $handler $body $msg}
 set mimeHandler(multipart/alternative)	{ ShowMultiAlt $handler $body $msg }
 set mimeHandler(multipart/encrypted)	{ ShowMultiEnc $handler $body $msg }
+set mimeHandler(multipart/related)	{ ShowMultiRelated $handler $body $msg}
 set mimeHandler(multipart)		{ ShowMultiMixed $handler $body $msg }
 set mimeHandler(message/rfc822)		{ ShowMessage 0 $handler \
 	                                              [$body message] }
@@ -37,16 +38,18 @@ set mimeHandler(application/pgp)	{ ShowTextPlain $handler $body $msg}
 set mimeHandler(application/ms-tnef)    { ShowMSTnef $handler $body }
 
 if {![catch {package require Img} err]} {
-    set extensions(Img) 1
     lappend GoodTypes image/jpeg image/tiff image/bmp image/xpm image/png \
         image/pjpeg image/x-portable-bitmap image/x-portable-graymap \
 	image/x-portable-pixmap image/x-png image/x-bmp
     lappend ImageTypes jpeg tiff bmp xpm png pjpeg x-png
 }
-if {![catch {package require Tkhtml 2.0} err]} {
-    set extensions(Tkhtml) 1
+
+if {![catch {package require Tkhtml 3.0} err]} {
     lappend GoodTypes text/html
-    set mimeHandler(text/html) {RatBusy {ShowTextHtml $handler $body $msg}}
+    set mimeHandler(text/html) {RatBusy {ShowTextHtml3 $handler $body $msg}}
+} elseif {![catch {package require Tkhtml 2.0} err]} {
+    lappend GoodTypes text/html
+    set mimeHandler(text/html) {RatBusy {ShowTextHtml2 $handler $body $msg}}
 }
 
 
@@ -114,7 +117,7 @@ proc Show {handler msg browse} {
 
     # Delete old subwindows
     foreach slave [winfo children $handler] {
-	destroy $slave
+        destroy $slave
     }
     # Do other misc cleanup
     if {[info exists fh(show_cleanup_cmds)]} {
@@ -129,10 +132,27 @@ proc Show {handler msg browse} {
     foreach bn [array names b $handler.*] {unset b($bn)}
     foreach bn [array names b $fh(struct_menu)*] {unset b($bn)}
 
+    bind $handler <Configure> {ResizeBodyText %W %w}
+
+    set width [expr [winfo width $fh(text_frame)] - \
+                   [winfo width $fh(text_yscroll)]]
+    set fh(width) $width
+
     # Show the message
     if {[catch "ShowMessage 1 $handler $msg" errmsg]} {
-	Popup $errmsg $fh(toplevel)
+ 	Popup $errmsg $fh(toplevel)
     }
+    set s [lsearch -exact [pack slaves $fh(text_frame)] $fh(text_xscroll)]
+    if {$fh(width) > $width} {
+        if {$s == -1} {
+            pack $fh(text_xscroll) -side bottom -fill x
+        }
+    } else {
+        if {$s != -1} {
+            pack forget $fh(text_xscroll)
+        }
+    }
+
     BuildStructMenu $handler $msg
 
     # Prepare for URL searching
@@ -626,9 +646,9 @@ proc ShowMultiAlt {handler body msg} {
 	    }
 	    set type [string tolower [lindex $typelist 0]/[lindex $typelist 1]]
 	    if { -1 != [lsearch $GoodTypes $type] } {
-                if {$i >
-                    0 && "text/html" == $type
-                    && $option(prefer_other_over_html)} {
+                if {$i > 0 &&
+                    (($type == "text/html" && $option(prefer_other_over_html))
+                     || $type == "text/plain")} {
                     set pc [lindex $children [expr $i-1]]
                     set ptl [$pc type]
                     set pt [string tolower [lindex $ptl 0]/[lindex $ptl 1]]
@@ -654,6 +674,50 @@ proc ShowMultiAlt {handler body msg} {
 	ShowBody $handler $child $msg
     }
 }
+
+
+# ShowMultiRelated --
+#
+# Show a multipart/related object
+# This is a very simple implementation which only shows the first child.
+#
+# Arguments:
+# handler -	The handler which identifies the show text widget
+# body    -	The bodypart to show
+# msg     -	The message name
+
+proc ShowMultiRelated {handler body msg} {
+    upvar \#0 $handler fh \
+    	     msgInfo_$msg msgInfo
+    global related
+
+    set children [$body children]
+    if {[info exists related]} {
+        unset related
+    }
+    foreach c [lrange $children 1 end] {
+        set id [string trim [$c id] "<>"]
+        if {"" != $id} {
+            set related($id) $c
+        }
+        set msgInfo(show,$c) 0
+    }
+
+    set typelist [[lindex $children 0] type]
+    set type [string tolower [lindex $typelist 0]/[lindex $typelist 1]]
+    if {"text/html" == $type} {
+        set msgInfo(show,[lindex $children 0]) 1
+    } else {
+        foreach c $children {
+            set msgInfo(show,$c) 1
+        }
+    }
+
+    foreach child [$body children] {
+	ShowBody $handler $child $msg
+    }
+}
+
 
 # ShowMultiEnc --
 #
@@ -759,19 +823,23 @@ proc ShowImage {handler body subtype} {
 	set xscroll [scrollbar $frame.xscroll -command [list $c xview] \
 		-orient horizontal]
 	grid $c -row 0 -column 0 -sticky news
-	if {[expr {$imgheight>[winfo height $handler]}]
-            && [info tclversion] < 8.5} {
+	if {$imgheight > [winfo height $handler] && [info tclversion] < 8.5} {
 	    $frame configure -height [winfo height $handler]
 	    grid $yscroll -row 0 -column 1 -sticky ns
 	} else {
 	    $frame configure -height $imgheight
 	}
-	if {[expr {$imgwidth>[winfo width $handler]}]} {
-	    $frame configure -width [winfo width $handler]
-	    grid $xscroll -row 1 -column 0 -sticky ew
-	} else {
+        if {$imgwidth > $fh(width)} {
+            if {[info tclversion] < 8.5} {
+                $frame configure -width $fh(width)
+                grid $xscroll -row 1 -column 0 -sticky ew
+            } else {
+                set fh(width) $imgwidth
+                $frame configure -width $imgwidth
+            }
+        } else {
 	    $frame configure -width $imgwidth
-	}
+        }
 	grid columnconfigure $frame 0 -weight 1
 	grid rowconfigure $frame 0 -weight 1
 	grid propagate $frame 0
@@ -784,18 +852,19 @@ proc ShowImage {handler body subtype} {
 	$handler tag bind $tag <3> "tk_popup $fh(struct_menu) %X %Y \
 		\[lsearch \[set ${handler}(struct_list)\] \
 		$body\]"
-	set binding [list ResizeFrame $frame $handler \
-		$imgheight $imgwidth $xscroll $yscroll]
-	if {[string first $binding [bind $handler <Configure>]] == -1} {
-	    bind $handler <Configure> +$binding
-	}
 	bind $c <3> "tk_popup $fh(struct_menu) %X %Y \
 		\[lsearch \[set ${handler}(struct_list)\] \
 		$body\]"
 	# Avoid processing new events (like selecting new message)
 	update idletasks
-	ResizeFrame $frame $handler \
-		$imgheight $imgwidth $xscroll $yscroll
+        if {[info tclversion] < 8.5} {
+            set binding [list ResizeFrame $frame $handler \
+                             $imgheight $imgwidth $xscroll $yscroll]
+            if {[string first $binding [bind $handler <Configure>]] == -1} {
+                bind $handler <Configure> +$binding
+            }
+            ResizeFrame $frame $handler $imgheight $imgwidth $xscroll $yscroll
+        }
     } else {
         ShowDefault $handler $body
     }
@@ -1286,6 +1355,7 @@ proc RunMailcap {body mailcap} {
         bind $w.text <Destroy> \
             "::tkrat::winctl::RecordGeometry extView $w $w.text"
         ::tkrat::winctl::SetGeometry extView $w $w.text
+        bind $w <Escape> "$w.button invoke"
 	$w.text insert insert [eval "exec $cmd"]
 	$w.text configure -state disabled
 	file delete -force -- $rm(fileName) &
@@ -1592,24 +1662,30 @@ proc ShowMSTnef {handler body} {
     upvar \#0 $handler fh
     global idCnt option rat_tmp fixedBoldFont t
 
+    # Save body data to file
+    set filename $rat_tmp/tnef.[RatGenId]
+    set fid [open $filename w]
+    fconfigure $fid -encoding binary
+    $body saveData $fid 0 0
+    close $fid
+
     # Check if tnef program is present and generate list of contents
-    set filename $rat_tmp/winmail_list.[RatGenId]
-    if {[catch {open "|$option(tnef) --list 2>$filename >$filename" w} tnef]} {
+    if {[catch {open "|$option(tnef) --list $filename" r} tnef]} {
         ShowDefault $handler $body $t(no_tnef_found)
+        file delete -force $filename
         return
     }
-    $body saveData $tnef 0 0
-    catch {close $tnef}
-    
-    # Read list
-    set f [open $filename r]
+
+    # Read list of contents
     set contents {}
-    while {-1 != [gets $f line]} {
+    while {-1 != [gets $tnef line]} {
         lappend contents $line
     }
-    close $f
-    file delete $filename
+    close $tnef
 
+    # Remove file
+    file delete -force $filename
+    
     # Add markers
     foreach c $contents {
         set w $handler.w[incr idCnt]
@@ -1656,17 +1732,26 @@ proc SaveTnefBody {body child parent} {
     set dir $rat_tmp/tnef.[RatGenId]
     file mkdir $dir
 
-    if {[catch {open "|$option(tnef) --maxsize=$option(tnef_max_size) --directory=$dir" w} tnef]} {
+    # Save body data to file
+    set winmail $rat_tmp/tnef.[RatGenId]
+    set fid [open $winmail w]
+    fconfigure $fid -encoding binary
+    $body saveData $fid 0 0
+    close $fid
+
+    if {[catch {open "|$option(tnef) --maxsize=$option(tnef_max_size) --directory=$dir $winmail" w} tnef]} {
         RatLog 4 "$t(save_failed): $tnef"
         file delete -force $dir
+        file delete -force $winmail
         return
     }
-    $body saveData $tnef 0 0
     if {[catch {close $tnef} err]} {
         RatLog 4 "$t(save_failed): $err"
         file delete -force $dir
+        file delete -force $winmail
         return
     }
+    file delete -force $winmail
     if {[catch {file copy -force $dir/$childs $filename} err]} {
         RatLog 4 "$t(save_failed): $err"
         file delete -force $dir

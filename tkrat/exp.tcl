@@ -23,7 +23,7 @@ proc ExpCreate {handler {addproc {}}} {
     # Create identifier
     set id expWin[incr idCnt]
     set w .$id
-    upvar #0 $id hd
+    upvar \#0 $id hd
     set hd(doSave) 0
     set hd(w) $w
     set hd(handler) $handler
@@ -44,7 +44,12 @@ proc ExpCreate {handler {addproc {}}} {
     $w.top.mode.m add command -label $t(basic_mode) -command "ExpModeBasic $id"
     $w.top.mode.m add command -label $t(advanced_mode) -command "ExpModeAdv $id"
     frame $w.top.c
-    checkbutton $w.top.c.but -text $t(save_as): -variable ${id}(doSave)
+    if {"" != $handler} {
+        checkbutton $w.top.c.but -text $t(save_as): -variable ${id}(doSave)
+    } else {
+        label $w.top.c.but -text $t(save_as):
+        set hd(doSave) 1
+    }
     entry $w.top.c.entry -width 20 -textvariable ${id}(saveAs)
     bind $w.top.c.entry <KeyRelease> \
 	    "if {0 < \[string length ${id}(saveAs)\]} { \
@@ -53,7 +58,7 @@ proc ExpCreate {handler {addproc {}}} {
 		 set ${id}(doSave) 0 \
 	     }"
     pack $w.top.c.but \
-	 $w.top.c.entry -side left
+         $w.top.c.entry -side left
     pack $w.top.mode \
 	 $w.top.c -side left -padx 20
     set b($w.top.mode) switch_expression
@@ -85,6 +90,7 @@ proc ExpCreate {handler {addproc {}}} {
     } else {
 	ExpModeAdv $id
     }
+    bind $w <Escape> "$w.buttons.cancel invoke"
     bind $w.buttons.ok <Destroy> "ExpClose $id"
     ::tkrat::winctl::SetGeometry ratExpression $w
 }
@@ -102,7 +108,7 @@ proc ExpEdit {name namechange} {
     # Create identifier
     set id expWin[incr idCnt]
     set w .$id
-    upvar #0 $id hd
+    upvar \#0 $id hd
     set hd(w) $w
     set hd(handler) $id
     set hd(mode) {}
@@ -135,7 +141,7 @@ proc ExpEdit {name namechange} {
 # handler -	The handler which identifies the expression window
 
 proc ExpModeBasic {handler} {
-    upvar #0 $handler hd
+    upvar \#0 $handler hd
     global t b
 
     # Check that this is really neccessary
@@ -180,7 +186,7 @@ proc ExpModeBasic {handler} {
 # handler -	The handler which identifies the expression window
 
 proc ExpModeAdv {handler} {
-    upvar #0 $handler hd
+    upvar \#0 $handler hd
     global t b
 
     # Check that this is really neccessary
@@ -280,7 +286,7 @@ proc ExpModeAdv {handler} {
 # handler	- the handler which identifies the expression window
 
 proc ExpClear {handler} {
-    upvar #0 $handler hd
+    upvar \#0 $handler hd
 
     if {![string compare basic $hd(mode)]} {
 	foreach f {subject from reply-to sender to cc} {
@@ -301,8 +307,10 @@ proc ExpClear {handler} {
 
 proc ExpDone {handler action} {
     upvar \#0 $handler hd
-    upvar \#0 $hd(handler) fHd
     global t b option expList expExp
+    if {"" != $hd(handler)} {
+        upvar \#0 $hd(handler) fHd
+    }
 
     if {![info exist expList]} {
 	set expList {}
@@ -349,13 +357,16 @@ proc ExpDone {handler action} {
 		    ExpWrite
 		} else {
 		    Popup $t(need_name) $hd(w)
+                    return
 		}
 	    }
 	    # Apply expression
-	    set ids [$fHd(folder_handler) match $expId]
-	    if {[string length $ids]} {
-		SetFlag $hd(handler) flagged 1 $ids
-	    }
+            if {[info exists fHd]} {
+                set ids [$fHd(folder_handler) match $expId]
+                if {[string length $ids]} {
+                    SetFlag $hd(handler) flagged 1 $ids
+                }
+            }
 
 	} else {
 	    if {$hd(saveAs) != $hd(oldName)} {
@@ -455,7 +466,7 @@ proc ExpBuildMenu {m handler} {
 #		  the selection should be done in.
 
 proc ExpMenuApply {id handler} {
-    upvar #0 $handler hd
+    upvar \#0 $handler hd
     global expExp
 
     set expId [RatParseExp $expExp($id)]
@@ -475,7 +486,7 @@ proc ExpMenuApply {id handler} {
 proc ExpHandleSaved {handler} {
     global t
 
-    rat_list::create expList expList "ExpCreate $handler" ExpEdit ExpDelete \
+    rat_list::create expList expList {ExpCreate {}} ExpEdit ExpDelete \
 	    ExpWrite $t(saved_expr) $t(create) $t(edit) $t(delete) $t(dismiss)
 }
 
@@ -487,9 +498,7 @@ proc ExpHandleSaved {handler} {
 # name - Name of expression to delete
 
 proc ExpDelete {name} {
-    global t expList expExp
+    global expExp
 
-    set i [lsearch -exact $expList $name]
-    set expList [lreplace $expList $i $i]
     unset expExp($name)
 }

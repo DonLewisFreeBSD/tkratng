@@ -20,6 +20,7 @@ FIX_INCLUDE =
 EXTRA_CFLAGS = @CFLAGS@ @MEM_DEBUG_FLAGS@
 
 # Installation directories
+   datarootdir = @datarootdir@
         prefix = @prefix@
    exec_prefix = @exec_prefix@
        MAN_DIR = @mandir@

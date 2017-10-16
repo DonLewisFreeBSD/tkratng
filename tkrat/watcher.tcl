@@ -18,7 +18,7 @@
 
 proc WatcherInit {handler} {
     global folderUnseen folderChanged
-    upvar #0 $handler hd
+    upvar \#0 $handler hd
 
     set hd(watcher_unseen) $folderUnseen($handler)
     set hd(watcher_folderChanged) $folderChanged($handler)
@@ -36,7 +36,7 @@ proc WatcherCreate {} {
 
     # Create toplevel
     set id watcher[incr idCnt]
-    upvar #0 $id whd
+    upvar \#0 $id whd
     set w .$id
     set whd(watcher_w) $w
     set whd(watcher_list) $w.list
@@ -82,7 +82,8 @@ proc WatcherCreate {} {
     bind $w.list <ButtonRelease-3>	"WatcherSleep $id"
     bind $w.info.name <ButtonRelease-3>	"WatcherSleep $id"
     bind $w.info.size <ButtonRelease-3>	"WatcherSleep $id"
-	  bind $w.info.name <Destroy>	"WatcherDestroy $id"
+    bind $w.info.name <Destroy>	        "WatcherDestroy $id"
+    bind $w <Escape>	                "WatcherSleep $id"
     wm withdraw $w
     return $id
 }
@@ -133,7 +134,7 @@ proc WatcherSleepFH {handler} {
 
 proc WatcherDestroy {whandler} {
     global $whandler freeWatchers
-    upvar #0 $whandler whd
+    upvar \#0 $whandler whd
     
     WatcherSleep $whandler
     unset $whandler
@@ -150,7 +151,7 @@ proc WatcherDestroy {whandler} {
 proc WatcherTrig {name1 name2 op} {
     global option t folderUnseen vFolderWatch folderWindowList watcherWins \
 	   folderChanged
-    upvar #0 $name2 hd
+    upvar \#0 $name2 hd
 
     if {"folderUnseen" == $name1} {
 	if {$folderUnseen($name2) < $hd(watcher_unseen)} {
@@ -188,7 +189,7 @@ proc WatcherTrig {name1 name2 op} {
 	set toSync {}
 	foreach fhd [array names folderWindowList] {
 	    if {"$name2" == $folderWindowList($fhd)} {
-		upvar #0 $fhd fh
+		upvar \#0 $fhd fh
 
 		lappend toSync $fhd
 		if {[winfo ismapped $fh(toplevel)]} {
@@ -219,7 +220,7 @@ proc WatcherTrig {name1 name2 op} {
 
 proc WatcherPopup {handler} {
     global option watcherWins freeWatchers vFolderName
-    upvar #0 $handler hd
+    upvar \#0 $handler hd
 
     # See if there is already existing watcher window to handle this folder
     if {[info exists watcherWins($handler)]} {
@@ -234,7 +235,7 @@ proc WatcherPopup {handler} {
 	}
 	set watcherWins($handler) $whandler
     }
-    upvar #0 $whandler whd
+    upvar \#0 $whandler whd
     set whd(folder_handler) $handler
     set whd(name) $vFolderName($handler)
 
@@ -295,11 +296,11 @@ proc WatcherPopup {handler} {
 
 proc WatcherWakeMaster {whandler} {
     global folderWindowList
-    upvar #0 $whandler whd
+    upvar \#0 $whandler whd
 
     foreach fhd [array names folderWindowList] {
 	if {"$whd(folder_handler)" == $folderWindowList($fhd)} {
-	    upvar #0 $fhd fh
+	    upvar \#0 $fhd fh
 	    FolderSelectUnread $fhd
 	    wm deiconify $fh(toplevel)
 	    return

@@ -45,7 +45,7 @@ proc rat_scrollframe::create {w args} {
 
 
 proc rat_scrollframe::recalc {w} {
-    upvar #0 rat_scrollframe::$w id
+    upvar \#0 rat_scrollframe::$w id
 
     update
     $w.c itemconfigure $id -height [winfo reqheight $w.c.f] \
@@ -61,7 +61,7 @@ proc rat_scrollframe::recalc {w} {
 # The name of the window
 
 proc rat_scrollframe::configure_event {w} {
-    upvar #0 rat_scrollframe::$w id
+    upvar \#0 rat_scrollframe::$w id
 
     $w.c configure -scrollregion \
 	[list 0 0 [winfo reqwidth $w.c.f] [winfo reqheight $w.c.f]]

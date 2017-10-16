@@ -41,6 +41,8 @@ static RatSetFlagProc Db_SetFlagProc;
 static RatGetFlagProc Db_GetFlagProc;
 static RatCreateProc Db_CreateProc;
 static RatSetInfoProc Db_SetInfoProc;
+static RatDbInfoGetProc Db_DbinfoGetProc;
+static RatDbInfoSetProc Db_DbinfoSetProc;
 static int GetAddressInfo(Tcl_Interp *interp, Tcl_DString *dsPtr, char *adr,
 	DbAdrInfo info);
 
@@ -94,7 +96,7 @@ RatDbFolderInit(Tcl_Interp *interp)
  */
 
 RatFolderInfo*
-RatDbFolderCreate(Tcl_Interp *interp, Tcl_Obj *defPtr)
+RatDbFolderCreate(Tcl_Interp *interp, int append_only, Tcl_Obj *defPtr)
 {
     RatFolderInfo *infoPtr;
     DbFolderInfo *dbPtr;
@@ -105,7 +107,11 @@ RatDbFolderCreate(Tcl_Interp *interp, Tcl_Obj *defPtr)
     Tcl_ListObjGetElements(interp, defPtr, &objc, &objv);
     
     Tcl_IncrRefCount(objv[5]);
-    if (TCL_OK != RatDbSearch(interp, objv[5], &number, &listPtr, &expError)) {
+    if (append_only) {
+        number = 0;
+        listPtr = NULL;
+    } else if (TCL_OK !=
+               RatDbSearch(interp, objv[5], &number, &listPtr, &expError)) {
 	Tcl_DecrRefCount(objv[5]);
         if (!expError) {
             RatLogF(interp, RAT_ERROR, "dbase_error", RATLOG_TIME,
@@ -135,7 +141,7 @@ RatDbFolderCreate(Tcl_Interp *interp, Tcl_Obj *defPtr)
 	}
     }
     infoPtr->size = 0;
-    for (i=0; i<number; i++) {
+    for (i=0; i<infoPtr->number; i++) {
 	infoPtr->size += atoi(RatDbGetEntry(listPtr[i])->content[RSIZE]);
     }
     infoPtr->initProc = Db_InitProc;
@@ -149,6 +155,8 @@ RatDbFolderCreate(Tcl_Interp *interp, Tcl_Obj *defPtr)
     infoPtr->setInfoProc = Db_SetInfoProc;
     infoPtr->createProc = Db_CreateProc;
     infoPtr->syncProc = NULL;
+    infoPtr->dbinfoGetProc = Db_DbinfoGetProc;
+    infoPtr->dbinfoSetProc = Db_DbinfoSetProc;
     infoPtr->private = (ClientData) dbPtr;
     dbPtr->listPtr = listPtr;
     dbPtr->searchExpr = objv[5];
@@ -217,7 +225,9 @@ Db_CloseProc(RatFolderInfoPtr infoPtr, Tcl_Interp *interp, int expunge)
     DbFolderInfo *dbPtr = (DbFolderInfo *) infoPtr->private;
     int i;
 
-    ckfree(dbPtr->listPtr);
+    if (dbPtr->listPtr) {
+        ckfree(dbPtr->listPtr);
+    }
     Tcl_DecrRefCount(dbPtr->searchExpr);
     ckfree(dbPtr->keywords);
     ckfree(dbPtr->exDate);
@@ -889,4 +899,86 @@ Db_SetInfoProc(Tcl_Interp *interp, ClientData clientData,
     if (oPtr) {
 	Tcl_IncrRefCount(oPtr);
     }
+}
+
+
+/*
+ *----------------------------------------------------------------------
+ *
+ * Db_DbinfoGetProc --
+ *
+ *      Handle the dbinfo_get command. See ../doc/interface for details
+ *
+ * Results:
+ *	None
+ *
+ * Side effects:
+ *	None
+ *
+ *
+ *----------------------------------------------------------------------
+ */
+static Tcl_Obj*
+Db_DbinfoGetProc(RatFolderInfo *infoPtr)
+{
+    Tcl_Obj *robjv[3];
+    int len;
+    
+    DbFolderInfo *dbPtr = (DbFolderInfo*)infoPtr->private;
+
+    len = dbPtr->keywords ? strlen(dbPtr->keywords) : 0;
+    if (len && '{' == dbPtr->keywords[0]
+        && '}' == dbPtr->keywords[len-1]) {
+        robjv[0] = Tcl_NewStringObj(dbPtr->keywords+1, len-2);
+    } else {
+        robjv[0] = Tcl_NewStringObj(dbPtr->keywords, len);
+    }
+    robjv[1] = Tcl_NewLongObj(atol(dbPtr->exDate));
+    robjv[2] = Tcl_NewStringObj(dbPtr->exType, -1);
+    return Tcl_NewListObj(3, robjv);
+}
+
+
+/*
+ *----------------------------------------------------------------------
+ *
+ * Db_DbinfoSetProc --
+ *
+ *      Handle the dbinfo_set command. See ../doc/interface for details
+ *
+ * Results:
+ *	None
+ *
+ * Side effects:
+ *	None
+ *
+ *
+ *----------------------------------------------------------------------
+ */
+int
+Db_DbinfoSetProc(Tcl_Interp *interp, RatFolderInfoPtr infoPtr,
+                 Tcl_Obj *indexes, Tcl_Obj *keywords, Tcl_Obj *ex_date,
+                 Tcl_Obj *ex_type)
+{
+    DbFolderInfo *dbPtr = (DbFolderInfo*)infoPtr->private;
+    int objc, *db_indexes, i, index, r;
+    Tcl_Obj **objv;
+
+    /* Convert folder indexes to database indexes */
+    if (TCL_OK != Tcl_ListObjGetElements(interp, indexes, &objc, &objv)) {
+        return TCL_ERROR;
+    }
+    db_indexes = (int*)ckalloc(objc*sizeof(int));
+    for (i=0; i<objc; i++) {
+        if (TCL_OK != Tcl_GetIntFromObj(interp, objv[i], &index)) {
+            ckfree(db_indexes);
+            return TCL_ERROR;
+        }
+        db_indexes[i] = dbPtr->listPtr[infoPtr->presentationOrder[index]];
+    }
+    
+    r = RatDbSetInfo(interp, db_indexes, objc, keywords, ex_date, ex_type);
+    ckfree(db_indexes);
+
+    return r;
 }

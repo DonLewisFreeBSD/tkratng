@@ -1,0 +1,212 @@
+CURRENT
+gmail
+  imap.gmail.com
+
+BUGS
+Move two (flagged) messages from spam to inbox causes it to download all messages again
+
+MUST
+
+TODO
+Color icon?
+
+Hotkeys for moving email to folders
+Create groups on dates
+Search LDAP when entering address
+New imap toolkit
+Better keydef window
+Dialogs, Status, Reason, Action (Verb)
+Fix bcc problem when doing pgp
+Icons in vfolderdef window (instead of Monitored,INBOX et al)
+Do not open pop-folders in offline mode
+Accept both dir and command as pgp_path
+Print multiple messages to file
+Warn before sending an empty message
+More detailed date info specifier
+Create generic paning-widget
+Performance
+Userproc for alias expansion (gives list of possible expansions)
+Alias-expansion should expand on given part of address...
+Keyboard shortcut to show body
+Accept rfc2368 mailto-URLs
+LockGUI during group-operations & sync etc
+Keyboard focus when alias-window comes up
+Button to close alias window?
+Go offline when all connections fails
+Rename RatAddressSize to RatAddressMaxSize (and change implementation)
+Move more stuff to preferences window (everything which uses rat_list)
+Escape '^From ' in attachments and text
+Ignore trailing dot in urls
+Do not always update the master folder when running in online-mode?
+Include From in reply-to all
+Implement save to dynamic folder
+Use mime.types-file and possibly other file command
+Reimplement PGP (sign & encrypt immediately)
+Partial quotations
+Network sync command which includes ';' 
+Import & generate vcard
+Show attachment name in menu
+Decode attachment name
+Confirm on send & dismiss
+Kill sender when quitting
+PGP
+Pipe messages to command
+compressed folders
+Sort according to message size
+Be able to show changes messages
+Option to make the folder menu popup new folders
+More intelligent handling of images to big for the paper
+Eliminate calls to Tcl_Eval in c-code
+Determine type of attachment from filename for octet-stream attachments (option)
+Scrollbars for images
+Detailed reply dialog
+Deescape >From
+Subscriptions
+Improve pgp, specify addresses etc
+Check for proper values of preferences fields
+Command line options
+Send handling
+Backward searching
+Print in compose window.
+Browse mode should also need prompting for downloading of attachments
+Move from pine address book
+Replace regexp search in RatDecodeHeader
+Show number of flagged and deleted messages in mailbox
+Associate detached menus with main window
+Keyboard bindings in watcher window
+N flag in browse mode
+Classes to make colorization easier
+Append outgoing to POP3 and dynamic
+Content-disposition
+Filter actions save to folder should have subargs:
+		save without attachments
+		let user decide about attachements
+		save unencrypted
+		always save encrypted with X
+		save encrypted with X if already encrypted
+		same with signed?
+Possiblility to keep attached messages in replies
+Add posibility to decode in the show window
+Should use $env(HOME) for all paths under $env(HOME)
+Subscribe and unsubscribe to IMAP folders
+Change icon when new mail arrives
+Show all To-lines when multiple are present
+Move to nonexisting IMAP-folder should create it
+See which other aliases an alias is included in
+Sender adding if from not oneself should perhaps be an option?
+Turn off inline showing of gifs
+Read next flagged message
+hide deleted messages
+Userproc to suggest folder to save message in
+New sorting options
+Specify folder to open on command line
+Do not print attachments
+Better colormaps
+You should not be able to delete the active folder
+Insert message into compose window (with quoting and attribution etc...
+Posibility to redecode a message
+Add more keys that the message gets encrypted to (both preference and on the spot)
+Default to not delete the imap folder when deleting vfolders
+Saving outgoing encrypted messages
+Changes to watcher preferences should take directly.
+Command line arg: -iconGeomtry
+Diferent handlers for different URL protocols
+Specify fonts
+Automatically (after user confirmation) restart tkrat if needed from options.
+scrollbar on extract addresses window.
+uudecoding
+decode not all headers
+Replies to your own messages
+Tmpdir
+Remove unneeded checks of input values
+Only one outstanding external edit
+Editor for deferred messages
+Support content-disposition
+Autosave backup copies of compose windows.
+Ability to specify filters for bodyparts (of unkown types primarily)
+True & False as option texts in the preferences window
+Check performance
+Tear-off menues are indistinguisable
+Option to not include text in responses
+Default name of new filefolders to the filename
+Hold outstanding compositions on SIGINT?
+When imporintg from an IMAP server which already have a submenu this should 
+	be used again
+Option to do automatic expunge
+Option to not automatically show any messages
+Sort imported imap folders
+Preference for automatic indention in compose
+Search current message
+Indicator that there are held messages
+The fileselector should remember different dirs for save and read etc
+Automove read messages?
+Address entry in dbase serach expression
+Split digests
+Search in folder (a'la emacs ^s)
+Construct dynamic folders on demand (when opening that submenu)
+Advanced reply (select which addresses to include and which bodyparts).
+Search helptexts
+See year of message
+Address fields columnizing (should be neater)
+Userproc to look up addresses (gets one string in and returns a list
+			       of possible results).
+Group on size and date intervals
+Remember tornoff menus
+Tab expansion of addresses (among aliases)
+Select startup folder on command line
+Forward group
+Edit saved expressions
+Busy cursor
+Mark line that was last on previous page when using space to scroll?
+Remember placement of icon.
+manpage
+Match everything in dbase
+Don't rebuild everything every time you write make
+Improve support of mh folders
+Max 120 recipients (or something like that)
+Attach arbitrary message to the message being composed
+Edit big aliases
+
+Store bcc in local messages (but filter upon sending)
+Change order of header-fields
+Modify the buttonbar
+Select folder from vfolderdef window
+Remail a message to a different address	(Remail)?
+Option to always start external editor
+Handle application/tcl
+See sender (instead of from)
+Global address books
+
+More emacs-bindings in window M-space M-w och M-y
+
+Test handling of expanded DSN's
+Test operation when the filesystem is full.
+Firm up aliases (illegal characters (rfc822))
+More than one folder window
+
+Localize internal messages
+Handle message/external
+Display how different types are handled (depends on mailcap)
+Move contents of one folder to another when the folder definition is edited.?
+Find reports in dbase too.
+UP that is run when messages arrive.
+Keep fullname in alias expand2 (option?)
+Thread messages.
+Wrap lines in message beeing replied to.
+
+See all used keywords (in dbase)
+Multiple alias lists
+
+Use imap4 better
+Take aliases from netscape
+Resync on error?
+
+LONG RANGE
+
+Support for compressed folders?
+Handle message/partial
+Form replies
+Remote controlling (through send)
+Ability to view a message in a separate window.
+User defined new header lines?
+

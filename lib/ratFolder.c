@@ -195,14 +195,17 @@ RatFolderInit(Tcl_Interp *interp)
  */
 
 RatFolderInfo*
-RatGetOpenFolder(Tcl_Interp *interp, Tcl_Obj *defPtr)
+RatGetOpenFolder(Tcl_Interp *interp, Tcl_Obj *defPtr, int append_only)
 {
     RatFolderInfo *infoPtr;
     char *def = RatGetIdentDef(interp, defPtr);
 
-    for (infoPtr = ratFolderList;
-	 infoPtr && strcmp(infoPtr->ident_def, def);
-	 infoPtr = infoPtr->nextPtr);
+    for (infoPtr = ratFolderList; infoPtr; infoPtr = infoPtr->nextPtr) {
+        if (!strcmp(infoPtr->ident_def, def)
+            && (!infoPtr->append_only || append_only)) {
+            break;
+        }
+    }
     if (infoPtr) {
 	infoPtr->refCount++;
     }
@@ -212,7 +215,7 @@ RatGetOpenFolder(Tcl_Interp *interp, Tcl_Obj *defPtr)
 /*
  *----------------------------------------------------------------------
  *
- * RatOpenFolder --
+ * RatOpenFolderCmd --
  *
  *      See the INTERFACE specification
  *
@@ -234,13 +237,18 @@ RatOpenFolderCmd(ClientData clientData, Tcl_Interp *interp, int objc,
 {
     RatFolderInfo *infoPtr;
 
-    if (objc != 2) {
-	Tcl_AppendResult(interp, "wrong # args: should be \"",
+    if ((objc != 2 && objc != 3)
+        || (objc == 3 && strcmp("append", Tcl_GetString(objv[1])))) {
+	Tcl_AppendResult(interp, "wrong # args: should be \"?append?",
 		Tcl_GetString(objv[0]), " folderdef\"", (char *) NULL);
 	return TCL_ERROR;
     }
 
-    infoPtr = RatOpenFolder(interp, objv[1]);
+    if (2 == objc) {
+        infoPtr = RatOpenFolder(interp, 0, objv[1]);
+    } else {
+        infoPtr = RatOpenFolder(interp, 1, objv[2]);
+    }
     if (NULL == infoPtr) {
 	Tcl_AppendResult(interp, ": Failed to create folder", NULL);
 	return TCL_ERROR;
@@ -270,7 +278,7 @@ RatOpenFolderCmd(ClientData clientData, Tcl_Interp *interp, int objc,
  */
 
 RatFolderInfo*
-RatOpenFolder(Tcl_Interp *interp, Tcl_Obj *def)
+RatOpenFolder(Tcl_Interp *interp, int append_only, Tcl_Obj *def)
 {
     RatFolderInfo *infoPtr;
     int i, fobjc, lobjc;
@@ -280,17 +288,17 @@ RatOpenFolder(Tcl_Interp *interp, Tcl_Obj *def)
     /*
      * Check open folders
      */
-    if ((infoPtr = RatGetOpenFolder(interp, def))) {
+    if ((infoPtr = RatGetOpenFolder(interp, def, append_only))) {
 	return infoPtr;
     }
     Tcl_ListObjGetElements(interp, def, &fobjc, &fobjv);
 
     if (!strcmp(Tcl_GetString(fobjv[1]), "dbase")) {
-	infoPtr = RatDbFolderCreate(interp, def);
+	infoPtr = RatDbFolderCreate(interp, append_only, def);
     } else if (!strcmp(Tcl_GetString(fobjv[1]), "dis")) {
-	infoPtr = RatDisFolderCreate(interp, def);
+	infoPtr = RatDisFolderCreate(interp, append_only, def);
     } else {
-	infoPtr = RatStdFolderCreate(interp, def);
+	infoPtr = RatStdFolderCreate(interp, append_only, def);
     }
     if (NULL == infoPtr) {
 	return NULL;
@@ -305,6 +313,7 @@ RatOpenFolder(Tcl_Interp *interp, Tcl_Obj *def)
 	}
     }
     infoPtr->ident_def = cpystr(RatGetIdentDef(interp, def));
+    infoPtr->append_only = append_only;
     ckfree(infoPtr->name);
     infoPtr->name = cpystr(Tcl_GetString(fobjv[0]));
     infoPtr->refCount = 1;
@@ -342,18 +351,20 @@ RatOpenFolder(Tcl_Interp *interp, Tcl_Obj *def)
 	(*infoPtr->finalProc)(infoPtr, interp);
     }
     ratFolderList = infoPtr;
-    RatFolderSort(interp, infoPtr);
     sprintf(infoPtr->cmdName, "RatFolder%d", numFolders++);
     Tcl_CreateObjCommand(interp, infoPtr->cmdName, RatFolderCmd,
-    	    (ClientData) infoPtr, (Tcl_CmdDeleteProc *) NULL);
-    Tcl_SetVar2Ex(interp, "folderExists", infoPtr->cmdName,
-	    Tcl_NewIntObj(infoPtr->number), TCL_GLOBAL_ONLY);
-    Tcl_SetVar2Ex(interp, "folderRecent", infoPtr->cmdName,
-	    Tcl_NewIntObj(infoPtr->recent), TCL_GLOBAL_ONLY);
-    Tcl_SetVar2Ex(interp, "folderUnseen", infoPtr->cmdName,
-	    Tcl_NewIntObj(infoPtr->unseen), TCL_GLOBAL_ONLY);
-    Tcl_SetVar2Ex(interp, "folderChanged", infoPtr->cmdName,
-	    Tcl_NewIntObj(++folderChangeId), TCL_GLOBAL_ONLY);
+                         (ClientData) infoPtr, (Tcl_CmdDeleteProc *) NULL);
+    if (!append_only) {
+        RatFolderSort(interp, infoPtr);
+        Tcl_SetVar2Ex(interp, "folderExists", infoPtr->cmdName,
+                      Tcl_NewIntObj(infoPtr->number), TCL_GLOBAL_ONLY);
+        Tcl_SetVar2Ex(interp, "folderRecent", infoPtr->cmdName,
+                      Tcl_NewIntObj(infoPtr->recent), TCL_GLOBAL_ONLY);
+        Tcl_SetVar2Ex(interp, "folderUnseen", infoPtr->cmdName,
+                      Tcl_NewIntObj(infoPtr->unseen), TCL_GLOBAL_ONLY);
+        Tcl_SetVar2Ex(interp, "folderChanged", infoPtr->cmdName,
+                      Tcl_NewIntObj(++folderChangeId), TCL_GLOBAL_ONLY);
+    }
     return infoPtr;
 }
 
@@ -388,7 +399,7 @@ RatGetOpenHandlerCmd(ClientData clientData, Tcl_Interp *interp, int objc,
 	return TCL_ERROR;
     }
 
-    if ((infoPtr = RatGetOpenFolder(interp, objv[1]))) {
+    if ((infoPtr = RatGetOpenFolder(interp, objv[1], 0))) {
 	Tcl_SetObjResult(interp, Tcl_NewStringObj(infoPtr->cmdName, -1));
     } else {
 	Tcl_ResetResult(interp);
@@ -693,6 +704,24 @@ RatFolderCmd(ClientData clientData, Tcl_Interp *interp, int objc,
     } else if (!strcmp(Tcl_GetString(objv[1]), "role")) {
 	Tcl_SetObjResult(interp, infoPtr->role);
 	return TCL_OK;
+
+    } else if (!strcmp(Tcl_GetString(objv[1]), "dbinfo_get")) {
+        if (infoPtr->dbinfoGetProc != NULL) {
+            Tcl_Obj *oPtr = (*infoPtr->dbinfoGetProc)(infoPtr);
+            Tcl_SetObjResult(interp, oPtr);
+            return TCL_OK;
+        } else {
+            return TCL_ERROR;
+        }
+
+    } else if (!strcmp(Tcl_GetString(objv[1]), "dbinfo_set")) {
+        if (infoPtr->dbinfoSetProc != NULL) {
+            if (objc != 6) goto usage;
+            return (*infoPtr->dbinfoSetProc)(interp, infoPtr, objv[2], objv[3],
+                                             objv[4], objv[5]);
+        } else {
+            return TCL_ERROR;
+        }
     }
 
  usage:
@@ -1413,7 +1442,7 @@ RatGetMsgInfo(Tcl_Interp *interp, RatFolderInfoType type, MessageInfo *msgPtr,
     MESSAGECACHE dateElt, *dateEltPtr;
     PARAMETER *parmPtr;
     ADDRESS *adrPtr;
-    struct tm tm, *tm2;
+    struct tm tm;
     char buf[1024], *s;
 
     switch (type) {
@@ -1550,13 +1579,12 @@ RatGetMsgInfo(Tcl_Interp *interp, RatFolderInfoType type, MessageInfo *msgPtr,
 	    tm.tm_wday = 0;
 	    tm.tm_yday = 0;
 	    tm.tm_isdst = -1;
-            /* time represents the time teh message was sent, without
+            /* time represents the time the message was sent, without
              * the time zone factor. So when rendered in gmt it gives
              * correct date/time. */
             time = mktime(&tm);
             if (RAT_FOLDER_DATE_F == type) {
-                tm2 = gmtime(&time);
-                oPtr = RatFormatDate(interp, tm2);
+                oPtr = RatFormatDate(interp, &tm);
             } else {
                 /* To get the real time of sending we must add the
                  * time zone offset. */
@@ -1951,7 +1979,7 @@ RatFolderClose(Tcl_Interp *interp, RatFolderInfo *infoPtr, int force)
     Tcl_GetBooleanFromObj(interp, oPtr, &expunge);
 
     if (infoPtr->refCount-- != 1 && !force) {
-	if (expunge) {
+	if (expunge && !infoPtr->append_only) {
 	    RatUpdateFolder(interp, infoPtr, RAT_SYNC);
 	}
 	return TCL_OK;

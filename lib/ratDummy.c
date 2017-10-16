@@ -16,6 +16,12 @@
 #   define CONST84
 #endif
 
+#if (TCL_MAJOR_VERSION >= 8) && (TCL_MINOR_VERSION >= 5)
+#   define CONST85 CONST
+#else
+#   define CONST85
+#endif
+
 void
 Tk_UnmapWindow(Tk_Window tkwin) {}
 
@@ -88,7 +94,7 @@ void
 Tk_MakeWindowExist (Tk_Window tkwin) {}
 
 void
-Tk_ManageGeometry (Tk_Window tkwin, Tk_GeomMgr * mgrPtr, ClientData clientData)
+Tk_ManageGeometry (Tk_Window tkwin, CONST85 Tk_GeomMgr * mgrPtr, ClientData clientData)
 {}
 
 void

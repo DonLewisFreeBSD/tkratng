@@ -3936,16 +3936,6 @@ sr {Proveravam bazu}
 pl {Sprawdzam bazê}
 pt {Verificação em curso}
 
-label total_num_messages
-sv {Totalt antal brev i indexet}
-en {Total number of messages in index}
-de {Gesamtanzahl der Nachrichten im Index}
-it {Numero totale di messaggi nell'indice}
-fr {Nombre de messages dans l'index}
-sr {Ukupan broj pisama u indeksu}
-pl {Ca³kowita liczba wiadomo¶ci w indeksie}
-pt {Número de mensagens no índice}
-
 label num_malformed
 sv {Antal ogiltiga ingångar}
 en {Number of malformed entries}
@@ -5715,15 +5705,6 @@ fr PPP
 sr DPI
 pl DPI
 pt dpi
-
-label mail_regarding
-sv {Brev angående:}
-en {Mail regarding:}
-de {Nachricht betrifft:}
-fr {Message concernant:}
-sr {Pismo povodom:}
-pl {Co do listu}
-pt {Referente a:}
 
 label d
 sv U
@@ -8166,5 +8147,85 @@ en "Database: to/from sender"
 sv "Databas: till/från avsändaren"
 
 label illegal_list_format
-en {Illegal character '%c' in list format}
-sv {Ogiltigt tecken '%c' i listformatet}
+en {Illegal character '%%%c' in list format}
+sv {Ogiltigt tecken '%%%c' i listformatet}
+
+label sync_offline_folders
+sv {Synkronisera frånkopplade nätverksmappar}
+en {Synchronize offline folders}
+
+label always_eeditor_but_none
+en {You have "Always use external editor" enabled but have\
+not defined any external editors.}
+sv {Du har "Använd alltid extern editor" påslaget men har\
+inte definierat någon extertn editor}
+
+label pgp_err
+en Failed
+sv Fel
+
+label pgp_abort
+en Aborted
+sv Avbruten
+
+label bad_mailto_url
+en "Bad mailto url"
+sv "Ogiltig mailto"
+
+label info
+en Information
+sv Information
+
+label earliest_date
+en {Earliest date}
+sv {Tidigaste datum}
+
+label latest_date
+en {Latest date}
+sv {Senaste datum}
+
+label keyword
+en Keyword
+sv Nyckelord
+
+label usage_count
+en {Usage count}
+sv Använt
+
+label total_num_messages
+sv {Totalt antal brev}
+en {Total number of messages}
+#de {Gesamtanzahl der Nachrichten im Index}
+#it {Numero totale di messaggi nell'indice}
+#fr {Nombre de messages dans l'index}
+#sr {Ukupan broj pisama u indeksu}
+#pl {Ca³kowita liczba wiadomo¶ci w indeksie}
+#pt {Número de mensagens no índice}
+
+label dbinfo
+en {Database info}
+sv {databasinfo}
+
+label dbinfo_info_msg
+en {Message database info}
+sv {Brevets databasinfo}
+
+label dbinfo_info_folder
+en {Values comes from folder and not from selected messages}
+sv {Värdena kommer från mappen och inte från de valda breven}
+
+label dbinfo_info_first_msg
+en {Values comes from the first message}
+sv {Värdena kommer från det första brevet}
+
+label flag_same_subject
+en {Flag messages with same subject}
+sv {Markera brev med samma ärende}
+
+label exdate_expl
+en {+n means to expire 'n' days after insert/modify}
+sv {+n betyder att expirera 'n' dagar efter lagring/modifiering}
+
+label date_parsing_failed
+en "Failed to parse time"
+sv "Kunde inte förstå tiden"

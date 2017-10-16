@@ -35,13 +35,13 @@ ListExpression*
 RatParseList(const char *format, char *error)
 {
     ListExpression *expPtr;
-    int i, w, expIndex, bufLen, num;
+    int i, w, index, bufLen, num;
     char buf[1024];
 
     for(i=num=0; '\0' != format[i]; i++) {
 	if ('%' == format[i] && format[i+1] && '%' != format[i+1]) {
-	    while (format[++i] && ('-' == format[i]
-		    || isdigit((unsigned char)format[i])));
+	    while (format[++i]
+                   && ('-' == format[i] || isdigit((unsigned char)format[i])));
 	    if (!strchr("scnNmrRbBdDSitMu", format[i])) {
                 if (error != NULL) {
                     *error = format[i];
@@ -52,56 +52,60 @@ RatParseList(const char *format, char *error)
 	}
     }
     expPtr = (ListExpression*)ckalloc(sizeof(ListExpression));
-    expPtr->size = num;
     expPtr->preString = (char**)ckalloc(num*sizeof(char*));
     expPtr->typeList =
 	(RatFolderInfoType*)ckalloc(num*sizeof(RatFolderInfoType));
     expPtr->fieldWidth = (int*)ckalloc(num*sizeof(int));
     expPtr->leftJust = (int*)ckalloc(num*sizeof(int));
-    for (i = expIndex = bufLen = 0; format[i]; i++) {
-	if ('%' == format[i]) {
+    for (i = index = bufLen = 0; format[i]; i++) {
+	if ('%' == format[i] && format[i+1]) {
 	    if ('%' == format[++i]) {
 		buf[bufLen++] = format[i];
 		continue;
 	    }
 	    buf[bufLen] = '\0';
-	    expPtr->preString[expIndex] = cpystr(buf);
+	    expPtr->preString[index] = cpystr(buf);
 	    if ('-' == format[i]) {
-		expPtr->leftJust[expIndex] = 1;
+		expPtr->leftJust[index] = 1;
 		i++;
 	    } else {
-		expPtr->leftJust[expIndex] = 0;
+		expPtr->leftJust[index] = 0;
 	    }
 	    w=0;
 	    while (isdigit((unsigned char)format[i])) {
 		w = w*10+format[i++]-'0';
 	    }
-	    expPtr->fieldWidth[expIndex] = w;
+            if (!format[i]) {
+                break;
+            }
+	    expPtr->fieldWidth[index] = w;
 	    switch(format[i]) {
-	    case 's': expPtr->typeList[expIndex++] = RAT_FOLDER_SUBJECT; break;
-	    case 'c': expPtr->typeList[expIndex++] = RAT_FOLDER_CANONSUBJECT; break;
-	    case 'n': expPtr->typeList[expIndex++] = RAT_FOLDER_NAME; break;
-	    case 'N': expPtr->typeList[expIndex++] = RAT_FOLDER_ANAME; break;
-	    case 'm': expPtr->typeList[expIndex++] = RAT_FOLDER_MAIL; break;
-	    case 'r': expPtr->typeList[expIndex++] = RAT_FOLDER_NAME_RECIPIENT;
+	    case 's': expPtr->typeList[index++] = RAT_FOLDER_SUBJECT; break;
+	    case 'c': expPtr->typeList[index++] = RAT_FOLDER_CANONSUBJECT;
+                break;
+	    case 'n': expPtr->typeList[index++] = RAT_FOLDER_NAME; break;
+	    case 'N': expPtr->typeList[index++] = RAT_FOLDER_ANAME; break;
+	    case 'm': expPtr->typeList[index++] = RAT_FOLDER_MAIL; break;
+	    case 'r': expPtr->typeList[index++] = RAT_FOLDER_NAME_RECIPIENT;
 		    break;
-	    case 'R': expPtr->typeList[expIndex++] = RAT_FOLDER_MAIL_RECIPIENT;
+	    case 'R': expPtr->typeList[index++] = RAT_FOLDER_MAIL_RECIPIENT;
 		    break;
-	    case 'b': expPtr->typeList[expIndex++] = RAT_FOLDER_SIZE; break;
-	    case 'B': expPtr->typeList[expIndex++] = RAT_FOLDER_SIZE_F; break;
-	    case 'd': expPtr->typeList[expIndex++] = RAT_FOLDER_DATE_F; break;
-	    case 'D': expPtr->typeList[expIndex++] = RAT_FOLDER_DATE_N; break;
-	    case 'S': expPtr->typeList[expIndex++] = RAT_FOLDER_STATUS; break;
-	    case 'i': expPtr->typeList[expIndex++] = RAT_FOLDER_INDEX; break;
-	    case 't': expPtr->typeList[expIndex++] =RAT_FOLDER_THREADING;break;
-	    case 'M': expPtr->typeList[expIndex++] = RAT_FOLDER_MSGID; break;
-	    case 'u': expPtr->typeList[expIndex++] = RAT_FOLDER_UID; break;
+	    case 'b': expPtr->typeList[index++] = RAT_FOLDER_SIZE; break;
+	    case 'B': expPtr->typeList[index++] = RAT_FOLDER_SIZE_F; break;
+	    case 'd': expPtr->typeList[index++] = RAT_FOLDER_DATE_F; break;
+	    case 'D': expPtr->typeList[index++] = RAT_FOLDER_DATE_N; break;
+	    case 'S': expPtr->typeList[index++] = RAT_FOLDER_STATUS; break;
+	    case 'i': expPtr->typeList[index++] = RAT_FOLDER_INDEX; break;
+	    case 't': expPtr->typeList[index++] = RAT_FOLDER_THREADING;break;
+	    case 'M': expPtr->typeList[index++] = RAT_FOLDER_MSGID; break;
+	    case 'u': expPtr->typeList[index++] = RAT_FOLDER_UID; break;
 	    }
 	    bufLen = 0;
 	} else {
 	    buf[bufLen++] = format[i];
 	}
     }
+    expPtr->size = index;
     if (bufLen) {
 	buf[bufLen] = '\0';
 	expPtr->postString = cpystr(buf);

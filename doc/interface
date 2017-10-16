@@ -132,6 +132,18 @@ $folder refcount
 $folder role
     Returns the role to use for this folder.
 
+$folder dbinfo_get
+    This is only valid for database folders. It returns the default
+    values for new messages in this folder. The return value is a list
+    consisting of:
+      {list_of_keywords expiration_time expiration_event}
+
+$folder dbinfo_set indexes keywords exdate extype    
+    This is only valid for database folders. It update the keywords,
+    expiration time and action for the messages whose indexes are included
+    in the indexes list.
+
+
     Message entities
 
 Each message has an associated variable named msgInfo_$message. When the
@@ -186,6 +198,16 @@ $message delete_attachments attachments dest_folder
     Delete the specified attachemnts and put the resulting message in
     the specified folder. Attachments are specified as a list of integers
     which give the "path" to the attachment.
+
+$message rerunPGP
+    Rerun any PGP operation on the body.
+
+$message dbinfo_get
+    This is only valid for database messages. It returns the current
+    database  information for this message. The return value is a list
+    consisting of:
+      {list_of_keywords expiration_time expiration_event}
+
 
     Bodypart entities
 
@@ -282,7 +304,8 @@ $body encoded
 
 $body sigstatus
     Gets the signature status for this bodypart. Possible return values
-    are "pgp_none", "pgp_unchecked", "pgp_good" or "pgp_bad"
+    are "pgp_none", "pgp_unchecked", "pgp_good", "pgp_bad", "pgp_err" or
+    "pgp_abort"
 
 $body checksig
     Causes this bodypart to check the signature. The return value is the
@@ -347,10 +370,12 @@ RatAlias get alias
     Returns the definition of an alias. The return value is
     {book fullname content comment pgp_key options}.
 
-RatAlias list var
+RatAlias list var ?nocase?
     Returns the alias list. The alias list is inserted into an array
     named "var". The index is the name of the alias and the content is
     a list of elements {book fullname content comment pgp_key options}.
+    If nocase is specified the all the keys in the array will be converted
+    to lower case.
 
 RatAlias read book filename
     Reads aliases from filename and adds them to the internal list as
@@ -503,6 +528,12 @@ RatDbaseInfo
       * approximate number of messages in database
       * timstamp of earliest message
       * timestamp of last message
+      * approximate size of database
+
+RatDbasekeywords
+    List the keywords usied in the database along whith a count of how
+    many messages are using each keyword. Returns a list of tuples where
+    each tuple is made up of a keyword and usage count.
 
 RatParseExp expression
     Parses the given expression and returns an expression identifier.
@@ -602,8 +633,17 @@ RatGetMatchingAddrsImpl addrlist match max
     Look for addresses in addrlist which starts with the match charaters
     (case insensitive). Return no more than "max" addresses.
 
-ratGenerateMsgId role
+RatGenerateMsgId role
     Return a suitable message id for the given role
+
+RatCheckListFormat list_format
+    Checks if the argument is a valid message list format. Returns ok
+    if it is valid, otherwise an error message is returned.
+
+RatDecodeUrlc string addr
+    Decodes any %HH encoded characters in the given string. Addr should
+    be true if this is an address field. Returns the string with the
+    charcters decoded.
 
 
 	TCL COMMANDS THE LIBRARY EXPECTS THE INTERFACE TO PROVIDE

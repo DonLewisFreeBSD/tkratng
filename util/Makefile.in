@@ -33,6 +33,7 @@ EXTRA_CFLAGS = @CFLAGS@ @MEM_DEBUG_FLAGS@
 SHELL =         /bin/sh
 
 # Installation directories
+   datarootdir = @datarootdir@
         prefix = @prefix@
    exec_prefix = @exec_prefix@
        MAN_DIR = @mandir@
@@ -79,7 +80,7 @@ TARGETS_DATA = rat_list.tcl rat_fbox.tcl rat_balloon.tcl \
                rat_edit.tcl rat_textlist.tcl rat_ed.tcl rat_ispell.tcl \
                rat_tree.tcl rat_enriched.tcl rat_flowmsg.tcl \
 	       rat_scrollframe.tcl rat_compat.tcl rat_textspell.tcl \
-	       rat_spellutil.tcl rat_find.tcl
+	       rat_spellutil.tcl rat_find.tcl rat_table.tcl
 TARGETS = ${TARGETS_LIB} ${TARGETS_DATA}
 
 all: ${TARGETS} pkgIndex.tcl ${DUMMYLIB}

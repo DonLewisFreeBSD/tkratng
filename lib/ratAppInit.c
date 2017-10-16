@@ -109,7 +109,6 @@ static Tcl_ObjCmdProc RatTildeSubstCmd;
 static Tcl_ObjCmdProc RatTimeCmd;
 static Tcl_ObjCmdProc RatLockCmd;
 static Tcl_ObjCmdProc RatIsLockedCmd;
-static Tcl_ObjCmdProc RatTypeCmd;
 static Tcl_ObjCmdProc RatEncodingCmd;
 static Tcl_ObjCmdProc RatDSECmd;
 static Tcl_ObjCmdProc RatExpireCmd;
@@ -273,13 +272,13 @@ RatAppInit(Tcl_Interp *interp)
      */
     if (!Tcl_GetVar2(interp, "env", "USER", TCL_GLOBAL_ONLY)) {
 	if (pwPtr == NULL) {
-	    pwPtr = getpwuid(getuid());
+	    pwPtr = GetPw();
 	}
 	Tcl_SetVar2(interp, "env", "USER", pwPtr->pw_name, TCL_GLOBAL_ONLY);
     }
     if (!Tcl_GetVar2(interp, "env", "GECOS", TCL_GLOBAL_ONLY)) {
 	if (pwPtr == NULL) {
-	    pwPtr = getpwuid(getuid());
+	    pwPtr = GetPw();
 	}
 	strlcpy(tmp, pwPtr->pw_gecos, sizeof(tmp));
 	if ((c = strchr(tmp, ','))) {
@@ -289,7 +288,7 @@ RatAppInit(Tcl_Interp *interp)
     }
     if (!Tcl_GetVar2(interp, "env", "HOME", TCL_GLOBAL_ONLY)) {
 	if (pwPtr == NULL) {
-	    pwPtr = getpwuid(getuid());
+	    pwPtr = GetPw();
 	}
 	Tcl_SetVar2(interp, "env", "HOME", pwPtr->pw_dir, TCL_GLOBAL_ONLY);
     }
@@ -297,7 +296,7 @@ RatAppInit(Tcl_Interp *interp)
 	char buf[1024];
 
 	if (pwPtr == NULL) {
-	    pwPtr = getpwuid(getuid());
+	    pwPtr = GetPw();
 	}
 	snprintf(buf, sizeof(buf), "/var/spool/mail/%s", pwPtr->pw_name);
 	Tcl_SetVar2(interp, "env", "MAIL", buf, TCL_GLOBAL_ONLY);
@@ -332,7 +331,6 @@ RatAppInit(Tcl_Interp *interp)
     Tcl_CreateObjCommand(interp, "RatTime", RatTimeCmd, NULL, NULL);
     Tcl_CreateObjCommand(interp, "RatLock", RatLockCmd, NULL, NULL);
     Tcl_CreateObjCommand(interp, "RatIsLocked", RatIsLockedCmd, NULL, NULL);
-    Tcl_CreateObjCommand(interp, "RatType2", RatTypeCmd, NULL, NULL);
     Tcl_CreateObjCommand(interp, "RatDaysSinceExpire", RatDSECmd, NULL, NULL);
     Tcl_CreateObjCommand(interp, "RatExpire", RatExpireCmd, NULL, NULL);
     Tcl_CreateObjCommand(interp, "RatLL", RatLLCmd, NULL, NULL);
@@ -376,6 +374,10 @@ RatAppInit(Tcl_Interp *interp)
 			 NULL, NULL);
     Tcl_CreateObjCommand(interp, "RatCheckListFormat", RatCheckListFormatCmd,
 			 NULL, NULL);
+    Tcl_CreateObjCommand(interp, "RatDecodeUrlc", RatDecodeUrlcCmd,
+			 NULL, NULL);
+    Tcl_CreateObjCommand(interp, "RatDbaseKeywords", RatDbaseKeywordsCmd,
+                         NULL, NULL);
 
     Tcl_CreateExitHandler(RatExit, NULL);
 
@@ -893,13 +895,13 @@ RatTmpdirToucher(ClientData clientData)
 {
     char buf[1024];
     const char *tmp = Tcl_GetVar(timerInterp, "rat_tmp", TCL_GLOBAL_ONLY);
-    int fd;
+    int fd, l;
 
     snprintf(buf, sizeof(buf), "%s/mark", tmp);
     if (0 <= (fd = open(buf, O_RDWR|O_TRUNC|O_CREAT, 0644))) {
-	write(fd, "mark", 4);
+	l = safe_write(fd, "mark", 4); /* Ignore result */
 	lseek(fd, 0, SEEK_SET);
-	read(fd, buf, 4);
+	SafeRead(fd, buf, 4);
 	close(fd);
     }
     
@@ -1387,115 +1389,6 @@ RatEncodingCmd(ClientData dummy, Tcl_Interp *interp, int objc,
     return TCL_OK;
 }
 
-/*
- *----------------------------------------------------------------------
- *
- * RatTypeCmd --
- *
- *	See ../doc/interface for a descriptions of arguments and result.
- *
- *	The algorithm is to first determine if the file exists and its
- *	encoding, then run the file command on it and try to match the
- *	result agains the typetable. If we don't find any match the type
- *	defaults to application/octet-stream.
- *
- * Results:
- *      A standard tcl result.
- *
- * Side effects:
- *      None.
- *
- *
- *----------------------------------------------------------------------
- */
-
-static int
-RatTypeCmd(ClientData dummy, Tcl_Interp *interp, int objc,
-	   Tcl_Obj *CONST objv[])
-{
-    int listArgc, elemArgc;
-    Tcl_Obj *oPtr, **listArgv, **elemArgv, *robjv[2];
-    CONST84 char *cmdArgv[3];
-    char buf[1024], *encodingName, *fileType;
-    Tcl_Channel channel;
-    char c;
-    int length, i, encoding;
-
-    if (objc != 2) {
-	Tcl_AppendResult(interp, "wrong # args: should be \"",
-		Tcl_GetString(objv[0]), " filename\"", (char *) NULL);
-	return TCL_ERROR;
-    }
-
-    /*
-     * Determine encoding
-     */
-    channel = Tcl_OpenFileChannel(interp, Tcl_GetString(objv[1]), "r", 0);
-    if (NULL == channel) {
-	Tcl_AppendResult(interp, "error opening file \"",
-			 Tcl_GetString(objv[1]), "\": ",
-			 Tcl_PosixError(interp), (char *) NULL);
-	return TCL_ERROR;
-    }
-    encoding = ENC7BIT;
-    length = 0;
-    while (Tcl_Read(channel, &c, 1), !Tcl_Eof(channel)) {
-	if ('\0' == c) {
-	    encoding = ENCBINARY;
-	    break;
-	}
-	if ('\n' == c) {
-	    length = 0;
-	} else {
-	    if (++length == 1024) {
-		encoding = ENCBINARY;
-		break;
-	    }
-	}
-	if (c & 0x80) {
-	    encoding = ENC8BIT;
-	}
-    }
-    Tcl_Close(interp, channel);
-    switch(encoding) {
-    case ENC7BIT:   encodingName = "7bit";   break;
-    case ENC8BIT:   encodingName = "8bit";   break;
-    case ENCBINARY: encodingName = "binary"; break;
-    default: 	    encodingName = "unkown"; break;
-    }
-
-    /*
-     * Run the "file" command.
-     */
-    cmdArgv[0] = "file";
-    cmdArgv[1] = Tcl_GetString(objv[1]);
-    if (!(channel = Tcl_OpenCommandChannel(interp, 2, cmdArgv, TCL_STDOUT))) {
-	return TCL_ERROR;
-    }
-    length = Tcl_Read(channel, buf, sizeof(buf)-1);
-    buf[length] = '\0';
-    Tcl_Close(interp, channel);
-    fileType = strchr(buf, ':')+1;
-    oPtr = Tcl_GetVar2Ex(interp, "option", "typetable", TCL_GLOBAL_ONLY);
-    Tcl_ListObjGetElements(interp, oPtr, &listArgc, &listArgv);
-    for (i=0; i<listArgc; i++) {
-	Tcl_ListObjGetElements(interp, listArgv[i], &elemArgc, &elemArgv);
-	if (Tcl_StringMatch(fileType, Tcl_GetString(elemArgv[0]))) {
-	    robjv[0] = elemArgv[1];
-	    robjv[1] = Tcl_NewStringObj(encodingName, -1);
-	    break;
-	}
-    }
-    if (i == listArgc) {
-	robjv[0] = Tcl_NewStringObj("application/octet-stream", -1);
-	robjv[1] = Tcl_NewStringObj(encodingName, -1);
-    }
-    oPtr = Tcl_NewListObj(2, robjv);
-    Tcl_SetObjResult(interp, oPtr);
-
-    return TCL_OK;
-}
-
 /* 
  *----------------------------------------------------------------------
  * 
@@ -1519,7 +1412,7 @@ RatTypeCmd(ClientData dummy, Tcl_Interp *interp, int objc,
 long
 RatDelaySoutr(void *stream_x, char *string)
 {
-    int len1, len2;
+    int len1, len2, l;
     len1 = strlen(ratDelayBuffer);
     len2 = strlen(string);
 
@@ -1527,8 +1420,8 @@ RatDelaySoutr(void *stream_x, char *string)
 	strlcat(ratDelayBuffer, string, sizeof(ratDelayBuffer));
 	return 1;
     }
-    write((int)stream_x, ratDelayBuffer, len1);
-    write((int)stream_x, string, len2-2);
+    l = safe_write((int)stream_x, ratDelayBuffer, len1); /* Ignore result */
+    l = safe_write((int)stream_x, string, len2-2);       /* Ignore result */
     ratDelayBuffer[0] = string[len2-2];
     ratDelayBuffer[1] = string[len2-1];
     return 1;
@@ -2532,7 +2425,9 @@ RatReadAndCanonify(Tcl_Interp *interp, char *filename_utf,
 	*size = used;
     } else {
 	buf = (char*)ckalloc(sbuf.st_size+1);
-	fread(buf, sbuf.st_size, 1, fp);
+	if (1 != fread(buf, sbuf.st_size, 1, fp)) {
+            sbuf.st_size = 0;
+        }
 	buf[sbuf.st_size] = '\0';
 	*size = sbuf.st_size;
     }
@@ -2736,4 +2631,73 @@ RatGenerateMsgIdCmd(ClientData dummy, Tcl_Interp *interp, int objc,
     snprintf(buf, sizeof(buf), "<tkrat.%s@%s>", digest_hex, domain);
     Tcl_SetObjResult(interp, Tcl_NewStringObj(buf, -1));
     return TCL_OK;
+}
+
+
+/*
+ *----------------------------------------------------------------------
+ *
+ * SafeRead --
+ *
+ *      Read a specified number of bytes from a socket. This function will
+ *      continue until it has received an EOF, error or the requested
+ *      number of bytes.
+ *
+ * Results:
+ *      Returns the number of bytes actually read or a negative value
+ *      on error.
+ *
+ * Side effects:
+ *      None
+ *
+ *
+ *----------------------------------------------------------------------
+ */
+ssize_t
+SafeRead(int fd, void *buf, size_t count)
+{
+    ssize_t got = 0;
+    ssize_t l;
+
+    while (got < count) {
+        l = read(fd, buf+got, count-got);
+        if (l < 0 && errno == EINTR) {
+            continue;
+        } else if (l <= 0) {
+            return got;
+        }
+        got += l;
+    }
+    return got;
+}
+
+
+/*
+ *----------------------------------------------------------------------
+ *
+ * GetPw --
+ *
+ *      Get the passwd struct for the current user. This function will
+ *      never return NULL, but may exit if the call fails.
+ *
+ * Results:
+ *      Returns a pointer to a passwd struct. The function will exit
+ *      if the getpwuid call fails.
+ *
+ * Side effects:
+ *      None
+ *
+ *
+ *----------------------------------------------------------------------
+ */
+struct passwd*
+GetPw()
+{
+    struct passwd *pwPtr = getpwuid(getuid());
+
+    if (!pwPtr) {
+        fprintf(stderr, "You don't exist, go away!\n");
+        exit(1);
+    }
+    return pwPtr;
 }

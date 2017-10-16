@@ -38,6 +38,7 @@ static RatMakeChildrenProc Db_MakeChildrenProc;
 static RatFetchBodyProc Db_FetchBodyProc;
 static RatBodyDeleteProc Db_BodyDeleteProc;
 static RatGetInternalDateProc Db_GetInternalDateProc;
+static RatMsgDbInfoProc Db_MsgDbInfoGetProc;
 
 
 /*
@@ -71,6 +72,7 @@ RatDbMessagesInit(MessageProcInfo *messageProcInfoPtr)
     messageProcInfoPtr->fetchBodyProc = Db_FetchBodyProc;
     messageProcInfoPtr->bodyDeleteProc = Db_BodyDeleteProc;
     messageProcInfoPtr->getInternalDateProc = Db_GetInternalDateProc;
+    messageProcInfoPtr->dbinfoGetProc = Db_MsgDbInfoGetProc;
 }
 
 
@@ -399,4 +401,42 @@ Db_GetInfoProc(Tcl_Interp *interp, ClientData clientData,
 	    break;
     }
     return NULL;
+}
+
+/*
+ *----------------------------------------------------------------------
+ *
+ * Db_DbinfoGetProc --
+ *
+ *      Handle the dbinfo_get command. See ../doc/interface for details
+ *
+ * Results:
+ *	None
+ *
+ * Side effects:
+ *	None
+ *
+ *
+ *----------------------------------------------------------------------
+ */
+static Tcl_Obj*
+Db_MsgDbInfoGetProc(MessageInfo *msgPtr)
+{
+    DbMessageInfo *dbMsgPtr = (DbMessageInfo*)msgPtr->clientData;
+    Tcl_Obj *robjv[3];
+    RatDbEntry *entry;
+    int len;
+    
+    entry = RatDbGetEntry(dbMsgPtr->index);
+
+    len = strlen(entry->content[KEYWORDS]);
+    if (len && '{' == entry->content[KEYWORDS][0]
+        && '}' == entry->content[KEYWORDS][len-1]) {
+        robjv[0] = Tcl_NewStringObj(entry->content[KEYWORDS]+1, len-2);
+    } else {
+        robjv[0] = Tcl_NewStringObj(entry->content[KEYWORDS], len);
+    }
+    robjv[1] = Tcl_NewLongObj(atol(entry->content[EX_TIME]));
+    robjv[2] = Tcl_NewStringObj(entry->content[EX_TYPE], -1);
+    return Tcl_NewListObj(3, robjv);
 }
