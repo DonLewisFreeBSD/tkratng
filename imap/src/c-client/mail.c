@@ -10,10 +10,10 @@
  *		Internet: MRC@CAC.Washington.EDU
  *
  * Date:	22 November 1989
- * Last Edited:	13 October 2001
+ * Last Edited:	18 January 2005
  *
  * The IMAP toolkit provided in this Distribution is
- * Copyright 2001 University of Washington.
+ * Copyright 1988-2005 University of Washington.
  * The full text of our legal notices is contained in the file called
  * CPYRIGHT, included with this Distribution.
  */
@@ -28,6 +28,9 @@
 #include "rfc822.h"
 #include "utf8.h"
 #include "smtp.h"
+
+char *UW_copyright = "The IMAP toolkit provided in this Distribution is\nCopyright 1988-2005 University of Washington.\nThe full text of our legal notices is contained in the file called\nCPYRIGHT, included with this Distribution.\n";
+
 
 /* c-client global data */
 
@@ -69,16 +72,29 @@ static quotaroot_t mailquotarootresults = NIL;
 static sortresults_t mailsortresults = NIL;
 				/* threaded results callback */
 static threadresults_t mailthreadresults = NIL;
+				/* free elt extra stuff callback */
+static freeeltsparep_t mailfreeeltsparep = NIL;
 				/* free envelope extra stuff callback */
 static freeenvelopesparep_t mailfreeenvelopesparep = NIL;
-				/* free envelope extra stuff callback */
-static freeeltsparep_t mailfreeeltsparep = NIL;
+				/* free body extra stuff callback */
+static freebodysparep_t mailfreebodysparep = NIL;
+				/* free stream extra stuff callback */
+static freestreamsparep_t mailfreestreamsparep = NIL;
 				/* SSL start routine */
 static sslstart_t mailsslstart = NIL;
 				/* SSL certificate query */
 static sslcertificatequery_t mailsslcertificatequery = NIL;
 				/* SSL failure notify */
 static sslfailure_t mailsslfailure = NIL;
+static kinit_t mailkinit = NIL;	/* application kinit callback */
+				/* snarf interval */
+static long mailsnarfinterval = 60;
+				/* snarf preservation */
+static long mailsnarfpreserve = NIL;
+				/* newsrc name uses canonical host */
+static long mailnewsrccanon = LONGT;
+				/* note network sent command */
+static sendcommand_t mailsendcommand = NIL;
 
 				/* supported threaders */
 static THREADER mailthreadordsub = {
@@ -167,6 +183,11 @@ void *mm_cache (MAILSTREAM *stream,unsigned long msgno,long op)
 	fs_give ((void **) &stream->sc[msgno - 1]->cc);
       if (stream->sc[msgno - 1]->subject)
 	fs_give ((void **) &stream->sc[msgno - 1]->subject);
+      if (stream->sc[msgno - 1]->original_subject)
+	fs_give ((void **) &stream->sc[msgno - 1]->original_subject);
+      if (stream->sc[msgno - 1]->unique &&
+	  (stream->sc[msgno - 1]->unique != stream->sc[msgno - 1]->message_id))
+	fs_give ((void **) &stream->sc[msgno - 1]->unique);
       if (stream->sc[msgno - 1]->message_id)
 	fs_give ((void **) &stream->sc[msgno - 1]->message_id);
       if (stream->sc[msgno - 1]->references)
@@ -278,6 +299,13 @@ void *mail_parameters (MAILSTREAM *stream,long function,void *value)
   DRIVER *d;
   AUTHENTICATOR *a;
   switch ((int) function) {
+  case SET_INBOXPATH:
+    fatal ("SET_INBOXPATH not permitted");
+  case GET_INBOXPATH:
+    if ((stream || (stream = mail_open (NIL,"INBOX",OP_PROTOTYPE))) &&
+	stream->dtb->parameters)
+      ret = (*stream->dtb->parameters) (function,value);
+    break;
   case SET_THREADERS:
     fatal ("SET_THREADERS not permitted");
   case GET_THREADERS:		/* use stream dtb instead of global */
@@ -287,24 +315,29 @@ void *mail_parameters (MAILSTREAM *stream,long function,void *value)
     break;
   case SET_NAMESPACE:
     fatal ("SET_NAMESPACE not permitted");
-  case GET_NAMESPACE:		/* use stream dtb instead of environment */
+    break;
+  case SET_NEWSRC:		/* too late on open stream */
+    if (stream && (stream != ((*stream->dtb->open) (NIL))))
+      fatal ("SET_NEWSRC not permitted");
+    else ret = env_parameters (function,value);
+    break;
+  case GET_NAMESPACE:
+  case GET_NEWSRC:		/* use stream dtb instead of environment */
     ret = (stream && stream->dtb) ?
 				/* KLUDGE ALERT: note stream passed as value */
       (*stream->dtb->parameters) (function,stream) :
 	env_parameters (function,value);
     break;
-  case SET_NEWSRC:		/* use stream dtb instead of environment */
-  case GET_NEWSRC:
-    ret = (stream && stream->dtb) ?
-      (*stream->dtb->parameters) (function,value) :
-	env_parameters (function,value);
-    break;
+  case ENABLE_DEBUG:
+    fatal ("ENABLE_DEBUG not permitted");
+  case DISABLE_DEBUG:
+    fatal ("DISABLE_DEBUG not permitted");
+
   case SET_DRIVERS:
     fatal ("SET_DRIVERS not permitted");
   case GET_DRIVERS:		/* always return global */
     ret = (void *) maildrivers;
     break;
-
   case SET_DRIVER:
     fatal ("SET_DRIVER not permitted");
   case GET_DRIVER:
@@ -379,6 +412,12 @@ void *mail_parameters (MAILSTREAM *stream,long function,void *value)
   case GET_NEWSRCQUERY:
     ret = (void *) mailnewsrcquery;
     break;
+  case SET_NEWSRCCANONHOST:
+    mailnewsrccanon = (long) value;
+  case GET_NEWSRCCANONHOST:
+    ret = (void *) mailnewsrccanon;
+    break;
+
   case SET_FREEENVELOPESPAREP:
     mailfreeenvelopesparep = (freeenvelopesparep_t) value;
   case GET_FREEENVELOPESPAREP:
@@ -388,6 +427,16 @@ void *mail_parameters (MAILSTREAM *stream,long function,void *value)
     mailfreeeltsparep = (freeeltsparep_t) value;
   case GET_FREEELTSPAREP:
     ret = (void *) mailfreeeltsparep;
+    break;
+  case SET_FREESTREAMSPAREP:
+    mailfreestreamsparep = (freestreamsparep_t) value;
+  case GET_FREESTREAMSPAREP:
+    ret = (void *) mailfreestreamsparep;
+    break;
+  case SET_FREEBODYSPAREP:
+    mailfreebodysparep = (freebodysparep_t) value;
+  case GET_FREEBODYSPAREP:
+    ret = (void *) mailfreebodysparep;
     break;
 
   case SET_SSLSTART:
@@ -404,6 +453,16 @@ void *mail_parameters (MAILSTREAM *stream,long function,void *value)
     mailsslfailure = (sslfailure_t) value;
   case GET_SSLFAILURE:
     ret = (void *) mailsslfailure;
+    break;
+  case SET_KINIT:
+    mailkinit = (kinit_t) value;
+  case GET_KINIT:
+    ret = (void *) mailkinit;
+    break;
+  case SET_SENDCOMMAND:
+    mailsendcommand = (sendcommand_t) value;
+  case GET_SENDCOMMAND:
+    ret = (void *) mailsendcommand;
     break;
 
   case SET_SERVICENAME:
@@ -482,6 +541,25 @@ void *mail_parameters (MAILSTREAM *stream,long function,void *value)
   case GET_QUOTAROOT:
     ret = (void *) mailquotarootresults;
     break;
+  case SET_SNARFINTERVAL:
+    mailsnarfinterval = (long) value;
+  case GET_SNARFINTERVAL:
+    ret = (void *) mailsnarfinterval;
+    break;
+  case SET_SNARFPRESERVE:
+    mailsnarfpreserve = (long) value;
+  case GET_SNARFPRESERVE:
+    ret = (void *) mailsnarfpreserve;
+    break;
+  case SET_SNARFMAILBOXNAME:
+    if (stream) {		/* have a stream? */
+      if (stream->snarf.name) fs_give ((void **) &stream->snarf.name);
+      stream->snarf.name = cpystr ((char *) value);
+    }
+    else fatal ("SET_SNARFMAILBOXNAME with no stream");
+  case GET_SNARFMAILBOXNAME:
+    if (stream) ret = (void *) stream->snarf.name;
+    break;
   default:
     if (r = smtp_parameters (function,value)) ret = r;
     if (r = env_parameters (function,value)) ret = r;
@@ -508,6 +586,14 @@ DRIVER *mail_valid (MAILSTREAM *stream,char *mailbox,char *purpose)
 {
   char tmp[MAILTMPLEN];
   DRIVER *factory = NIL;
+				/* never allow names with newlines */
+  if (strpbrk (mailbox,"\015\012")) {
+    if (purpose) {		/* if want an error message */
+      sprintf (tmp,"Can't %s with such a name",purpose);
+      MM_LOG (tmp,ERROR);
+    }
+    return NIL;
+  }
 				/* validate name, find driver factory */
   if (strlen (mailbox) < (NETMAXHOST+(NETMAXUSER*2)+NETMAXMBX+NETMAXSRV+50))
     for (factory = maildrivers; factory && 
@@ -555,14 +641,33 @@ DRIVER *mail_valid_net (char *name,DRIVER *drv,char *host,char *mailbox)
 
 long mail_valid_net_parse (char *name,NETMBX *mb)
 {
+  return mail_valid_net_parse_work (name,mb,"imap");
+}
+
+/* Mail validate network mailbox name worker routine
+ * Accepts: mailbox name
+ *	    NETMBX structure to return values
+ *	    default service
+ * Returns: T on success, NIL on failure
+ */
+
+long mail_valid_net_parse_work (char *name,NETMBX *mb,char *service)
+{
   int i,j;
   char c,*s,*t,*v,tmp[MAILTMPLEN],arg[MAILTMPLEN];
 				/* initialize structure */
   memset (mb,'\0',sizeof (NETMBX));
-				/* have host specification? */
-  if (!((*name++ == '{') && (v = strpbrk (name,"/:}")) && (i = v - name) &&
-	(i < NETMAXHOST) && (t = strchr (v,'}')) && ((j = t - v)<MAILTMPLEN) &&
-	(strlen (t+1) < (size_t) NETMAXMBX))) return NIL;
+				/* must have host specification */
+  if (*name++ != '{') return NIL;
+  if (*name == '[') {		/* if domain literal, find its ending */
+    if (!((v = strpbrk (name,"]}")) && (*v++ == ']'))) return NIL;
+  }
+				/* find end of host name */
+  else if (!(v = strpbrk (name,"/:}"))) return NIL;
+				/* validate length, find mailbox part */
+  if (!((i = v - name) && (i < NETMAXHOST) && (t = strchr (v,'}')) &&
+	((j = t - v) < MAILTMPLEN) && (strlen (t+1) < (size_t) NETMAXMBX)))
+    return NIL;			/* invalid mailbox */
   strncpy (mb->host,name,i);	/* set host name */
   strncpy (mb->orighost,name,i);
   mb->host[i] = mb->orighost[i] = '\0';
@@ -576,7 +681,6 @@ long mail_valid_net_parse (char *name,NETMBX *mb)
       if (mb->port || !(mb->port = strtoul (t,&t,10))) return NIL;
       c = t ? *t++ : '\0';	/* get delimiter, advance pointer */
       break;
-
     case '/':			/* switch */
 				/* find delimiter */
       if (t = strpbrk (s = t,"/:=")) {
@@ -603,7 +707,7 @@ long mail_valid_net_parse (char *name,NETMBX *mb)
 	  i = strlen (v);	/* length of argument */
 	}
 	if (!compare_cstring (s,"service") && (i < NETMAXSRV) && !*mb->service)
-	  strcpy (mb->service,lcase (v));
+	  lcase (strcpy (mb->service,v));
 	else if (!compare_cstring (s,"user") && (i < NETMAXUSER) && !*mb->user)
 	  strcpy (mb->user,v);
 	else if (!compare_cstring (s,"authuser") && (i < NETMAXUSER) &&
@@ -617,6 +721,7 @@ long mail_valid_net_parse (char *name,NETMBX *mb)
 	else if (!compare_cstring (s,"readonly")) mb->readonlyflag = T;
 	else if (!compare_cstring (s,"secure")) mb->secflag = T;
 	else if (!compare_cstring (s,"norsh")) mb->norsh = T;
+	else if (!compare_cstring (s,"loser")) mb->loser = T;
 	else if (!compare_cstring (s,"tls") && !mb->notlsflag) mb->tlsflag = T;
 	else if (!compare_cstring (s,"notls") && !mb->tlsflag)
 	  mb->notlsflag = T;
@@ -633,7 +738,7 @@ long mail_valid_net_parse (char *name,NETMBX *mb)
 		 !compare_cstring (s,"nntp") ||
 		 !compare_cstring (s,"pop3") ||
 		 !compare_cstring (s,"smtp"))
-	  strcpy (mb->service,s);
+	  lcase (strcpy (mb->service,s));
 	else if (!compare_cstring (s,"imap2") ||
 		 !compare_cstring (s,"imap2bis") ||
 		 !compare_cstring (s,"imap4") ||
@@ -651,7 +756,7 @@ long mail_valid_net_parse (char *name,NETMBX *mb)
 				/* default mailbox name */
   if (!*mb->mailbox) strcpy (mb->mailbox,"INBOX");
 				/* default service name */
-  if (!*mb->service) strcpy (mb->service,"imap");
+  if (!*mb->service) strcpy (mb->service,service);
 				/* /norsh only valid if imap */
   if (mb->norsh && strcmp (mb->service,"imap")) return NIL;
   return T;
@@ -800,6 +905,11 @@ long mail_create (MAILSTREAM *stream,char *mailbox)
   char *s,*t,tmp[MAILTMPLEN];
   size_t i;
   DRIVER *d;
+				/* never allow names with newlines */
+  if (s = strpbrk (mailbox,"\015\012")) {
+    MM_LOG ("Can't create mailbox with such a name",ERROR);
+    return NIL;
+  }
   if (strlen (mailbox) >= (NETMAXHOST+(NETMAXUSER*2)+NETMAXMBX+NETMAXSRV+50)) {
     sprintf (tmp,"Can't create %.80s: %s",mailbox,(*mailbox == '{') ?
 	     "invalid remote specification" : "no such mailbox");
@@ -977,45 +1087,88 @@ long mail_status_default (MAILSTREAM *stream,char *mbx,long flags)
 MAILSTREAM *mail_open (MAILSTREAM *stream,char *name,long options)
 {
   int i;
-  char *s,tmp[MAILTMPLEN];
+  char c,*s,tmp[MAILTMPLEN];
   NETMBX mb;
   DRIVER *d;
-				/* see if special driver hack */
-  if ((options & OP_PROTOTYPE) && (name[0] == '#') &&
-      ((name[1] == 'D') || (name[1] == 'd')) &&
-      ((name[2] == 'R') || (name[2] == 'r')) &&
-      ((name[3] == 'I') || (name[3] == 'i')) &&
-      ((name[4] == 'V') || (name[4] == 'v')) &&
-      ((name[5] == 'E') || (name[5] == 'e')) &&
-      ((name[6] == 'R') || (name[6] == 'r')) && (name[7] == '.')) {
-    sprintf (tmp,"%.80s",name+8);
-				/* tie off name at likely delimiter */
-    if (s = strpbrk (lcase (tmp),"/\\:")) *s++ = '\0';
-    else {
-      sprintf (tmp,"Can't resolve mailbox %.80s: bad driver syntax",name);
-      MM_LOG (tmp,ERROR);
-      return NIL;
+  switch (name[0]) {		/* see if special handling */
+  case '#':			/* possible special hacks */
+    if (((name[1] == 'M') || (name[1] == 'm')) &&
+	((name[2] == 'O') || (name[2] == 'o')) &&
+	((name[3] == 'V') || (name[3] == 'v')) &&
+	((name[4] == 'E') || (name[4] == 'e')) && (c = name[5]) &&
+	(s = strchr (name+6,c)) && (i = s - (name + 6)) && (i < MAILTMPLEN)) {
+      if (stream = mail_open (stream,s+1,options)) {
+	strncpy (tmp,name+6,i);	/* copy snarf mailbox name */
+	tmp[i] = '\0';		/* tie off name */
+	mail_parameters (stream,SET_SNARFMAILBOXNAME,(void *) tmp);
+	stream->snarf.options = options;
+	mail_ping (stream);	/* do initial snarf */
+				/* punt if can't do initial snarf */
+	if (!stream->snarf.time) stream = mail_close (stream);
+      }
+      return stream;
     }
-    for (d = maildrivers; d && strcmp (d->name,tmp); d = d->next);
-    if (d) return (*d->open) (NIL);
-    else {
+				/* special POP hack */
+    else if (((name[1] == 'P') || (name[1] == 'p')) &&
+	     ((name[2] == 'O') || (name[2] == 'o')) &&
+	     ((name[3] == 'P') || (name[3] == 'p')) &&
+	     mail_valid_net_parse_work (name+4,&mb,"pop3") &&
+	!strcmp (mb.service,"pop3") && !mb.anoflag && !mb.readonlyflag) {
+      if (stream = mail_open (stream,mb.mailbox,options)) {
+	sprintf (tmp,"{%.255s",mb.host);
+	if (mb.port) sprintf (tmp + strlen (tmp),":%lu",mb.port);
+	if (mb.user[0]) sprintf (tmp + strlen (tmp),"/user=%.64s",mb.user);
+	if (mb.dbgflag) strcat (tmp,"/debug");
+	if (mb.secflag) strcat (tmp,"/secure");
+	if (mb.tlsflag) strcat (tmp,"/tls");
+	if (mb.notlsflag) strcat (tmp,"/notls");
+	if (mb.sslflag) strcat (tmp,"/ssl");
+	if (mb.trysslflag) strcat (tmp,"/tryssl");
+	if (mb.novalidate) strcat (tmp,"/novalidate-cert");
+	strcat (tmp,"/pop3/loser}");
+	mail_parameters (stream,SET_SNARFMAILBOXNAME,(void *) tmp);
+	mail_ping (stream);	/* do initial snarf */
+      }
+      return stream;		/* return local mailbox stream */
+    }
+
+    else if ((options & OP_PROTOTYPE) &&
+	     ((name[1] == 'D') || (name[1] == 'd')) &&
+	     ((name[2] == 'R') || (name[2] == 'r')) &&
+	     ((name[3] == 'I') || (name[3] == 'i')) &&
+	     ((name[4] == 'V') || (name[4] == 'v')) &&
+	     ((name[5] == 'E') || (name[5] == 'e')) &&
+	     ((name[6] == 'R') || (name[6] == 'r')) && (name[7] == '.')) {
+      sprintf (tmp,"%.80s",name+8);
+				/* tie off name at likely delimiter */
+      if (s = strpbrk (tmp,"/\\:")) *s++ = '\0';
+      else {
+	sprintf (tmp,"Can't resolve mailbox %.80s: bad driver syntax",name);
+	MM_LOG (tmp,ERROR);
+	return mail_close (stream);
+      }
+      for (d = maildrivers; d && compare_cstring (d->name,tmp); d = d->next);
+      if (d) return (*d->open) (NIL);
       sprintf (tmp,"Can't resolve mailbox %.80s: unknown driver",name);
       MM_LOG (tmp,ERROR);
-      return NIL;
+      return mail_close (stream);
     }
+				/* fall through to default case */
+  default:			/* not special hack (but could be # name */
+    d = mail_valid (NIL,name,(options & OP_SILENT) ?
+		    (char *) NIL : "open mailbox");
   }
-  else d = mail_valid (NIL,name,(options & OP_SILENT) ?
-		       (char *) NIL : "open mailbox");
 
   if (d) {			/* must have a factory */
+    char *oname = cpystr (name);
     if (options & OP_PROTOTYPE) return (*d->open) (NIL);
     if (stream) {		/* recycling requested? */
-				/* yes, recycleable stream? */
       if ((stream->dtb == d) && (d->flags & DR_RECYCLE) &&
+	  ((d->flags & DR_HALFOPEN) || !(options & OP_HALFOPEN)) &&
 	  mail_usable_network_stream (stream,name)) {
-				/* checkpoint if needed */
+				/* yes, checkpoint if needed */
 	if (d->flags & DR_XPOINT) mail_check (stream);
-	mail_free_cache(stream);/* yes, clean up stream */
+	mail_free_cache(stream);/* clean up stream */
 	if (stream->mailbox) fs_give ((void **) &stream->mailbox);
 	if (stream->original_mailbox)
 	  fs_give ((void **) &stream->original_mailbox);
@@ -1033,13 +1186,19 @@ MAILSTREAM *mail_open (MAILSTREAM *stream,char *name,long options)
 	stream = mail_close (stream);
       }
     }
+				/* check if driver does not support halfopen */
+    else if ((options & OP_HALFOPEN) && !(d->flags & DR_HALFOPEN)) {
+      fs_give ((void **) &oname);
+      return NIL;
+    }
+
 				/* instantiate new stream if not recycling */
     if (!stream) (*mailcache) (stream = (MAILSTREAM *)
 			       memset (fs_get (sizeof (MAILSTREAM)),0,
 				       sizeof (MAILSTREAM)),(long) 0,CH_INIT);
     stream->dtb = d;		/* set dispatch */
 				/* set mailbox name */
-    stream->mailbox = cpystr (stream->original_mailbox = cpystr (name));
+    stream->mailbox = cpystr (stream->original_mailbox = oname);
 				/* initialize stream flags */
     stream->inbox = stream->lock = NIL;
     stream->debug = (options & OP_DEBUG) ? T : NIL;
@@ -1077,11 +1236,14 @@ MAILSTREAM *mail_close_full (MAILSTREAM *stream,long options)
     if (stream->mailbox) fs_give ((void **) &stream->mailbox);
     if (stream->original_mailbox)
       fs_give ((void **) &stream->original_mailbox);
+    if (stream->snarf.name) fs_give ((void *) &stream->snarf.name);
     stream->sequence++;		/* invalidate sequence */
 				/* flush user flags */
     for (i = 0; i < NUSERFLAGS; i++)
       if (stream->user_flags[i]) fs_give ((void **) &stream->user_flags[i]);
     mail_free_cache (stream);	/* finally free the stream's storage */
+    if (mailfreestreamsparep && stream->sparep)
+      (*mailfreestreamsparep) (&stream->sparep);
     if (!stream->use) fs_give ((void **) &stream);
   }
   return NIL;
@@ -1143,7 +1305,8 @@ MESSAGECACHE *mail_elt (MAILSTREAM *stream,unsigned long msgno)
 {
   if (msgno < 1 || msgno > stream->nmsgs) {
     char tmp[MAILTMPLEN];
-    sprintf (tmp,"Bad msgno %lu in mail_elt, nmsgs = %lu",msgno,stream->nmsgs);
+    sprintf (tmp,"Bad msgno %lu in mail_elt, nmsgs = %lu, mbx=%.80s",
+	     msgno,stream->nmsgs,stream->mailbox ? stream->mailbox : "???");
     fatal (tmp);
   }
   return (MESSAGECACHE *) (*mailcache) (stream,msgno,CH_MAKEELT);
@@ -1189,25 +1352,51 @@ void mail_fetch_overview (MAILSTREAM *stream,char *sequence,overview_t ofn)
 {
   if (stream->dtb && mail_uid_sequence (stream,sequence) &&
       !(stream->dtb->overview && (*stream->dtb->overview) (stream,ofn)) &&
-      mail_ping (stream)) {
-    MESSAGECACHE *elt;
-    ENVELOPE *env;
-    OVERVIEW ov;
-    unsigned long i;
-    ov.optional.lines = 0;
-    ov.optional.xref = NIL;
-    for (i = 1; i <= stream->nmsgs; i++)
-      if (((elt = mail_elt (stream,i))->sequence) &&
-	  (env = mail_fetch_structure (stream,i,NIL,NIL)) && ofn) {
-	ov.subject = env->subject;
-	ov.from = env->from;
-	ov.date = env->date;
-	ov.message_id = env->message_id;
-	ov.references = env->references;
-	ov.optional.octets = elt->rfc822_size;
-	(*ofn) (stream,mail_uid (stream,i),&ov);
-      }
-  }
+      mail_ping (stream))
+    mail_fetch_overview_default (stream,ofn);
+}
+
+
+/* Mail fetch message overview using sequence numbers instead of UIDs
+ * Accepts: mail stream
+ *	    sequence to fetch
+ *	    pointer to overview return function
+ */
+
+void mail_fetch_overview_sequence (MAILSTREAM *stream,char *sequence,
+				   overview_t ofn)
+{
+  if (stream->dtb && mail_sequence (stream,sequence) &&
+      !(stream->dtb->overview && (*stream->dtb->overview) (stream,ofn)) &&
+      mail_ping (stream))
+    mail_fetch_overview_default (stream,ofn);
+}
+
+
+/* Mail fetch message overview default handler
+ * Accepts: mail stream with sequence bits lit
+ *	    pointer to overview return function
+ */
+
+void mail_fetch_overview_default (MAILSTREAM *stream,overview_t ofn)
+{
+  MESSAGECACHE *elt;
+  ENVELOPE *env;
+  OVERVIEW ov;
+  unsigned long i;
+  ov.optional.lines = 0;
+  ov.optional.xref = NIL;
+  for (i = 1; i <= stream->nmsgs; i++)
+    if (((elt = mail_elt (stream,i))->sequence) &&
+	(env = mail_fetch_structure (stream,i,NIL,NIL)) && ofn) {
+      ov.subject = env->subject;
+      ov.from = env->from;
+      ov.date = env->date;
+      ov.message_id = env->message_id;
+      ov.references = env->references;
+      ov.optional.octets = elt->rfc822_size;
+      (*ofn) (stream,mail_uid (stream,i),&ov,i);
+    }
 }
 
 /* Mail fetch message structure
@@ -1229,7 +1418,6 @@ ENVELOPE *mail_fetch_structure (MAILSTREAM *stream,unsigned long msgno,
   char c,*s,*hdr;
   unsigned long hdrsize;
   STRING bs;
-
 				/* do the driver's action if specified */
   if (stream->dtb && stream->dtb->structure)
     return (*stream->dtb->structure) (stream,msgno,body,flags);
@@ -1272,18 +1460,21 @@ ENVELOPE *mail_fetch_structure (MAILSTREAM *stream,unsigned long msgno,
       BODY *tb = NIL;
 
       hdr = (*stream->dtb->header) (stream,msgno,&hdrsize,flags | FT_INTERNAL);
-      c = hdr[hdrsize];		/* preserve what's there */
-      hdr[hdrsize] = '\0';	/* tie off header */
-      rfc822_parse_msg (env,&tb,hdr,hdrsize,NIL,mylocalhost(),stream->dtb->flags);
-      hdr[hdrsize] = c;		/* restore in case cached data */
+      if (hdrsize) {		/* in case null header */
+	c = hdr[hdrsize];	/* preserve what's there */
+	hdr[hdrsize] = '\0';	/* tie off header */
+	rfc822_parse_msg (env,&tb,hdr,hdrsize,NIL,mylocalhost(),stream->dtb->flags);
+	hdr[hdrsize] = c;	/* restore in case cached data */
 
-      /* Fill in optional mime content-type part /MaF */
-      (*env)->optional.type = tb->type;
-      (*env)->optional.subtype = tb->subtype;
-      (*env)->optional.parameter = tb->parameter;
-      tb->subtype = NIL;
-      tb->parameter = NIL;
-      mail_free_body(&tb);
+        /* Fill in optional mime content-type part /MaF */
+        (*env)->optional.type = tb->type;
+        (*env)->optional.subtype = tb->subtype;
+        (*env)->optional.parameter = tb->parameter;
+        tb->subtype = NIL;
+        tb->parameter = NIL;
+        mail_free_body(&tb);
+      }
+      else *env = mail_newenvelope ();
     }
   }
 				/* if need date, have date in envelope? */
@@ -1855,8 +2046,7 @@ char *mail_fetch_string_return (GETS_DATA *md,STRING *bs,unsigned long i,
 				/* make string copy in memory */
   return textcpyoffstring (&md->stream->text,bs,GETPOS (bs),i);
 }
-
-
+
 /* Read data from stringstruct
  * Accepts: stringstruct
  *	    size of data to read
@@ -1893,7 +2083,7 @@ unsigned long mail_uid (MAILSTREAM *stream,unsigned long msgno)
 }
 
 
-/* Mail fetch msgno from UID (for internal use only)
+/* Mail fetch msgno from UID
  * Accepts: mail stream
  *	    UID
  * Returns: msgno or zero if failed
@@ -1901,16 +2091,38 @@ unsigned long mail_uid (MAILSTREAM *stream,unsigned long msgno)
 
 unsigned long mail_msgno (MAILSTREAM *stream,unsigned long uid)
 {
-  unsigned long msgno;
-				/* scan cache for UID */
-  for (msgno = 1; msgno <= stream->nmsgs; msgno++)
-    if (mail_elt (stream,msgno)->private.uid == uid) return msgno;
-  if (stream->dtb) {		/* else get it from driver if possible */
-				/* direct way */
-    if (stream->dtb->msgno) return (*stream->dtb->msgno) (stream,uid);
-    if (stream->dtb->uid)	/* indirect way */
+  unsigned long msgno,delta,first,firstuid,last,lastuid,middle,miduid;
+  if (stream->dtb) {		/* active stream? */
+    if (stream->dtb->msgno)	/* direct way */
+      return (*stream->dtb->msgno) (stream,uid);
+    else if (stream->dtb->uid) {/* indirect way */
+      /* Placeholder for now, since currently there are no drivers which
+       * have a uid method but not a msgno method
+       */
       for (msgno = 1; msgno <= stream->nmsgs; msgno++)
 	if ((*stream->dtb->uid) (stream,msgno) == uid) return msgno;
+    }
+				/* binary search since have full map */
+    else for (first = 1,last = stream->nmsgs, delta = (first <= last) ? 1 : 0;
+	      delta &&
+	      (uid >= (firstuid = mail_elt (stream,first)->private.uid)) &&
+		(uid <= (lastuid = mail_elt (stream,last)->private.uid));) {
+				/* done if match at an endpoint */
+	if (uid == firstuid) return first;
+	if (uid == lastuid) return last;
+				/* have anything between endpoints? */
+	if (delta = ((last - first) / 2)) {
+	  if ((miduid = mail_elt (stream,middle = first + delta)->private.uid)
+	      == uid)
+	    return middle;	/* found match in middle */
+	  else if (uid < miduid) last = middle - 1;
+	  else first = middle + 1;
+	}
+    }
+  }
+  else {			/* dead stream, do linear search for UID */
+    for (msgno = 1; msgno <= stream->nmsgs; msgno++)
+      if (mail_elt (stream,msgno)->private.uid == uid) return msgno;
   }
   return 0;			/* didn't find the UID anywhere */
 }
@@ -1975,9 +2187,9 @@ void mail_flag (MAILSTREAM *stream,char *sequence,char *flag,long flags)
   short nf;
   if (!stream->dtb) return;	/* no-op if no stream */
   if ((stream->dtb->flagmsg || !stream->dtb->flag) &&
-      ((f = mail_parse_flags (stream,flag,&uf)) || uf) &&
       ((flags & ST_UID) ? mail_uid_sequence (stream,sequence) :
-       mail_sequence (stream,sequence)))
+       mail_sequence (stream,sequence)) &&
+      ((f = mail_parse_flags (stream,flag,&uf)) || uf))
     for (i = 1,nf = (flags & ST_SET) ? T : NIL; i <= stream->nmsgs; i++)
       if ((elt = mail_elt (stream,i))->sequence) {
 	struct {		/* old flags */
@@ -2020,22 +2232,22 @@ void mail_flag (MAILSTREAM *stream,char *sequence,char *flag,long flags)
  *	    character set
  *	    search program
  *	    option flags
+ * Returns: T if successful, NIL if dead stream, NIL searchpgm or bad charset
  */
 
-void mail_search_full (MAILSTREAM *stream,char *charset,SEARCHPGM *pgm,
+long mail_search_full (MAILSTREAM *stream,char *charset,SEARCHPGM *pgm,
 		       long flags)
 {
   unsigned long i;
+  long ret = NIL;
   if (!(flags & SE_RETAIN))	/* clear search vector unless retaining */
     for (i = 1; i <= stream->nmsgs; ++i) mail_elt (stream,i)->searched = NIL;
-  if (pgm && stream->dtb) {	/* must have a search program and driver */
-				/* do the driver's action if requested */
-    if (!(flags & SO_NOSERVER) && stream->dtb->search)
-      (*stream->dtb->search) (stream,charset,pgm,flags);
-    else mail_search_default (stream,charset,pgm,flags);
-  }
+  if (pgm && stream->dtb)	/* must have a search program and driver */
+    ret = (*(stream->dtb->search ? stream->dtb->search : mail_search_default))
+      (stream,charset,pgm,flags);
 				/* flush search program if requested */
   if (flags & SE_FREE) mail_free_searchpgm (&pgm);
+  return ret;
 }
 
 
@@ -2044,9 +2256,10 @@ void mail_search_full (MAILSTREAM *stream,char *charset,SEARCHPGM *pgm,
  *	    character set
  *	    search program
  *	    option flags
+ * Returns: T if successful, NIL if bad charset
  */
 
-void mail_search_default (MAILSTREAM *stream,char *charset,SEARCHPGM *pgm,
+long mail_search_default (MAILSTREAM *stream,char *charset,SEARCHPGM *pgm,
 			  long flags)
 {
   unsigned long i;
@@ -2063,7 +2276,7 @@ void mail_search_default (MAILSTREAM *stream,char *charset,SEARCHPGM *pgm,
 	  ((charset[2] == 'F') || (charset[2] == 'f')) &&
 	  (charset[3] == '-') && (charset[4] == '8') && !charset[5])))) {
     if (utf8_text (NIL,charset,NIL,T)) utf8_searchpgm (pgm,charset);
-    else return;		/* charset unknown */
+    else return NIL;		/* charset unknown */
   }
   for (i = 1; i <= stream->nmsgs; ++i) if (mail_search_msg (stream,i,NIL,pgm)){
     if (flags & SE_UID) mm_searched (stream,mail_uid (stream,i));
@@ -2072,6 +2285,7 @@ void mail_search_default (MAILSTREAM *stream,char *charset,SEARCHPGM *pgm,
       if (!stream->silent) mm_searched (stream,i);
     }
   }
+  return LONGT;
 }
 
 /* Mail ping mailbox
@@ -2081,11 +2295,82 @@ void mail_search_default (MAILSTREAM *stream,char *charset,SEARCHPGM *pgm,
 
 long mail_ping (MAILSTREAM *stream)
 {
-  				/* do the driver's action */
-  return stream->dtb ? (*stream->dtb->ping) (stream) : NIL;
+  unsigned long i,n,uf,len;
+  char *s,*f,tmp[MAILTMPLEN],flags[MAILTMPLEN];
+  MAILSTREAM *snarf;
+  MESSAGECACHE *elt;
+  STRING bs;
+  long ret;
+				/* do driver action */
+  if ((ret = ((stream && stream->dtb) ? (stream->dtb->ping) (stream) : NIL)) &&
+      stream->snarf.name &&	/* time to snarf? */
+				/* prohibit faster than once/min */
+      (time (0) > (time_t) (stream->snarf.time + min(60,mailsnarfinterval))) &&
+      (snarf = mail_open (NIL,stream->snarf.name,
+			  stream->snarf.options | OP_SILENT))) {
+    if ((n = snarf->nmsgs) &&	/* yes, have messages to snarf? */
+	mail_search_full (snarf,NIL,mail_criteria ("UNDELETED"),SE_FREE)) {
+      for (i = 1; ret && (i <= n); i++)	/* for each message */
+	if ((elt = mail_elt (snarf,i))->searched &&
+	    (s = mail_fetch_message (snarf,i,&len,NIL)) && len) {
+	  INIT (&bs,mail_string,s,len);
+	  if (mailsnarfpreserve) {
+				/* yes, make sure have fast data */
+	    if (!elt->valid || !elt->day) {
+	      sprintf (tmp,"%lu",n);
+	      mail_fetch_fast (snarf,tmp,NIL);
+	    }
+				/* initialize flag string */
+	    memset (flags,0,MAILTMPLEN);
+				/* output system flags */
+	    if (elt->seen) strcat (flags," \\Seen");
+	    if (elt->flagged) strcat (flags," \\Flagged");
+	    if (elt->answered) strcat (flags," \\Answered");
+	    if (elt->draft) strcat (flags," \\Draft");
+				/* any user flags? */
+	    for (uf = elt->user_flags,s = flags + strlen (flags);
+		 uf && (f = stream->user_flags[find_rightmost_bit (&uf)]) &&
+		   ((MAILTMPLEN - (s - tmp)) > (long) (2 + strlen (f)));
+		 s += strlen (s)) sprintf (s," %s",f);
+	    ret = mail_append_full (stream,stream->mailbox,flags + 1,
+				    mail_date (tmp,elt),&bs);
+	  }
+	  else ret = mail_append (stream,stream->mailbox,&bs);
+
+	  if (ret) {		/* did snarf succeed? */
+				/* driver has per-message (or no) flag call */
+	    if (snarf->dtb->flagmsg || !snarf->dtb->flag) {
+	      elt->valid = NIL;	/* prepare for flag alteration */
+	      if (snarf->dtb->flagmsg) (*snarf->dtb->flagmsg) (snarf,elt);
+	      elt->deleted = T;
+	      elt->valid = T;	/* flags now altered */
+	      if (snarf->dtb->flagmsg) (*snarf->dtb->flagmsg) (snarf,elt);
+	    }
+				/* driver has one-time flag call */
+	    if (snarf->dtb->flag) {
+	      sprintf (tmp,"%lu",i);
+	      (*snarf->dtb->flag) (snarf,tmp,"\\Deleted",ST_SET);
+	    }
+	  }
+	  else {		/* copy failed */
+	    sprintf (tmp,"Unable to move message %lu from %s mailbox",
+		     i,snarf->dtb->name);
+	    mm_log (tmp,WARN);
+	  }
+	}
+    }
+				/* expunge the messages */
+    mail_close_full (snarf,n ? CL_EXPUNGE : NIL);
+    stream->snarf.time = time (0);
+    /* Even if the snarf failed, we don't want to return NIL if the stream
+     * is still alive.  Or at least that's what we currently think.
+     */
+  				/* redo the driver's action */
+    ret = stream->dtb ? (*stream->dtb->ping) (stream) : NIL;
+  }
+  return ret;
 }
-
-
+
 /* Mail check mailbox
  * Accepts: mail stream
  */
@@ -2183,6 +2468,11 @@ long mail_append_multiple (MAILSTREAM *stream,char *mailbox,append_t af,
 {
   char *s,tmp[MAILTMPLEN];
   DRIVER *d = NIL;
+				/* never allow names with newlines */
+  if (strpbrk (mailbox,"\015\012")) {
+    MM_LOG ("Can't append to mailbox with such a name",ERROR);
+    return NIL;
+  }
   if (strlen (mailbox) >= (NETMAXHOST+(NETMAXUSER*2)+NETMAXMBX+NETMAXSRV+50)) {
     sprintf (tmp,"Can't append %.80s: %s",mailbox,(*mailbox == '{') ?
 	     "invalid remote specification" : "no such mailbox");
@@ -2303,7 +2593,7 @@ void mail_gc_body (BODY *body)
  * Returns: pointer to body
  */
 
-BODY *mail_body (MAILSTREAM *stream,unsigned long msgno,char *section)
+BODY *mail_body (MAILSTREAM *stream,unsigned long msgno,unsigned char *section)
 {
   BODY *b = NIL;
   PART *pt;
@@ -2313,7 +2603,7 @@ BODY *mail_body (MAILSTREAM *stream,unsigned long msgno,char *section)
     while (*section) {		/* find desired section */
       if (isdigit (*section)) {	/* get section specifier */
 				/* make sure what follows is valid */
-	if (!(i = strtoul (section,&section,10)) ||
+	if (!(i = strtoul (section,(char **) &section,10)) ||
 	    (*section && ((*section++ != '.') || !*section))) return NIL;
 				/* multipart content? */
 	if (b->type == TYPEMULTIPART) {
@@ -2423,13 +2713,19 @@ char *mail_cdate (char *string,MESSAGECACHE *elt)
  *    www, dd mmm yyyy hh:mm:ss +zzzz
  */
 
-long mail_parse_date (MESSAGECACHE *elt,char *s)
+long mail_parse_date (MESSAGECACHE *elt,unsigned char *s)
 {
   unsigned long d,m,y;
   int mi,ms;
   struct tm *t;
   time_t tn;
   char tmp[MAILTMPLEN];
+  static unsigned long maxyear = 0;
+  if (!maxyear) {		/* know the end of time yet? */
+    MESSAGECACHE tmpelt;
+    memset (&tmpelt,0xff,sizeof (MESSAGECACHE));
+    maxyear = BASEYEAR + tmpelt.year;
+  }
 				/* clear elt */
   elt->zoccident = elt->zhours = elt->zminutes =
     elt->hours = elt->minutes = elt->seconds =
@@ -2441,13 +2737,13 @@ long mail_parse_date (MESSAGECACHE *elt,char *s)
   if (isalpha (*s) && isalpha (s[1]) && isalpha (s[2]) && (s[3] == ',') &&
       (s[4] == ' ')) s += 5;
   while (*s == ' ') s++;	/* parse first number (probable month) */
-  if (!(m = strtoul ((const char *) s,&s,10))) return NIL;
+  if (!(m = strtoul (s,(char **) &s,10))) return NIL;
 
   switch (*s) {			/* different parse based on delimiter */
   case '/':			/* mm/dd/yy format */
-    if (isdigit (*++s) && (d = strtoul ((const char *) s,&s,10)) &&
+    if (isdigit (*++s) && (d = strtoul (s,(char **) &s,10)) &&
 	(*s == '/') && isdigit (*++s)) {
-      y = strtoul ((const char *) s,&s,10);
+      y = strtoul (s,(char **) &s,10);
       if (*s == '\0') break;	/* must end here */
     }
     return NIL;			/* bogon */
@@ -2484,7 +2780,7 @@ long mail_parse_date (MESSAGECACHE *elt,char *s)
     }
     while (*s == ' ') s++;	/* parse year */
     if (isdigit (*s)) {		/* must be a digit here */
-      y = strtoul ((const char *) s,&s,10);
+      y = strtoul (s,(char **) &s,10);
       if (*s == '\0' || *s == ' ') break;
     }
   default:
@@ -2494,17 +2790,18 @@ long mail_parse_date (MESSAGECACHE *elt,char *s)
   if ((d > 31) || (m > 12)) return NIL; 
   if (y < 49) y += 2000;	/* RFC 2282 rules for two digit years 00-49 */
   else if (y < 999) y += 1900;	/* 2-digit years 50-99 and 3-digit years */
-  if (y < BASEYEAR) return NIL;	/* reject prehistoric year */
+				/* reject prehistoric and far future years */
+  if ((y < BASEYEAR) || (y > maxyear)) return NIL;
 				/* set values in elt */
   elt->day = d; elt->month = m; elt->year = y - BASEYEAR;
 
   ms = '\0';			/* initially no time zone string */
   if (*s) {			/* time specification present? */
 				/* parse time */
-    d = strtoul ((const char *) s+1,&s,10);
+    d = strtoul (s+1,(char **) &s,10);
     if (*s != ':') return NIL;
-    m = strtoul ((const char *) ++s,&s,10);
-    y = (*s == ':') ? strtoul ((const char *) ++s,&s,10) : 0;
+    m = strtoul (++s,(char **) &s,10);
+    y = (*s == ':') ? strtoul (++s,(char **) &s,10) : 0;
 				/* validity check time */
     if ((d > 23) || (m > 59) || (y > 60)) return NIL; 
 				/* set values in elt */
@@ -2684,11 +2981,19 @@ long mail_parse_date (MESSAGECACHE *elt,char *s)
 
 void mail_exists (MAILSTREAM *stream,unsigned long nmsgs)
 {
+  char tmp[MAILTMPLEN];
+  if (nmsgs > MAXMESSAGES) {
+    sprintf (tmp,"Mailbox has more messages (%lu) exist than maximum (%lu)",
+	     nmsgs,MAXMESSAGES);
+    mm_log (tmp,ERROR);
+  }
+  else {
 				/* make sure cache is large enough */
-  (*mailcache) (stream,nmsgs,CH_SIZE);
-  stream->nmsgs = nmsgs;	/* update stream status */
+    (*mailcache) (stream,nmsgs,CH_SIZE);
+    stream->nmsgs = nmsgs;	/* update stream status */
 				/* notify main program of change */
-  if (!stream->silent) MM_EXISTS (stream,nmsgs);
+    if (!stream->silent) MM_EXISTS (stream,nmsgs);
+  }
 }
 
 
@@ -2699,7 +3004,13 @@ void mail_exists (MAILSTREAM *stream,unsigned long nmsgs)
 
 void mail_recent (MAILSTREAM *stream,unsigned long recent)
 {
-  stream->recent = recent;	/* update stream status */
+  char tmp[MAILTMPLEN];
+  if (recent <= stream->nmsgs) stream->recent = recent;
+  else {
+    sprintf (tmp,"Non-existent recent message(s) %lu, nmsgs=%lu",
+	     recent,stream->nmsgs);
+    mm_log (tmp,ERROR);
+  }
 }
 
 
@@ -2710,21 +3021,30 @@ void mail_recent (MAILSTREAM *stream,unsigned long recent)
 
 void mail_expunged (MAILSTREAM *stream,unsigned long msgno)
 {
-  MESSAGECACHE *elt = (MESSAGECACHE *) (*mailcache) (stream,msgno,CH_ELT);
-				/* notify main program of change */
-  if (!stream->silent) MM_EXPUNGED (stream,msgno);
-  if (elt) {			/* if an element is there */
-    elt->msgno = 0;		/* invalidate its message number and free */
-    (*mailcache) (stream,msgno,CH_FREE);
-    (*mailcache) (stream,msgno,CH_FREESORTCACHE);
+  char tmp[MAILTMPLEN];
+  MESSAGECACHE *elt;
+  if (msgno > stream->nmsgs) {
+    sprintf (tmp,"Expunge of non-existent message %lu, nmsgs=%lu",
+	     msgno,stream->nmsgs);
+    mm_log (tmp,ERROR);
   }
+  else {
+    elt = (MESSAGECACHE *) (*mailcache) (stream,msgno,CH_ELT);
+				/* notify main program of change */
+    if (!stream->silent) MM_EXPUNGED (stream,msgno);
+    if (elt) {			/* if an element is there */
+      elt->msgno = 0;		/* invalidate its message number and free */
+      (*mailcache) (stream,msgno,CH_FREE);
+      (*mailcache) (stream,msgno,CH_FREESORTCACHE);
+    }
 				/* expunge the slot */
-  (*mailcache) (stream,msgno,CH_EXPUNGE);
-  --stream->nmsgs;		/* update stream status */
-  if (stream->msgno) {		/* have stream pointers? */
+    (*mailcache) (stream,msgno,CH_EXPUNGE);
+    --stream->nmsgs;		/* update stream status */
+    if (stream->msgno) {	/* have stream pointers? */
 				/* make sure the short cache is nuked */
-    if (stream->scache) mail_gc (stream,GC_ENV | GC_TEXTS);
-    else stream->msgno = 0;	/* make sure invalidated in any case */
+      if (stream->scache) mail_gc (stream,GC_ENV | GC_TEXTS);
+      else stream->msgno = 0;	/* make sure invalidated in any case */
+    }
   }
 }
 
@@ -2737,7 +3057,12 @@ void mail_expunged (MAILSTREAM *stream,unsigned long msgno)
 
 void mail_lock (MAILSTREAM *stream)
 {
-  if (stream->lock) fatal ("Lock when already locked");
+  if (stream->lock) {
+    char tmp[MAILTMPLEN];
+    sprintf (tmp,"Lock when already locked, mbx=%.80s",
+	     stream->mailbox ? stream->mailbox : "???");
+    fatal (tmp);
+  }
   else stream->lock = T;	/* lock stream */
 }
 
@@ -2760,6 +3085,7 @@ void mail_unlock (MAILSTREAM *stream)
 void mail_debug (MAILSTREAM *stream)
 {
   stream->debug = T;		/* turn on debugging telemetry */
+  if (stream->dtb) (*stream->dtb->parameters) (ENABLE_DEBUG,stream);
 }
 
 
@@ -2770,6 +3096,7 @@ void mail_debug (MAILSTREAM *stream)
 void mail_nodebug (MAILSTREAM *stream)
 {
   stream->debug = NIL;		/* turn off debugging telemetry */
+  if (stream->dtb) (*stream->dtb->parameters) (DISABLE_DEBUG,stream);
 }
 
 
@@ -2789,7 +3116,7 @@ void mail_dlog (char *string,long flag)
  * Returns: T if parse successful, else NIL
  */
 
-long mail_uid_sequence (MAILSTREAM *stream,char *sequence)
+long mail_uid_sequence (MAILSTREAM *stream,unsigned char *sequence)
 {
   unsigned long i,j,k,x,y;
   for (i = 1; i <= stream->nmsgs; i++) mail_elt (stream,i)->sequence = NIL;
@@ -2799,8 +3126,13 @@ long mail_uid_sequence (MAILSTREAM *stream,char *sequence)
       sequence++;		/* skip past * */
     }
 				/* parse and validate message number */
-    else if (!(i = strtoul ((const char *) sequence,&sequence,10))) {
-      MM_LOG ("UID sequence invalid",ERROR);
+				/* parse and validate message number */
+    else if (!isdigit (*sequence)) {
+      MM_LOG ("Syntax error in sequence",ERROR);
+      return NIL;
+    }
+    else if (!(i = strtoul (sequence,(char **) &sequence,10))) {
+      MM_LOG ("UID may not be zero",ERROR);
       return NIL;
     }
     switch (*sequence) {	/* see what the delimiter is */
@@ -2810,7 +3142,7 @@ long mail_uid_sequence (MAILSTREAM *stream,char *sequence)
 	sequence++;		/* skip past * */
       }
 				/* parse end of range */
-      else if (!(j = strtoul ((const char *) sequence,&sequence,10))) {
+      else if (!(j = strtoul (sequence,(char **) &sequence,10))) {
 	MM_LOG ("UID sequence range invalid",ERROR);
 	return NIL;
       }
@@ -2955,21 +3287,21 @@ long mail_search_msg (MAILSTREAM *stream,unsigned long msgno,char *section,
   if (pgm->msgno || pgm->uid) {	/* message set searches */
     SEARCHSET *set;
 				/* message sequences */
-    if (set = pgm->msgno) {	/* must be inside this sequence */
-      while (set) {		/* run down until find matching range */
-	if (set->last ? ((msgno < set->first) || (msgno > set->last)) :
-	    msgno != set->first) set = set->next;
-	else break;
-      }
+    if (pgm->msgno) {		/* inside this message sequence set */
+      for (set = pgm->msgno; set; set = set->next)
+	if (set->last ? ((set->first <= set->last) ?
+			 ((msgno >= set->first) && (msgno <= set->last)) :
+			 ((msgno >= set->last) && (msgno <= set->first))) :
+	    msgno == set->first) break;
       if (!set) return NIL;	/* not found within sequence */
     }
-    if (set = pgm->uid) {		/* must be inside this sequence */
+    if (pgm->uid) {		/* inside this unique identifier set */
       unsigned long uid = mail_uid (stream,msgno);
-      while (set) {		/* run down until find matching range */
-	if (set->last ? ((uid < set->first) || (uid > set->last)) :
-	    uid != set->first) set = set->next;
-	else break;
-      }
+      for (set = pgm->uid; set; set = set->next)
+	if (set->last ? ((set->first <= set->last) ?
+			 ((uid >= set->first) && (uid <= set->last)) :
+			 ((uid >= set->last) && (uid <= set->first))) :
+	    uid == set->first) break;
       if (!set) return NIL;	/* not found within sequence */
     }
   }
@@ -2985,7 +3317,21 @@ long mail_search_msg (MAILSTREAM *stream,unsigned long msgno,char *section,
 		       pgm->recent || pgm->old ||
 		       pgm->seen || pgm->unseen ||
 		       pgm->keyword || pgm->unkeyword))) {
-    sprintf (tmp,"%lu",elt->msgno);
+    unsigned long i;
+    MESSAGECACHE *ielt;
+    for (i = elt->msgno;	/* find last unloaded message in range */
+	 (i < stream->nmsgs) && (ielt = mail_elt (stream,i+1)) &&
+	   ((!ielt->rfc822_size && (pgm->larger || pgm->smaller)) ||
+	    (!ielt->year && (pgm->before || pgm->on || pgm->since)) ||
+	    (!ielt->valid && (pgm->answered || pgm->unanswered ||
+			      pgm->deleted || pgm->undeleted ||
+			      pgm->draft || pgm->undraft ||
+			      pgm->flagged || pgm->unflagged ||
+			      pgm->recent || pgm->old ||
+			      pgm->seen || pgm->unseen ||
+			      pgm->keyword || pgm->unkeyword))); ++i);
+    if (i == elt->msgno) sprintf (tmp,"%lu",elt->msgno);
+    else sprintf (tmp,"%lu:%lu",elt->msgno,i);
     mail_fetch_fast (stream,tmp,NIL);
   }
 				/* size ranges */
@@ -3005,12 +3351,12 @@ long mail_search_msg (MAILSTREAM *stream,unsigned long msgno,char *section,
       (pgm->seen && !elt->seen) ||
       (pgm->unseen && elt->seen)) return NIL;
 				/* keywords */
-  if ((pgm->keyword && !mail_search_keyword (stream,elt,pgm->keyword)) ||
-      (pgm->unkeyword && mail_search_keyword (stream,elt,pgm->unkeyword)))
+  if ((pgm->keyword && !mail_search_keyword (stream,elt,pgm->keyword,LONGT)) ||
+      (pgm->unkeyword && !mail_search_keyword (stream,elt,pgm->unkeyword,NIL)))
     return NIL;
 				/* internal date ranges */
   if (pgm->before || pgm->on || pgm->since) {
-    d = (elt->year << 9) + (elt->month << 5) + elt->day;
+    d = mail_shortdate (elt->year,elt->month,elt->day);
     if (pgm->before && (d >= pgm->before)) return NIL;
     if (pgm->on && (d != pgm->on)) return NIL;
     if (pgm->since && (d < pgm->since)) return NIL;
@@ -3029,13 +3375,16 @@ long mail_search_msg (MAILSTREAM *stream,unsigned long msgno,char *section,
       env = (body && (body->type == TYPEMESSAGE) && body->subtype &&
 	     !strcmp (body->subtype,"RFC822")) ? body->nested.msg->env : NIL;
     }
-				/* use top level envelope if no section */
-    else env = mail_fetchenvelope (stream,msgno);
+    else {			/* use top level envelope if no section */
+      if (pgm->header && !stream->scache && !(stream->dtb->flags & DR_LOCAL))
+	mail_fetch_header(stream,msgno,NIL,NIL,NIL,FT_PEEK|FT_SEARCHLOOKAHEAD);
+      env = mail_fetchenvelope (stream,msgno);
+    }
     if (!env) return NIL;	/* no envelope obtained */
 				/* sent date ranges */
     if ((pgm->sentbefore || pgm->senton || pgm->sentsince) &&
 	(!mail_parse_date (&delt,env->date) ||
-	 !(d = (delt.year << 9) + (delt.month << 5) + delt.day) ||
+	 !(d = mail_shortdate (delt.year,delt.month,delt.day)) ||
 	 (pgm->sentbefore && (d >= pgm->sentbefore)) ||
 	 (pgm->senton && (d != pgm->senton)) ||
 	 (pgm->sentsince && (d < pgm->sentsince)))) return NIL;
@@ -3074,7 +3423,9 @@ long mail_search_msg (MAILSTREAM *stream,unsigned long msgno,char *section,
     sth.text.size = hdr->line.size;
 				/* get the header text */
     if ((t = mail_fetch_header (stream,msgno,NIL,&sth,&s.size,
-				FT_INTERNAL | FT_PEEK)) && strchr (t,':')) {
+				FT_INTERNAL | FT_PEEK |
+				(section ? NIL : FT_SEARCHLOOKAHEAD))) &&
+	strchr (t,':')) {
       if (hdr->text.size) {	/* anything matches empty search string */
 				/* non-empty, copy field data */
 	s.data = (unsigned char *) fs_get (s.size + 1);
@@ -3244,23 +3595,26 @@ long mail_search_body (MAILSTREAM *stream,unsigned long msgno,BODY *body,
       ret = mail_search_body (stream,msgno,&part->body,s,i,flags);
     break;
   case TYPEMESSAGE:
-    if (flags) {		/* want to search nested message header? */
-      st.data = (unsigned char *)
-	mail_fetch_header (stream,msgno,sect,NIL,&st.size,
-			   FT_INTERNAL | FT_PEEK);
-      if (stream->dtb->flags & DR_LOWMEM) ret = stream->private.search.result;
-      else {
-	utf8_mime2text (&st,&h);/* make UTF-8 version of header */
-	ret = mail_search_string (&h,"UTF-8",&stream->private.search.string);
-	if (h.data != st.data) fs_give ((void **) &h.data);
+    if (!strcmp (body->subtype,"RFC822")) {
+      if (flags) {		/* want to search nested message header? */
+	st.data = (unsigned char *)
+	  mail_fetch_header (stream,msgno,sect,NIL,&st.size,
+			     FT_INTERNAL | FT_PEEK);
+	if (stream->dtb->flags & DR_LOWMEM) ret =stream->private.search.result;
+	else {
+	  utf8_mime2text (&st,&h);/* make UTF-8 version of header */
+	  ret = mail_search_string (&h,"UTF-8",&stream->private.search.string);
+	  if (h.data != st.data) fs_give ((void **) &h.data);
+	}
       }
+      if (body = body->nested.msg->body)
+	ret = (body->type == TYPEMULTIPART) ?
+	  mail_search_body (stream,msgno,body,(prefix ? prefix : ""),
+			    section - 1,flags) :
+	mail_search_body (stream,msgno,body,strcat (sect,"."),1,flags);
+      break;
     }
-    if (body = body->nested.msg->body)
-      ret = (body->type == TYPEMULTIPART) ?
-	mail_search_body (stream,msgno,body,(prefix ? prefix : ""),section - 1,
-			  flags) :
-	  mail_search_body (stream,msgno,body,strcat (sect,"."),1,flags);
-    break;
+				/* non-MESSAGE/RFC822 falls into text case */
 
   case TYPETEXT:
     s = mail_fetch_body (stream,msgno,sect,&i,FT_INTERNAL | FT_PEEK);
@@ -3306,17 +3660,17 @@ long mail_search_string (SIZEDTEXT *s,char *charset,STRINGLIST **st)
   void *t;
   SIZEDTEXT u;
   STRINGLIST **sc = st;
-  if (utf8_text (s,charset,&u,NIL)) {
-    while (*sc) {		/* run down criteria list */
-      if (search (u.data,u.size,(*sc)->text.data,(*sc)->text.size)) {
-	t = (void *) (*sc);	/* found one, need to flush this */
-	*sc = (*sc)->next;	/* remove it from the list */
-	fs_give (&t);		/* flush the buffer */
-      }
-      else sc = &(*sc)->next;	/* move to next in list */
+				/* convert to UTF-8 as best we can */
+  if (!utf8_text (s,charset,&u,NIL)) utf8_text (s,NIL,&u,NIL);
+  while (*sc) {			/* run down criteria list */
+    if (search (u.data,u.size,(*sc)->text.data,(*sc)->text.size)) {
+      t = (void *) (*sc);	/* found one, need to flush this */
+      *sc = (*sc)->next;	/* remove it from the list */
+      fs_give (&t);		/* flush the buffer */
     }
-    if (u.data != s->data) fs_give ((void **) &u.data);
+    else sc = &(*sc)->next;	/* move to next in list */
   }
+  if (u.data != s->data) fs_give ((void **) &u.data);
   return *st ? NIL : LONGT;
 }
 
@@ -3325,19 +3679,26 @@ long mail_search_string (SIZEDTEXT *s,char *charset,STRINGLIST **st)
  * Accepts: MAIL stream
  *	    elt to get flags from
  *	    keyword list
+ *	    T for keyword search, NIL for unkeyword search
  * Returns: T if search found a match
  */
 
-long mail_search_keyword (MAILSTREAM *stream,MESSAGECACHE *elt,STRINGLIST *st)
+long mail_search_keyword (MAILSTREAM *stream,MESSAGECACHE *elt,STRINGLIST *st,
+			  long flag)
 {
-  int i;
-  do for (i = 0;; ++i) {	/* check each possible keyword */
-    if (i >= NUSERFLAGS || !stream->user_flags[i]) return NIL;
-    if ((elt->user_flags & (1 << i)) &&
-	!compare_csizedtext (stream->user_flags[i],&st->text))
-      break;
-  } while (st = st->next);	/* try next keyword */
-  return T;
+  int i,j;
+  unsigned long f = 0;
+  unsigned long tf;
+  do {
+    for (i = 0; (j = (i < NUSERFLAGS) && stream->user_flags[i]); ++i)
+      if (!compare_csizedtext (stream->user_flags[i],&st->text)) {
+	f |= (1 << i);
+	break;
+      }
+    if (flag && !j) return NIL;
+  } while (st = st->next);
+  tf = elt->user_flags & f;	/* get set flags which match */
+  return flag ? (f == tf) : !tf;
 }
 
 /* Mail search an address list
@@ -3363,11 +3724,12 @@ long mail_search_addr (ADDRESS *adr,STRINGLIST *st)
     tadr.error = NIL,tadr.next = NIL;
 				/* write address list */
     for (txt.size = 0,a = adr; a; a = a->next) {
-      k = (tadr.mailbox = a->mailbox) ? 2*strlen (a->mailbox) : 3;
+      k = (tadr.mailbox = a->mailbox) ? 4 + 2*strlen (a->mailbox) : 3;
       if (tadr.personal = a->personal) k += 3 + 2*strlen (a->personal);
-      if (tadr.adl = a->adl) k += 1 + 2*strlen (a->adl);
-      if (tadr.host = a->host) k += 1 + 2*strlen (a->host);
-      if (k < MAILTMPLEN) {	/* ignore ridiculous addresses */
+      if (tadr.adl = a->adl) k += 3 + 2*strlen (a->adl);
+      if (tadr.host = a->host) k += 3 + 2*strlen (a->host);
+      if (tadr.personal || tadr.adl) k += 2;
+      if (k < (MAILTMPLEN-10)) { /* ignore ridiculous addresses */
 	tmp[0] = '\0';
 	rfc822_write_address (tmp,&tadr);
 				/* resize buffer if necessary */
@@ -3450,80 +3812,88 @@ char *mail_search_gets (readfn_t f,void *stream,unsigned long size,
 
 SEARCHPGM *mail_criteria (char *criteria)
 {
-  SEARCHPGM *pgm;
-  char tmp[MAILTMPLEN];
-  int f = NIL;
-  if (!criteria) return NIL;	/* return if no criteria */
-  pgm = mail_newsearchpgm ();	/* make a basic search program */
+  SEARCHPGM *pgm = NIL;
+  char *criterion,tmp[MAILTMPLEN];
+  int f;
+  if (criteria) {		/* only if criteria defined */
+				/* make writeable copy of criteria */
+    criteria = cpystr (criteria);
 				/* for each criterion */
-  for (criteria = strtok (criteria," "); criteria;
-       (criteria = strtok (NIL," "))) {
-    f = NIL;			/* init then scan the criterion */
-    switch (*ucase (criteria)) {
-    case 'A':			/* possible ALL, ANSWERED */
-      if (!strcmp (criteria+1,"LL")) f = T;
-      else if (!strcmp (criteria+1,"NSWERED")) f = pgm->answered = T;
-      break;
-    case 'B':			/* possible BCC, BEFORE, BODY */
-      if (!strcmp (criteria+1,"CC")) f = mail_criteria_string (&pgm->bcc);
-      else if (!strcmp (criteria+1,"EFORE"))
-	f = mail_criteria_date (&pgm->before);
-      else if (!strcmp (criteria+1,"ODY")) f=mail_criteria_string (&pgm->body);
-      break;
-    case 'C':			/* possible CC */
-      if (!strcmp (criteria+1,"C")) f = mail_criteria_string (&pgm->cc);
-      break;
-    case 'D':			/* possible DELETED */
-      if (!strcmp (criteria+1,"ELETED")) f = pgm->deleted = T;
-      break;
-    case 'F':			/* possible FLAGGED, FROM */
-      if (!strcmp (criteria+1,"LAGGED")) f = pgm->flagged = T;
-      else if (!strcmp (criteria+1,"ROM")) f=mail_criteria_string (&pgm->from);
-      break;
-    case 'K':			/* possible KEYWORD */
-      if (!strcmp (criteria+1,"EYWORD"))
-	f = mail_criteria_string (&pgm->keyword);
-      break;
+    for (pgm = mail_newsearchpgm (), criterion = strtok (criteria," ");
+	 criterion; (criterion = strtok (NIL," "))) {
+      f = NIL;			/* init then scan the criterion */
+      switch (*ucase (criterion)) {
+      case 'A':			/* possible ALL, ANSWERED */
+	if (!strcmp (criterion+1,"LL")) f = T;
+	else if (!strcmp (criterion+1,"NSWERED")) f = pgm->answered = T;
+	break;
+      case 'B':			/* possible BCC, BEFORE, BODY */
+	if (!strcmp (criterion+1,"CC")) f = mail_criteria_string (&pgm->bcc);
+	else if (!strcmp (criterion+1,"EFORE"))
+	  f = mail_criteria_date (&pgm->before);
+	else if (!strcmp (criterion+1,"ODY"))
+	  f = mail_criteria_string (&pgm->body);
+	break;
+      case 'C':			/* possible CC */
+	if (!strcmp (criterion+1,"C")) f = mail_criteria_string (&pgm->cc);
+	break;
+      case 'D':			/* possible DELETED */
+	if (!strcmp (criterion+1,"ELETED")) f = pgm->deleted = T;
+	break;
+      case 'F':			/* possible FLAGGED, FROM */
+	if (!strcmp (criterion+1,"LAGGED")) f = pgm->flagged = T;
+	else if (!strcmp (criterion+1,"ROM"))
+	  f = mail_criteria_string (&pgm->from);
+	break;
+      case 'K':			/* possible KEYWORD */
+	if (!strcmp (criterion+1,"EYWORD"))
+	  f = mail_criteria_string (&pgm->keyword);
+	break;
 
-    case 'N':			/* possible NEW */
-      if (!strcmp (criteria+1,"EW")) f = pgm->recent = pgm->unseen = T;
-      break;
-    case 'O':			/* possible OLD, ON */
-      if (!strcmp (criteria+1,"LD")) f = pgm->old = T;
-      else if (!strcmp (criteria+1,"N")) f = mail_criteria_date (&pgm->on);
-      break;
-    case 'R':			/* possible RECENT */
-      if (!strcmp (criteria+1,"ECENT")) f = pgm->recent = T;
-      break;
-    case 'S':			/* possible SEEN, SINCE, SUBJECT */
-      if (!strcmp (criteria+1,"EEN")) f = pgm->seen = T;
-      else if (!strcmp (criteria+1,"INCE")) f=mail_criteria_date (&pgm->since);
-      else if (!strcmp (criteria+1,"UBJECT"))
-	f = mail_criteria_string (&pgm->subject);
-      break;
-    case 'T':			/* possible TEXT, TO */
-      if (!strcmp (criteria+1,"EXT")) f = mail_criteria_string (&pgm->text);
-      else if (!strcmp (criteria+1,"O")) f = mail_criteria_string (&pgm->to);
-      break;
-    case 'U':			/* possible UN* */
-      if (criteria[1] == 'N') {
-	if (!strcmp (criteria+2,"ANSWERED")) f = pgm->unanswered = T;
-	else if (!strcmp (criteria+2,"DELETED")) f = pgm->undeleted = T;
-	else if (!strcmp (criteria+2,"FLAGGED")) f = pgm->unflagged = T;
-	else if (!strcmp (criteria+2,"KEYWORD"))
-	  f = mail_criteria_string (&pgm->unkeyword);
-	else if (!strcmp (criteria+2,"SEEN")) f = pgm->unseen = T;
+      case 'N':			/* possible NEW */
+	if (!strcmp (criterion+1,"EW")) f = pgm->recent = pgm->unseen = T;
+	break;
+      case 'O':			/* possible OLD, ON */
+	if (!strcmp (criterion+1,"LD")) f = pgm->old = T;
+	else if (!strcmp (criterion+1,"N")) f = mail_criteria_date (&pgm->on);
+	break;
+      case 'R':			/* possible RECENT */
+	if (!strcmp (criterion+1,"ECENT")) f = pgm->recent = T;
+	break;
+      case 'S':			/* possible SEEN, SINCE, SUBJECT */
+	if (!strcmp (criterion+1,"EEN")) f = pgm->seen = T;
+	else if (!strcmp (criterion+1,"INCE"))
+	  f = mail_criteria_date (&pgm->since);
+	else if (!strcmp (criterion+1,"UBJECT"))
+	  f = mail_criteria_string (&pgm->subject);
+	break;
+      case 'T':			/* possible TEXT, TO */
+	if (!strcmp (criterion+1,"EXT")) f = mail_criteria_string (&pgm->text);
+	else if (!strcmp (criterion+1,"O"))
+	  f = mail_criteria_string (&pgm->to);
+	break;
+      case 'U':			/* possible UN* */
+	if (criterion[1] == 'N') {
+	  if (!strcmp (criterion+2,"ANSWERED")) f = pgm->unanswered = T;
+	  else if (!strcmp (criterion+2,"DELETED")) f = pgm->undeleted = T;
+	  else if (!strcmp (criterion+2,"FLAGGED")) f = pgm->unflagged = T;
+	  else if (!strcmp (criterion+2,"KEYWORD"))
+	    f = mail_criteria_string (&pgm->unkeyword);
+	  else if (!strcmp (criterion+2,"SEEN")) f = pgm->unseen = T;
+	}
+	break;
+      default:			/* we will barf below */
+	break;
       }
-      break;
-    default:			/* we will barf below */
-      break;
+      if (!f) {			/* if can't identify criterion */
+	sprintf (tmp,"Unknown search criterion: %.30s",criterion);
+	MM_LOG (tmp,ERROR);
+	mail_free_searchpgm (&pgm);
+	break;
+      }
     }
-    if (!f) {			/* if can't determine any criteria */
-      sprintf (tmp,"Unknown search criterion: %.30s",criteria);
-      MM_LOG (tmp,ERROR);
-      mail_free_searchpgm (&pgm);
-      break;
-    }
+				/* no longer need copy of criteria */
+    fs_give ((void **) &criteria);
   }
   return pgm;
 }
@@ -3540,13 +3910,25 @@ int mail_criteria_date (unsigned short *date)
 				/* parse the date and return fn if OK */
   int ret = (mail_criteria_string (&s) &&
 	     mail_parse_date (&elt,(char *) s->text.data) &&
-	     (*date = (elt.year << 9) + (elt.month << 5) + elt.day)) ?
+	     (*date = mail_shortdate (elt.year,elt.month,elt.day))) ?
 	       T : NIL;
   if (s) mail_free_stringlist (&s);
   return ret;
 }
 
+/* Calculate shortdate from elt values
+ * Accepts: year (0 = BASEYEAR)
+ *	    month (1 = January)
+ *	    day
+ * Returns: shortdate
+ */
 
+unsigned short mail_shortdate (unsigned int year,unsigned int month,
+			       unsigned int day)
+{
+  return (year << 9) + (month << 5) + day;
+}
+
 /* Parse a string
  * Accepts: pointer to stringlist
  * Returns: T if successful, else NIL
@@ -3712,7 +4094,8 @@ SORTCACHE **mail_sort_loadcache (MAILSTREAM *stream,SORTPGM *pgm)
       for (pg = pgm; pg; pg = pg->next) switch (pg->function) {
       case SORTARRIVAL:		/* sort by arrival date */
 	if (!s->arrival) {
-	  if (!elt->day) {	/* if date unknown */
+				/* internal date unknown but can get? */
+	  if (!elt->day && !(stream->dtb->flags & DR_NOINTDATE)) {
 	    sprintf (tmp,"%lu",i);
 	    mail_fetch_fast (stream,tmp,NIL);
 	  }
@@ -3747,11 +4130,23 @@ SORTCACHE **mail_sort_loadcache (MAILSTREAM *stream,SORTPGM *pgm)
 	      }
 				/* skip leading whitespace */
 	  if (t) while ((*t == ' ') || (*t == '\t')) t++;
+				/* parse date from Date: header */
+	  if (!(t && mail_parse_date (&telt,t) && 
+		(s->date = mail_longdate (&telt)))) {
+				/* failed, use internal date */
+	    if (!(s->date = s->arrival)) {
+				/* internal date unknown but can get? */
+	      if (!elt->day && !(stream->dtb->flags & DR_NOINTDATE)) {
+		sprintf (tmp,"%lu",i);
+		mail_fetch_fast (stream,tmp,NIL);
+	      }
 				/* wrong thing before 3-Jan-1970 */
-	  if (!(t && mail_parse_date (&telt,t) &&
-		(s->date = mail_longdate (&telt)))) s->date = 1;
+	      s->date = (s->arrival = elt->day ? mail_longdate (elt) : 1);
+	    }
+	  }
 	}
 	break;
+
       case SORTFROM:		/* sort by first from */
 	if (!s->from) {
 	  if (env) s->from = env->from && env->from->mailbox ?
@@ -3867,8 +4262,8 @@ SORTCACHE **mail_sort_loadcache (MAILSTREAM *stream,SORTPGM *pgm)
 	      }
 	  else t = "";		/* empty subject */
 				/* strip and cache subject */
-	  s->refwd = mail_strip_subject (t,&s->subject);
-	  lcase (s->subject);	/* canonicalize to lower case */
+	  s->refwd = mail_strip_subject (s->original_subject = cpystr (t),
+					 &s->subject);
 	}
 	break;
       default:
@@ -3886,161 +4281,114 @@ SORTCACHE **mail_sort_loadcache (MAILSTREAM *stream,SORTPGM *pgm)
 
 unsigned int mail_strip_subject (char *t,char **ret)
 {
-  unsigned long i;
-  char *s;
-  unsigned int refwd = mail_strip_subject_aux (t,&s);
+  SIZEDTEXT src,dst;
+  unsigned long i,slen;
+  char c,*s,*x;
+  unsigned int refwd = NIL;
+  if (src.size = strlen (t)) {	/* have non-empty subject? */
+    src.data = (unsigned char *) t;
+			/* Step 1 */
+				/* make copy, convert MIME2 if needed */
+    *ret = s = (utf8_mime2text (&src,&dst) && (src.data != dst.data)) ?
+      (char *) dst.data : cpystr (t);
+				/* convert spaces to tab, strip extra spaces */
+    for (x = t = s, c = 'x'; *t; t++) {
+      if (c != ' ') c = *x++ = ((*t == '\t') ? ' ' : *t);
+      else if ((*t != '\t') && (*t != ' ')) c = *x++ = *t;
+    }
+    *x = '\0';			/* tie off string */
+			/* Step 2 */
+    for (slen = dst.size; s; slen = strlen (s))  {
+      for (t = s + slen; t > s; ) switch (t[-1]) {
+      case ' ': case '\t':	/* WSP */
+	*--t = '\0';		/* just remove it */
+	break;
+      case ')':			/* possible "(fwd)" */
+	if ((t >= (s + 5)) && (t[-5] == '(') &&
+	    ((t[-4] == 'F') || (t[-4] == 'f')) &&
+	    ((t[-3] == 'W') || (t[-3] == 'w')) &&
+	    ((t[-2] == 'D') || (t[-2] == 'd'))) {
+	  *(t -= 5) = '\0';	/* remove "(fwd)" */
+	  refwd = T;		/* note a re/fwd */
+	  break;
+	}
+      default:			/* not a subj-trailer */
+	t = s;
+	break;
+      }
+			/* Steps 3-5 */
+      for (t = s; t; ) switch (*s) {
+      case ' ': case '\t':	/* WSP */
+	s = t = mail_strip_subject_wsp (s + 1);
+	break;
+      case 'r': case 'R':	/* possible "re" */
+	if (((s[1] == 'E') || (s[1] == 'e')) &&
+	    (t = mail_strip_subject_wsp (s + 2)) &&
+	    (t = mail_strip_subject_blob (t)) && (*t == ':'))
+	  s = ++t;		/* found "re" */
+	else t = NIL;		/* found subj-middle */
+	break;
+      case 'f': case 'F':	/* possible "fw" or "fwd" */
+	if (((s[1] == 'w') || (s[1] == 'W')) &&
+	    (((s[2] == 'd') || (s[2] == 'D')) ?
+	     (t = mail_strip_subject_wsp (s + 3)) :
+	     (t = mail_strip_subject_wsp (s + 2))) &&
+	    (t = mail_strip_subject_blob (t)) && (*t == ':'))
+	  s = ++t;		/* found "re" */
+	else t = NIL;		/* found subj-middle */
+	break;
+      case '[':			/* possible subj-blob */
+	if ((t = mail_strip_subject_blob (s)) && *t) s = t;
+	else t = NIL;		/* found subj-middle */
+	break;
+      default:
+	t = NIL;		/* found subj-middle */
+	break;
+      }
+			/* Step 6 */
 				/* Netscape-style "[Fwd: ...]"? */
-  while ((*s == '[') && ((s[1] == 'F') || (s[1] == 'f')) &&
-	 ((s[2] == 'W') || (s[2] == 'w')) &&
-	 ((s[3] == 'D') || (s[3] == 'd')) && (s[4] == ':') &&
-	 (s[i = strlen (s) - 1] == ']')) {
-    s[i] = '\0';		/* flush closing ] */
-				/* re-strip what's left */
-    mail_strip_subject_aux ((t = s) + 5,&s);
-    fs_give ((void **) &t);	/* flush old string, loop back */
-    refwd = T;			/* definitely a re/fwd at this point */
+      if ((*s == '[') && ((s[1] == 'F') || (s[1] == 'f')) &&
+	  ((s[2] == 'W') || (s[2] == 'w')) &&
+	  ((s[3] == 'D') || (s[3] == 'd')) && (s[4] == ':') &&
+	  (s[i = strlen (s) - 1] == ']')) {
+	s[i] = '\0';		/* flush closing "]" */
+	s += 5;			/* and leading "[Fwd:" */
+	refwd = T;		/* definitely a re/fwd at this point */
+      }
+      else break;		/* don't need to loop back to step 2 */
+    }
+    if (s != (t = *ret)) {	/* removed leading text? */
+      s = *ret = cpystr (s);	/* yes, make a fresh return copy */
+      fs_give ((void **) &t);	/* flush old copy */
+    }
   }
-  *ret = s;			/* return stripped subject */
+  else *ret = cpystr ("");	/* empty subject */
   return refwd;			/* return re/fwd state */
 }
 
-/* Strip subject helper routine: does everything except "[Fwd: ...]"
- * Accepts: unstripped subject
- *	    pointer to return stripped subject, in cpystr form
- * Returns: T if subject had a re/fwd, NIL otherwise
+/* Strip subject wsp helper routine
+ * Accepts: text
+ * Returns: pointer to text after blob
  */
 
-unsigned int mail_strip_subject_aux (char *t,char **ret)
+char *mail_strip_subject_wsp (char *s)
 {
-  char c,*s,*x;
-  unsigned int refwd = NIL;
-  SIZEDTEXT src,dst;
-  for (x = t; x; ) switch (*t) {/* flush leading whitespace, [, and "re" */
-  case ' ': case '\t':
-    t++;			/* leading whitespace */
-    break;
-  case '[':			/* leading [ */
-    for (s = t + 1; s;) switch (*s) {
-    case '\0': case '[':	/* end of string or nesting */
-      x = s = NIL;		/* just punt */
-      break;
-    default:			/* any other character */
-      s++;			/* sniff at next */
-      break;
-    case ']':			/* closing ] */
-      while (s) switch (*++s) {
-      case '(':			/* possible trailing (fwd) */
-	for (x = s; ((*x == '(') &&
-		     ((x[1] == 'F') || (x[1] == 'f')) &&
-		     ((x[2] == 'W') || (x[2] == 'w')) &&
-		     ((x[3] == 'D') || (x[3] == 'd')) && (x[4] == ')'));) {
-	  x += 5;		/* yes, skip past it */
-	  refwd = T;		/* note a re/fwd */
-				/* skip whitespace */
-	  while ((*x == ' ') || (*x == '\t')) ++x;
-	}
-	if (!*x) {		/* end of string? */
-	  x = s = NIL;		/* yes, terminate search */
-	  break;
-	}
-      default:
-	x = t = s;		/* found usable text */
-	s = NIL;		/* terminate search */
-      case ' ': case '\t':	/* skip whitespace */
-	break;
-      case '\0':		/* end of string */
-	s = x = NIL;		/* terminate search here */
-	break;
-      }
-      break;
-    }
-    break;
-
-  case 'R': case 'r':		/* possible "re" */
-    if ((t[1] != 'E') && (t[1] != 'e')) x = NIL;
-    else {			/* found re, skip leading whitespace */
-      for (x = t + 2; (*x == ' ') || (*x == '\t'); x++);
-      switch (*x++) {		/* what comes after? */
-      case ':':			/* "re:" */
-	refwd = T;		/* note a re/fwd */
-	t = x;
-	break;
-      case '[':			/* possible "re[babble]:" */
-	if (x = strchr (x,']')) {
-	  for (x++; ((*x == ' ') || (*x == '\t')); x++);
-	  if (*x == ':') {	/* is it for real? */
-	    t = ++x;
-	    refwd = T;		/* note a re/fwd */
-	  }
-	  else x = NIL;
-	}
-	break;
-      default:			/* something significant starting with "re" */
-	x = NIL;		/* terminate the loop */
-	break;
-      }
-    }
-    break;
-  case 'F': case 'f':		/* possible "fw" or "fwd" */
-    if ((t[1] != 'W') && (t[1] != 'w')) x = NIL;
-    else {			/* found fw, skip "D" and leading whitespace */
-      for (x = ((t[2] == 'D') || (t[2] == 'd')) ? t + 3 : t + 2;
-	   (*x == ' ') || (*x == '\t'); x++);
-      switch (*x++) {		/* what comes after? */
-      case ':':			/* "fwd:" */
-	refwd = T;		/* note a re/fwd */
-	t = x;
-	break;
-      case '[':			/* possible "fwd[babble]:" */
-	if (x = strchr (x,']')) {
-	  for (x++; ((*x == ' ') || (*x == '\t')); x++);
-	  if (*x == ':') {	/* is it for real? */
-	    t = ++x;
-	    refwd = T;		/* note a re/fwd */
-	  }
-	  else x = NIL;
-	}
-	break;
-      default:			/* something significant starting with "fwd" */
-	x = NIL;		/* terminate the loop */
-	break;
-      }
-    }
-    break;
-  default:			/* something significant */
-    x = NIL;			/* terminate the loop */
-    break;
-  }
-
-				/* have an empty subject? */
-  if (src.size = strlen (t)) {	/* have non-empty subject */
-    src.data = (unsigned char *) t;
-				/* make copy, convert MIME2 if needed */
-    if (utf8_mime2text (&src,&dst) && (src.data != dst.data))
-      t = (x = (char *) dst.data) + dst.size;
-    else t = (x = cpystr ((char *) src.data)) + src.size;
-    while (t > x) {		/* flush trailing "(fwd)" and whitespace */
-      while ((t[-1] == ' ') || (t[-1] == '\t')) t--;
-      if ((t >= (x + 5)) && (t[-5] == '(') &&
-	  ((t[-4] == 'F') || (t[-4] == 'f')) &&
-	  ((t[-3] == 'W') || (t[-3] == 'w')) &&
-	  ((t[-2] == 'D') || (t[-2] == 'd')) && (t[-1] == ')')) {
-	t -= 5;
-	refwd = T;		/* note a re/fwd */
-      }
-      else break;
-    }
-    *t = '\0';			/* tie off subject string */
-				/* convert spaces to tab, strip extra spaces */
-    for (s = t = x, c = 'x'; *t; t++) {
-      if (c != ' ') c = *s++ = ((*t == '\t') ? ' ' : *t);
-      else if ((*t != '\t') && (*t != ' ')) c = *s++ = *t;
-    }
-    *s = '\0';			/* tie off string again */
-    *ret = x;			/* return stripped subject */
-  }
-  else *ret = cpystr ("");	/* return empty subject */
-  return refwd;			/* return re/fwd state */
+  while ((*s == ' ') || (*s == '\t')) s++;
+  return s;
+}
+
+
+/* Strip subject blob helper routine
+ * Accepts: text
+ * Returns: pointer to text after any blob, NIL if blob-like but not blob
+ */
+
+char *mail_strip_subject_blob (char *s)
+{
+  if (*s != '[') return s;	/* not a blob, ignore */
+				/* search for end of blob */
+  while (*++s != ']') if ((*s == '[') || !*s) return NIL;
+  return mail_strip_subject_wsp (s + 1);
 }
 
 /* Sort compare messages
@@ -4100,6 +4448,9 @@ int mail_sort_compare (const void *a1,const void *a2)
  *
  * This routine, like most UNIX systems, is clueless about leap seconds.
  * Thus, it treats 23:59:60 as equivalent to 00:00:00 the next day.
+ *
+ * This routine forces any early hours on 1-Jan-1970 in oriental timezones
+ * to be 1-Jan-1970 00:00:00 UTC, so as to avoid negative longdates.
  */
 
 unsigned long mail_longdate (MESSAGECACHE *elt)
@@ -4134,8 +4485,9 @@ unsigned long mail_longdate (MESSAGECACHE *elt)
   ret *= 24; ret += elt->hours;	/* date value in hours */
   ret *= 60; ret +=elt->minutes;/* date value in minutes */
   yr = (elt->zhours * 60) + elt->zminutes;
-  if (elt->zoccident) ret += yr;/* cretinous TinyFlaccid C compiler! */
-  else ret -= yr;
+  if (elt->zoccident) ret += yr;/* occidental timezone, make UTC */
+  else if (ret < yr) return 0;	/* still 31-Dec-1969 in UTC */
+  else ret -= yr;		/* oriental timezone, make UTC */
   ret *= 60; ret += elt->seconds;
   return ret;
 }
@@ -4146,7 +4498,7 @@ unsigned long mail_longdate (MESSAGECACHE *elt)
  *	    character set
  *	    search program
  *	    option flags
- * Returns: thread node tree
+ * Returns: thread node tree or NIL if error
  */
 
 THREADNODE *mail_thread (MAILSTREAM *stream,char *type,char *charset,
@@ -4170,7 +4522,7 @@ THREADNODE *mail_thread (MAILSTREAM *stream,char *type,char *charset,
  *	    search program
  *	    option flags
  *	    sorter routine
- * Returns: thread node tree
+ * Returns: thread node tree or NIL if error
  */
 
 THREADNODE *mail_thread_msgs (MAILSTREAM *stream,char *type,char *charset,
@@ -4226,8 +4578,10 @@ THREADNODE *mail_thread_orderedsubject (MAILSTREAM *stream,char *charset,
 	  i++;			/* have a new thread */
 	  top = top->branch = cur = mail_newthreadnode (s);
 	}
-				/* another node on this branch */
-	else cur = cur->next = mail_newthreadnode (s);
+				/* start a child of the top */
+	else if (cur == top) cur = cur->next = mail_newthreadnode (s);
+				/* sibling of child */
+	else cur = cur->branch = mail_newthreadnode (s);
 				/* set to msgno or UID as needed */
 	cur->num = (flags & SE_UID) ? mail_uid (stream,s->num) : s->num;
       }
@@ -4280,7 +4634,7 @@ THREADNODE *mail_thread_orderedsubject (MAILSTREAM *stream,char *charset,
 THREADNODE *mail_thread_references (MAILSTREAM *stream,char *charset,
 				    SEARCHPGM *spg,long flags,sorter_t sorter)
 {
-  MESSAGECACHE telt;
+  MESSAGECACHE *elt, telt;
   ENVELOPE *env;
   SORTCACHE *s;
   STRINGLIST *st;
@@ -4326,10 +4680,10 @@ THREADNODE *mail_thread_references (MAILSTREAM *stream,char *charset,
 	if (env = mail_fetch_structure (stream,s->num,NIL,NIL)) {
 	  if (!s->date && env->date && mail_parse_date (&telt,env->date))
 	    s->date = mail_longdate (&telt);
-	  if (!s->subject && env->subject) {
-	    s->refwd = mail_strip_subject (env->subject,&s->subject);
-	    lcase (s->subject);	/* canonicalize to lower case */
-	  }
+	  if (!s->subject && env->subject)
+	    s->refwd =
+	      mail_strip_subject (s->original_subject = cpystr (env->subject),
+				  &s->subject);
 	  if (!s->message_id && env->message_id && *env->message_id)
 	    s->message_id = mail_thread_parse_msgid (env->message_id,NIL);
 	  if (!s->references &&	/* use References: or In-Reply-To: */
@@ -4338,24 +4692,34 @@ THREADNODE *mail_thread_references (MAILSTREAM *stream,char *charset,
 	    s->references = mail_thread_parse_references(env->in_reply_to,NIL);
 	}
 				/* last resort */
-	if (!s->date) s->date = 1;
+	if (!s->date && !(s->date = s->arrival)) {
+				/* internal date unknown but can get? */
+	  if (!(elt = mail_elt (stream,s->num))->day &&
+	      !(stream->dtb->flags & DR_NOINTDATE)) {
+	    sprintf (tmp,"%lu",s->num);
+	    mail_fetch_fast (stream,tmp,NIL);
+	  }
+				/* wrong thing before 3-Jan-1970 */
+	  s->date = (s->arrival = elt->day ? mail_longdate (elt) : 1);
+	}
 	if (!s->subject) s->subject = cpystr ("");
 	if (!s->references) s->references = mail_newstringlist ();
       }
     }
-			/* Step 1 (preliminary) */
-				/* don't permit Message ID duplicates */
-    if (s->message_id && hash_lookup (ht,s->message_id))
-      fs_give ((void **) &s->message_id);
-    if (!s->message_id) {	/* fake Message-ID from mailbox and UID */
-      sprintf (tmp,"%s.%lx.%lx@%s",stream->mailbox,stream->uid_validity,
-	       mail_uid (stream,s->num),mylocalhost ());
-      s->message_id = cpystr (tmp);
-    }
-				/* add message ID to hash table */
-    hash_add (ht,s->message_id,s,THREADLINKS);
-  }
 
+			/* Step 1 (preliminary) */
+				/* generate unique string */
+    sprintf (tmp,"%s.%lx.%lx@%s",stream->mailbox,stream->uid_validity,
+	     mail_uid (stream,s->num),mylocalhost ());
+				/* flush old unique string if not message-id */
+    if (s->unique && (s->unique != s->message_id))
+      fs_give ((void **) &s->unique);
+    s->unique = s->message_id ?	/* don't permit Message ID duplicates */
+      (hash_lookup (ht,s->message_id) ? cpystr (tmp) : s->message_id) :
+	(s->message_id = cpystr (tmp));
+				/* add unique string to hash table */
+    hash_add (ht,s->unique,s,THREADLINKS);
+  }
 			/* Step 1 */
   for (i = 0; i < nmsgs; ++i) {	/* for each message in sortcache */
 			/* Step 1A */
@@ -4373,7 +4737,7 @@ THREADNODE *mail_thread_references (MAILSTREAM *stream,char *charset,
       }
     else con = NIL;		/* else message has no ancestors */
 			/* Step 1B */
-    if ((prc = PARENT ((nxc = hash_lookup (ht,s->message_id)))) &&
+    if ((prc = PARENT ((nxc = hash_lookup (ht,s->unique)))) &&
 	(prc != con)) {		/* break links if have a different parent */
       SETPARENT (nxc,NIL);	/* easy if direct child */
       if (nxc == CHILD (prc)) SETCHILD (prc,SIBLING (nxc));
@@ -4514,18 +4878,18 @@ THREADNODE *mail_thread_references (MAILSTREAM *stream,char *charset,
  * Accepts: MAIL stream
  *	    UID of this message
  *	    overview of this message
+ *	    msgno of this message
  */
 
-void mail_thread_loadcache (MAILSTREAM *stream,unsigned long uid,OVERVIEW *ov)
+void mail_thread_loadcache (MAILSTREAM *stream,unsigned long uid,OVERVIEW *ov,
+			    unsigned long msgno)
 {
-  unsigned long msgno = mail_msgno (stream,uid);
   if (msgno && ov) {		/* just in case */
     MESSAGECACHE telt;
     SORTCACHE *s = (SORTCACHE *) (*mailcache) (stream,msgno,CH_SORTCACHE);
-    if (!s->subject && ov->subject) {
-      s->refwd = mail_strip_subject (ov->subject,&s->subject);
-      lcase (s->subject);	/* canonicalize to lower case */
-    }
+    if (!s->subject && ov->subject)
+      s->refwd = mail_strip_subject (s->original_subject = cpystr(ov->subject),
+				     &s->subject);
     if (!s->from && ov->from && ov->from->mailbox)
       s->from = cpystr (ov->from->mailbox);
     if (!s->date && ov->date && mail_parse_date (&telt,ov->date))
@@ -4719,20 +5083,24 @@ THREADNODE *mail_thread_sort (THREADNODE *thr,THREADNODE **tc)
  * Accept: first message sort cache element
  *	   second message sort cache element
  * Returns: -1 if a1 < a2, 1 if a1 > a2
- * Resolves by order in mailbox as last resort
+ *
+ * This assumes that a sort cache element is either a message (with a
+ * sortcache entry) or a dummy with a message (with sortcache entry) child.
+ * This is true of both the ORDEREDSUBJECT (no dummies) and REFERENCES
+ * (dummies only at top-level, and with non-dummy children).
+ *
+ * If a new algorithm allows a dummy parent to have a dummy child, this
+ * routine must be changed if it is to be used by that algorithm.
+ *
+ * Messages with bogus dates are always sorted at the top.
  */
 
 int mail_thread_compare_date (const void *a1,const void *a2)
 {
   THREADNODE *t1 = *(THREADNODE **) a1;
   THREADNODE *t2 = *(THREADNODE **) a2;
-  SORTCACHE *s1 = t1->sc ? t1->sc : t1->next->sc;
-  SORTCACHE *s2 = t2->sc ? t2->sc : t2->next->sc;
-				/* only compare dates if both are good  */
-  int ret = ((s1->date > 1) && (s2->date > 1)) ?
-    compare_ulong (s1->date,s2->date) : 0;
-				/* use sequence if can't resolve using date */
-  return ret ? ret : ((s1->num) < (s2->num) ? -1 : 1);
+  return compare_ulong ((t1->sc ? t1->sc : t1->next->sc)->date,
+			(t2->sc ? t2->sc : t2->next->sc)->date);
 }
 
 /* Mail parse sequence
@@ -4741,7 +5109,7 @@ int mail_thread_compare_date (const void *a1,const void *a2)
  * Returns: T if parse successful, else NIL
  */
 
-long mail_sequence (MAILSTREAM *stream,char *sequence)
+long mail_sequence (MAILSTREAM *stream,unsigned char *sequence)
 {
   unsigned long i,j,x;
   for (i = 1; i <= stream->nmsgs; i++) mail_elt (stream,i)->sequence = NIL;
@@ -4755,9 +5123,13 @@ long mail_sequence (MAILSTREAM *stream,char *sequence)
       sequence++;		/* skip past * */
     }
 				/* parse and validate message number */
-    else if (!(i = strtoul ((const char *) sequence,&sequence,10)) ||
+    else if (!isdigit (*sequence)) {
+      MM_LOG ("Syntax error in sequence",ERROR);
+      return NIL;
+    }
+    else if (!(i = strtoul (sequence,(char **) &sequence,10)) ||
 	     (i > stream->nmsgs)) {
-      MM_LOG ("Sequence invalid",ERROR);
+      MM_LOG ("Sequence out of range",ERROR);
       return NIL;
     }
     switch (*sequence) {	/* see what the delimiter is */
@@ -4771,7 +5143,7 @@ long mail_sequence (MAILSTREAM *stream,char *sequence)
 	sequence++;		/* skip past * */
       }
 				/* parse end of range */
-      else if (!(j = strtoul ((const char *) sequence,&sequence,10)) ||
+      else if (!(j = strtoul (sequence,(char **) &sequence,10)) ||
 	       (j > stream->nmsgs)) {
 	MM_LOG ("Sequence range invalid",ERROR);
 	return NIL;
@@ -4810,8 +5182,7 @@ long mail_parse_flags (MAILSTREAM *stream,char *flag,unsigned long *uf)
 {
   char *t,*n,*s,tmp[MAILTMPLEN],flg[MAILTMPLEN];
   short f = 0;
-  long i;
-  short j;
+  long i,j;
   *uf = 0;			/* initially no user flags */
   if (flag && *flag) {		/* no-op if no flag string */
 				/* check if a list and make sure valid */
@@ -4856,6 +5227,7 @@ long mail_parse_flags (MAILSTREAM *stream,char *flag,unsigned long *uf)
 	}
 	if (i) f |= i;		/* add flag to flags list */
       }
+
 				/* user flag, search through table */
       else for (j = 0; !i && j < NUSERFLAGS && (s =stream->user_flags[j]); ++j)
 	if (!compare_cstring (t,s)) *uf |= i = 1 << j;
@@ -4867,14 +5239,28 @@ long mail_parse_flags (MAILSTREAM *stream,char *flag,unsigned long *uf)
 				/* can we create it? */
 	else if (stream->kwd_create && (j < NUSERFLAGS) &&
 	    (strlen (t) <= MAXUSERFLAG)) {
-	  *uf |= 1 << j;	/* set the bit */
-	  stream->user_flags[j] = cpystr (t);
+	  for (s = t; t && *s; s++) switch (*s) {
+	  default:		/* all other characters */
+				/* SPACE, CTL, or not CHAR */
+	    if ((*s > ' ') && (*s < 0x7f)) break;
+	  case '*': case '%':	/* list_wildcards */
+	  case '"': case '\\':	/* quoted-specials */
+				/* atom_specials */
+	  case '(': case ')': case '{':
+	    sprintf (flg,"Invalid flag: %.80s",t);
+	    MM_LOG (flg,WARN);
+	    t = NIL;
+	  }
+	  if (t) {		/* only if valid */
+	    *uf |= 1 << j;	/* set the bit */
+	    stream->user_flags[j] = cpystr (t);
 				/* if out of user flags */
-	  if (j == NUSERFLAGS - 1) stream->kwd_create = NIL;
+	    if (j == NUSERFLAGS - 1) stream->kwd_create = NIL;
+	  }
 	}
 	else {
 	  sprintf (flg,"Unknown flag: %.80s",t);
-	  MM_LOG (flg,ERROR);
+	  MM_LOG (flg,WARN);
 	}
       }
     }
@@ -4890,16 +5276,22 @@ long mail_parse_flags (MAILSTREAM *stream,char *flag,unsigned long *uf)
 
 long mail_usable_network_stream (MAILSTREAM *stream,char *name)
 {
-  NETMBX smb,nmb;
+  NETMBX smb,nmb,omb;
   return (stream && stream->dtb && !(stream->dtb->flags & DR_LOCAL) &&
 	  mail_valid_net_parse (name,&nmb) &&
 	  mail_valid_net_parse (stream->mailbox,&smb) &&
-	  !compare_cstring (smb.host,
-			    trustdns ? tcp_canonical (nmb.host) : nmb.host) &&
-	  !strcmp (smb.service,nmb.service) &&
-	  (!nmb.port || (smb.port == nmb.port)) &&
-	  (nmb.anoflag == stream->anonymous) &&
-	  (!nmb.user[0] || !strcmp (smb.user,nmb.user))) ? LONGT : NIL;
+	  mail_valid_net_parse (stream->original_mailbox,&omb) &&
+	  ((!compare_cstring (smb.host,
+			      trustdns ? tcp_canonical (nmb.host) : nmb.host)&&
+	    !strcmp (smb.service,nmb.service) &&
+	    (!nmb.port || (smb.port == nmb.port)) &&
+	    (nmb.anoflag == stream->anonymous) &&
+	    (!nmb.user[0] || !strcmp (smb.user,nmb.user))) ||
+	   (!compare_cstring (omb.host,nmb.host) &&
+	    !strcmp (omb.service,nmb.service) &&
+	    (!nmb.port || (omb.port == nmb.port)) &&
+	    (nmb.anoflag == stream->anonymous) &&
+	    (!nmb.user[0] || !strcmp (omb.user,nmb.user))))) ? LONGT : NIL;
 }
 
 /* Mail data structure instantiation routines */
@@ -5142,8 +5534,8 @@ void mail_free_body_data (BODY *body)
     if (body->subtype && !strcmp (body->subtype,"RFC822")) {
       mail_free_stringlist (&body->nested.msg->lines);
       mail_gc_msg (body->nested.msg,GC_ENV | GC_TEXTS);
-      fs_give ((void **) &body->nested.msg);
     }
+    if (body->nested.msg) fs_give ((void **) &body->nested.msg);
     break;
   default:
     break;
@@ -5156,9 +5548,12 @@ void mail_free_body_data (BODY *body)
   if (body->disposition.parameter)
     mail_free_body_parameter (&body->disposition.parameter);
   if (body->language) mail_free_stringlist (&body->language);
+  if (body->location) fs_give ((void **) &body->location);
   if (body->mime.text.data) fs_give ((void **) &body->mime.text.data);
   if (body->contents.text.data) fs_give ((void **) &body->contents.text.data);
   if (body->md5) fs_give ((void **) &body->md5);
+  if (mailfreebodysparep && body->sparep)
+      (*mailfreebodysparep) (&body->sparep);
 }
 
 /* Mail garbage collect body parameter
@@ -5268,6 +5663,8 @@ void mail_free_address (ADDRESS **address)
     if ((*address)->mailbox) fs_give ((void **) &(*address)->mailbox);
     if ((*address)->host) fs_give ((void **) &(*address)->host);
     if ((*address)->error) fs_give ((void **) &(*address)->error);
+    if ((*address)->orcpt.type) fs_give ((void **) &(*address)->orcpt.type);
+    if ((*address)->orcpt.addr) fs_give ((void **) &(*address)->orcpt.addr);
     mail_free_address (&(*address)->next);
     fs_give ((void **) address);/* return address to free storage */
   }
@@ -5715,9 +6112,14 @@ char *net_localhost (NETSTREAM *stream)
   return (*stream->dtb->localhost) (stream->stream);
 }
 
-/* Function used to make tkrat barf if it gets linked with
+/* Function used to make TkRat barf if it gets linked with
  * another version of c-client than this specially modified
  * version.
+ *
+ * OBSERVE that I have made a number of subtle, and some not so
+ * subtle, modifications to this c-client library so you may get
+ * more or less severe side-effects if you replace it with some
+ * other version.
  */
 int special_ratatosk_modified_c_client_library_needed(void)
 {

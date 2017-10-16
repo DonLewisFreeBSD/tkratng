@@ -10,14 +10,15 @@
  *		Internet: MRC@CAC.Washington.EDU
  *
  * Date:	23 February 1992
- * Last Edited:	11 April 2001
+ * Last Edited:	4 November 2004
  * 
  * The IMAP toolkit provided in this Distribution is
- * Copyright 2001 University of Washington.
+ * Copyright 1988-2004 University of Washington.
  * The full text of our legal notices is contained in the file called
  * CPYRIGHT, included with this Distribution.
  */
-
+
+
 #include <stdio.h>
 #include <ctype.h>
 #include <errno.h>
@@ -30,6 +31,55 @@ extern int errno;		/* just in case */
 #include "mh.h"
 #include "misc.h"
 #include "dummy.h"
+
+/* MH I/O stream local data */
+	
+typedef struct mh_local {
+  char *dir;			/* spool directory name */
+  unsigned char *buf;		/* temporary buffer */
+  unsigned long buflen;		/* current size of temporary buffer */
+  unsigned long cachedtexts;	/* total size of all cached texts */
+  time_t scantime;		/* last time directory scanned */
+} MHLOCAL;
+
+
+/* Convenient access to local data */
+
+#define LOCAL ((MHLOCAL *) stream->local)
+
+
+/* Function prototypes */
+
+DRIVER *mh_valid (char *name);
+int mh_isvalid (char *name,char *tmp,long synonly);
+void *mh_parameters (long function,void *value);
+void mh_scan (MAILSTREAM *stream,char *ref,char *pat,char *contents);
+void mh_list (MAILSTREAM *stream,char *ref,char *pat);
+void mh_lsub (MAILSTREAM *stream,char *ref,char *pat);
+void mh_list_work (MAILSTREAM *stream,char *dir,char *pat,long level);
+long mh_subscribe (MAILSTREAM *stream,char *mailbox);
+long mh_unsubscribe (MAILSTREAM *stream,char *mailbox);
+long mh_create (MAILSTREAM *stream,char *mailbox);
+long mh_delete (MAILSTREAM *stream,char *mailbox);
+long mh_rename (MAILSTREAM *stream,char *old,char *newname);
+MAILSTREAM *mh_open (MAILSTREAM *stream);
+void mh_close (MAILSTREAM *stream,long options);
+void mh_fast (MAILSTREAM *stream,char *sequence,long flags);
+char *mh_header (MAILSTREAM *stream,unsigned long msgno,unsigned long *length,
+		 long flags);
+long mh_text (MAILSTREAM *stream,unsigned long msgno,STRING *bs,long flags);
+long mh_ping (MAILSTREAM *stream);
+void mh_check (MAILSTREAM *stream);
+void mh_expunge (MAILSTREAM *stream);
+long mh_copy (MAILSTREAM *stream,char *sequence,char *mailbox,
+	      long options);
+long mh_append (MAILSTREAM *stream,char *mailbox,append_t af,void *data);
+
+int mh_select (struct direct *name);
+int mh_numsort (const void *d1,const void *d2);
+char *mh_file (char *dst,char *name);
+long mh_canonicalize (char *pattern,char *ref,char *pat);
+void mh_setdate (char *file,MESSAGECACHE *elt);
 
 /* MH mail routines */
 
@@ -399,8 +449,7 @@ long mh_delete (MAILSTREAM *stream,char *mailbox)
 				/* try to remove the directory */
   if (rmdir (mh_file (tmp,mailbox))) {
     sprintf (tmp,"Can't delete mailbox %.80s: %s",mailbox,strerror (errno));
-    mm_log (tmp,ERROR);
-    return NIL;
+    mm_log (tmp,WARN);
   }
   return T;			/* return success */
 }
@@ -529,7 +578,7 @@ char *mh_header (MAILSTREAM *stream,unsigned long msgno,unsigned long *length,
 {
   unsigned long i,hdrsize;
   int fd;
-  char *t;
+  unsigned char *t;
   struct stat sbuf;
   struct tm *tm;
   MESSAGECACHE *elt;
@@ -569,10 +618,10 @@ char *mh_header (MAILSTREAM *stream,unsigned long msgno,unsigned long *length,
     hdrsize = (*t ? ++t : t) - LOCAL->buf;
     elt->rfc822_size =		/* size of entire message in CRLF form */
       (elt->private.msg.header.text.size =
-       strcrlfcpy ((char **) &elt->private.msg.header.text.data,&i,LOCAL->buf,
+       strcrlfcpy (&elt->private.msg.header.text.data,&i,LOCAL->buf,
 		   hdrsize)) +
 	 (elt->private.msg.text.text.size =
-	  strcrlfcpy ((char **) &elt->private.msg.text.text.data,&i,t,
+	  strcrlfcpy (&elt->private.msg.text.text.data,&i,t,
 		      sbuf.st_size - hdrsize));
 				/* add to cached size */
     LOCAL->cachedtexts += elt->rfc822_size;
@@ -867,14 +916,7 @@ long mh_append (MAILSTREAM *stream,char *mailbox,append_t af,void *data)
 				/* make sure valid mailbox */
   if (!mh_isvalid (mailbox,tmp,NIL)) switch (errno) {
   case ENOENT:			/* no such file? */
-    if ((mailbox[0] == '#') && ((mailbox[1] == 'M') || (mailbox[1] == 'm')) &&
-	((mailbox[2] == 'H') || (mailbox[2] == 'h')) &&
-	((mailbox[3] == 'I') || (mailbox[3] == 'i')) &&
-	((mailbox[4] == 'N') || (mailbox[4] == 'n')) &&
-	((mailbox[5] == 'B') || (mailbox[5] == 'b')) &&
-	((mailbox[6] == 'O') || (mailbox[6] == 'o')) &&
-	((mailbox[7] == 'X') || (mailbox[7] == 'x')) && !mailbox[8])
-      mh_create (NIL,"INBOX");
+    if (!compare_cstring (mailbox,"#mhinbox")) mh_create (NIL,"INBOX");
     else {
       mm_notify (stream,"[TRYCREATE] Must create mailbox before append",NIL);
       return NIL;

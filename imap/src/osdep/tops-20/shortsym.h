@@ -10,10 +10,10 @@
  *		Internet: MRC@CAC.Washington.EDU
  *
  * Date:	24 May 1995
- * Last Edited:	5 October 2001
+ * Last Edited:	6 December 2004
  * 
  * The IMAP toolkit provided in this Distribution is
- * Copyright 2001 University of Washington.
+ * Copyright 1988-2004 University of Washington.
  * The full text of our legal notices is contained in the file called
  * CPYRIGHT, included with this Distribution.
  */
@@ -82,6 +82,8 @@
 #define imap_anon i_anon
 #define imap_auth i_auth
 #define imap_cache i_cach
+#define imap_cap i_cap
+#define imap_capability i_capa
 #define imap_challenge i_chln
 #define imap_check i_chck
 #define imap_close i_clos
@@ -134,6 +136,7 @@
 #define imap_parse_unsolicited ip_uns
 #define imap_parse_user_flag ipu_fl
 #define imap_ping i_ping
+#define imap_reform_sequence i_rfrs
 #define imap_rename i_ren
 #define imap_reply i_rep
 #define imap_response i_rspn
@@ -145,7 +148,9 @@
 #define imap_send_sdate iss_da
 #define imap_send_slist iss_sl
 #define imap_send_spgm iss_pg
+#define imap_send_spgm_trim iss_pt
 #define imap_send_sset iss_st
+#define imap_send_sset_work iss_sw
 #define imap_setacl i_sacl
 #define imap_setquota i_sqot
 #define imap_sort i_sort
@@ -155,6 +160,7 @@
 #define imap_structure i_stru
 #define imap_subscribe i_sub
 #define imap_thread i_thrd
+#define imap_thread_work i_thrw
 #define imap_uid i_uid
 #define imap_unsubscribe i_uns
 #define imap_valid i_val
@@ -185,6 +191,8 @@
 #define mail_fetch_message mf_msg
 #define mail_fetch_mime mf_mim
 #define mail_fetch_overview mf_ovr
+#define mail_fetch_overview_sequence mf_ovs
+#define mail_fetch_overview_default mf_ovd
 #define mail_fetch_structure mf_str
 #define mail_fetch_text mf_txt
 #define mail_fetch_text_return mf_txr
@@ -284,7 +292,8 @@
 #define mail_string_next mt_nxt
 #define mail_string_setpos mt_sps
 #define mail_strip_subject mst_sb
-#define mail_strip_subject_aux mst_sx
+#define mail_strip_subject_wsp mst_ws
+#define mail_strip_subject_blob mst_bl
 #define mail_subscribe m_sub
 #define mail_thread m_thr
 #define mail_threadlist mt_lst
@@ -371,6 +380,7 @@
 #define nntp_fetchmessage nf_msg
 #define nntp_flagmsg n_fmsg
 #define nntp_gc n_gc
+#define nntp_getmap n_gmap
 #define nntp_header n_head
 #define nntp_isvalid n_isvl
 #define nntp_list n_list
@@ -379,8 +389,11 @@
 #define nntp_mclose n_mcls
 #define nntp_mopen n_mopn
 #define nntp_open_full n_open
+#define nntp_over n_ovr
+#define nntp_overview n_over
 #define nntp_parameters n_parm
 #define nntp_parsestructure n_pars
+#define nntp_parse_overview n_povr
 #define nntp_ping n_ping
 #define nntp_rename n_ren
 #define nntp_reply n_repl
@@ -478,11 +491,9 @@
 #define smtp_auth s_auth
 #define smtp_challenge s_chal
 #define smtp_close s_clos
-#define smtp_debug s_dbug
 #define smtp_ehlo s_ehlo
 #define smtp_fake s_fake
 #define smtp_mail s_mail
-#define smtp_nodebug s_nodb
 #define smtp_open_full s_open
 #define smtp_rcpt s_rcpt
 #define smtp_reply s_repl
@@ -514,12 +525,17 @@
 #define textcpy txcopy
 #define textcpystring txcpst
 #define textcpyoffstring txcpos
+#define utf8_cstext u8_cst
+#define utf8_cstocstext u8_cct
+#define utf8_get u8_get
 #define utf8_iso2022text u8_i22
 #define utf8_mime2text u8_mi2
+#define utf8_rmap u8_rmp
 #define utf8_searchpgm u8_spg
 #define utf8_stringlist u8_lst
 #define utf8_text u8_txt
 #define utf8_text_8859_1 u8t_we
+#define utf8_text_1byte0 u8t_10
 #define utf8_text_1byte u8t_1b
 #define utf8_text_1byte8 u8t_18
 #define utf8_text_euc u8t_eu

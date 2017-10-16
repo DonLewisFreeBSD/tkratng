@@ -11,5 +11,6 @@ set env(SSH)            "@ssh@"
 # This version of the tkrat file is only intended to be used in
 # the development tree.
 set auto_path [concat [pwd]/.. $env(LIBDIR) $auto_path]
+package forget ratatosk ratatosk_old
 
 TkRatClientStart

@@ -10,10 +10,10 @@
  *		Internet: MRC@CAC.Washington.EDU
  *
  * Date:	1 August 1988
- * Last Edited:	24 October 2000
+ * Last Edited:	18 January 2005
  * 
  * The IMAP toolkit provided in this Distribution is
- * Copyright 2000 University of Washington.
+ * Copyright 2005 University of Washington.
  * The full text of our legal notices is contained in the file called
  * CPYRIGHT, included with this Distribution.
  */
@@ -22,6 +22,7 @@
 static char *myLocalHost = NIL;	/* local host name */
 static char *myHomeDir = NIL;	/* home directory name */
 static char *myNewsrc = NIL;	/* newsrc file name */
+static short no822tztext = NIL;	/* disable RFC [2]822 timezone text */
 
 #include "write.c"		/* include safe writing routines */
 #include "pmatch.c"		/* include wildcard pattern matcher */
@@ -62,6 +63,11 @@ void *env_parameters (long function,void *value)
     }
     ret = (void *) myNewsrc;
     break;
+  case SET_DISABLE822TZTEXT:
+    no822tztext = value ? T : NIL;
+  case GET_DISABLE822TZTEXT:
+    ret = (void *) (no822tztext ? VOIDT : NIL);
+    break;
   }
   return ret;
 }
@@ -99,9 +105,14 @@ static void do_date (char *date,char *prefix,char *fmt,int suffix)
   sprintf (date,fmt,t->tm_mday,months[t->tm_mon],t->tm_year+1900,
 	   t->tm_hour,t->tm_min,t->tm_sec,zone/60,abs (zone) % 60);
   if (suffix) {			/* append timezone suffix if desired */
+    char *tz;
     tzset ();			/* get timezone from TZ environment stuff */
-    sprintf (date + strlen (date)," (%.50s)",
-	     tzname[daylight ? (((struct tm *) t)->tm_isdst > 0) : 0]);
+    tz = tzname[daylight ? (((struct tm *) t)->tm_isdst > 0) : 0];
+    if (tz && tz[0]) {
+      char *s;
+      for (s = tz; *s; s++) if (*s & 0x80) return;
+      sprintf (date + strlen (date)," (%.50s)",tz);
+    }
   }
 }
 
@@ -112,7 +123,8 @@ static void do_date (char *date,char *prefix,char *fmt,int suffix)
 
 void rfc822_date (char *date)
 {
-  do_date (date,"%s, ","%d %s %d %02d:%02d:%02d %+03d%02d",T);
+  do_date (date,"%s, ","%d %s %d %02d:%02d:%02d %+03d%02d",
+	   no822tztext ? NIL : T);
 }
 
 

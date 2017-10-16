@@ -10,10 +10,10 @@
  *		Internet: MRC@CAC.Washington.EDU
  *
  * Date:	22 May 1990
- * Last Edited:	9 October 2001
+ * Last Edited:	7 December 2004
  * 
  * The IMAP toolkit provided in this Distribution is
- * Copyright 2001 University of Washington.
+ * Copyright 1988-2004 University of Washington.
  * The full text of our legal notices is contained in the file called
  * CPYRIGHT, included with this Distribution.
  */
@@ -24,6 +24,11 @@
  * The atime is the last read time of the file.
  * The mtime is the last flags update time of the file.
  * The ctime is the last write time of the file.
+ *
+ *				TEXT SIZE SEMANTICS
+ *
+ * Most of the text sizes are in internal (LF-only) form, except for the
+ * msg.text size.  Beware.
  */
 
 #include <stdio.h>
@@ -33,9 +38,67 @@ extern int errno;		/* just in case */
 #include "mail.h"
 #include "osdep.h"
 #include <sys/stat.h>
-#include "tenex.h"
 #include "misc.h"
 #include "dummy.h"
+
+/* TENEX I/O stream local data */
+	
+typedef struct tenex_local {
+  unsigned int shouldcheck: 1;	/* if ping should do a check instead */
+  unsigned int mustcheck: 1;	/* if ping must do a check instead */
+  int fd;			/* file descriptor for I/O */
+  off_t filesize;		/* file size parsed */
+  time_t filetime;		/* last file time */
+  time_t lastsnarf;		/* local snarf time */
+  unsigned char *buf;		/* temporary buffer */
+  unsigned long buflen;		/* current size of temporary buffer */
+  unsigned long uid;		/* current text uid */
+  SIZEDTEXT text;		/* current text */
+} TENEXLOCAL;
+
+
+/* Convenient access to local data */
+
+#define LOCAL ((TENEXLOCAL *) stream->local)
+
+
+/* Function prototypes */
+
+DRIVER *tenex_valid (char *name);
+int tenex_isvalid (char *name,char *tmp);
+void *tenex_parameters (long function,void *value);
+void tenex_scan (MAILSTREAM *stream,char *ref,char *pat,char *contents);
+void tenex_list (MAILSTREAM *stream,char *ref,char *pat);
+void tenex_lsub (MAILSTREAM *stream,char *ref,char *pat);
+long tenex_create (MAILSTREAM *stream,char *mailbox);
+long tenex_delete (MAILSTREAM *stream,char *mailbox);
+long tenex_rename (MAILSTREAM *stream,char *old,char *newname);
+long tenex_status (MAILSTREAM *stream,char *mbx,long flags);
+MAILSTREAM *tenex_open (MAILSTREAM *stream);
+void tenex_close (MAILSTREAM *stream,long options);
+void tenex_fast (MAILSTREAM *stream,char *sequence,long flags);
+void tenex_flags (MAILSTREAM *stream,char *sequence,long flags);
+char *tenex_header (MAILSTREAM *stream,unsigned long msgno,
+		    unsigned long *length,long flags);
+long tenex_text (MAILSTREAM *stream,unsigned long msgno,STRING *bs,long flags);
+void tenex_flag (MAILSTREAM *stream,char *sequence,char *flag,long flags);
+void tenex_flagmsg (MAILSTREAM *stream,MESSAGECACHE *elt);
+long tenex_ping (MAILSTREAM *stream);
+void tenex_check (MAILSTREAM *stream);
+void tenex_snarf (MAILSTREAM *stream);
+void tenex_expunge (MAILSTREAM *stream);
+long tenex_copy (MAILSTREAM *stream,char *sequence,char *mailbox,long options);
+long tenex_append (MAILSTREAM *stream,char *mailbox,append_t af,void *data);
+
+unsigned long tenex_size (MAILSTREAM *stream,unsigned long m);
+char *tenex_file (char *dst,char *name);
+long tenex_parse (MAILSTREAM *stream);
+MESSAGECACHE *tenex_elt (MAILSTREAM *stream,unsigned long msgno);
+void tenex_read_flags (MAILSTREAM *stream,MESSAGECACHE *elt);
+void tenex_update_status (MAILSTREAM *stream,unsigned long msgno,
+			  long syncflag);
+unsigned long tenex_hdrpos (MAILSTREAM *stream,unsigned long msgno,
+			    unsigned long *size);
 
 /* Tenex mail routines */
 
@@ -124,21 +187,20 @@ int tenex_isvalid (char *name,char *tmp)
 				/* must begin with dd-mmm-yy" */
 	ret = (((tmp[2] == '-' && tmp[6] == '-') ||
 		(tmp[1] == '-' && tmp[5] == '-')) &&
-	       (s = strchr (tmp+20,',')) && strchr (s+2,';')) ? T : NIL;
+	       (s = strchr (tmp+18,',')) && strchr (s+2,';')) ? T : NIL;
       }
       else errno = -1;		/* bogus format */
       close (fd);		/* close the file */
-      tp[0] = sbuf.st_atime;	/* preserve atime and mtime */
-      tp[1] = sbuf.st_mtime;
-      utime (file,tp);		/* set the times */
+				/* \Marked status? */
+      if (sbuf.st_ctime > sbuf.st_atime) {
+	tp[0] = sbuf.st_atime;	/* preserve atime and mtime */
+	tp[1] = sbuf.st_mtime;
+	utime (file,tp);	/* set the times */
+      }
     }
   }
 				/* in case INBOX but not tenex format */
-  else if ((errno == ENOENT) && ((name[0] == 'I') || (name[0] == 'i')) &&
-	   ((name[1] == 'N') || (name[1] == 'n')) &&
-	   ((name[2] == 'B') || (name[2] == 'b')) &&
-	   ((name[3] == 'O') || (name[3] == 'o')) &&
-	   ((name[4] == 'X') || (name[4] == 'x')) && !name[5]) errno = -1;
+  else if ((errno == ENOENT) && !compare_cstring (name,"INBOX")) errno = -1;
   return ret;			/* return what we should */
 }
 
@@ -150,7 +212,13 @@ int tenex_isvalid (char *name,char *tmp)
 
 void *tenex_parameters (long function,void *value)
 {
-  return NIL;
+  void *ret = NIL;
+  switch ((int) function) {
+  case GET_INBOXPATH:
+    if (value) ret = tenex_file ((char *) value,"INBOX");
+    break;
+  }
+  return ret;
 }
 
 
@@ -213,10 +281,18 @@ long tenex_rename (MAILSTREAM *stream,char *old,char *newname)
 {
   long ret = T;
   char c,*s,tmp[MAILTMPLEN],file[MAILTMPLEN],lock[MAILTMPLEN];
-  int ld;
-  int fd = open (tenex_file (file,old),O_RDWR,NIL);
+  int fd,ld;
   struct stat sbuf;
-  if (fd < 0) {			/* open mailbox */
+  if (!dummy_file (file,old) ||
+      (newname && !((s = mailboxfile (tmp,newname)) && *s))) {
+    sprintf (tmp,newname ?
+	     "Can't rename mailbox %.80s to %.80s: invalid name" :
+	     "Can't delete mailbox %.80s: invalid name",
+	     old,newname);
+    mm_log (tmp,ERROR);
+    return NIL;
+  }
+  else if ((fd = open (file,O_RDWR,NIL)) < 0) {
     sprintf (tmp,"Can't open mailbox %.80s: %s",old,strerror (errno));
     MM_LOG (tmp,ERROR);
     return NIL;
@@ -236,13 +312,7 @@ long tenex_rename (MAILSTREAM *stream,char *old,char *newname)
   }
 
   if (newname) {		/* want rename? */
-    if (!((s = tenex_file (tmp,newname)) && *s)) {
-      sprintf (tmp,"Can't rename mailbox %.80s to %.80s: invalid name",
-	       old,newname);
-      MM_LOG (tmp,ERROR);
-      ret = NIL;		/* set failure */
-    }
-    if (s = strrchr (s,'/')) {	/* found superior to destination name? */
+    if (s = strrchr (tmp,'/')) {/* found superior to destination name? */
       c = *++s;			/* remember first character of inferior */
       *s = '\0';		/* tie off to get just superior */
 				/* name doesn't exist, create it */
@@ -327,9 +397,14 @@ MAILSTREAM *tenex_open (MAILSTREAM *stream)
   if (!stream) return user_flags (&tenexproto);
   if (stream->local) fatal ("tenex recycle stream");
   user_flags (stream);		/* set up user flags */
+				/* canonicalize the mailbox name */
+  if (!tenex_file (tmp,stream->mailbox)) {
+    sprintf (tmp,"Can't open - invalid name: %.80s",stream->mailbox);
+    mm_log (tmp,ERROR);
+  }
   if (stream->rdonly ||
-      (fd = open (tenex_file (tmp,stream->mailbox),O_RDWR,NIL)) < 0) {
-    if ((fd = open (tenex_file (tmp,stream->mailbox),O_RDONLY,NIL)) < 0) {
+      (fd = open (tmp,O_RDWR,NIL)) < 0) {
+    if ((fd = open (tmp,O_RDONLY,NIL)) < 0) {
       sprintf (tmp,"Can't open mailbox: %s",strerror (errno));
       MM_LOG (tmp,ERROR);
       return NIL;
@@ -342,6 +417,8 @@ MAILSTREAM *tenex_open (MAILSTREAM *stream)
   stream->local = fs_get (sizeof (TENEXLOCAL));
   LOCAL->buf = (char *) fs_get (MAXMESSAGESIZE + 1);
   LOCAL->buflen = MAXMESSAGESIZE;
+  LOCAL->text.data = (unsigned char *)
+    fs_get ((LOCAL->text.size = MAXMESSAGESIZE) + 1);
 
 				/* note if an INBOX or not */
   stream->inbox = !compare_cstring (stream->mailbox,"INBOX");
@@ -392,6 +469,7 @@ void tenex_close (MAILSTREAM *stream,long options)
     close (LOCAL->fd);		/* close the local file */
 				/* free local text buffer */
     if (LOCAL->buf) fs_give ((void **) &LOCAL->buf);
+    if (LOCAL->text.data) fs_give ((void **) &LOCAL->text.data);
 				/* nuke the local data */
     fs_give ((void **) &stream->local);
     stream->dtb = NIL;		/* log out the DTB */
@@ -514,28 +592,40 @@ long tenex_text (MAILSTREAM *stream,unsigned long msgno,STRING *bs,long flags)
     tenex_update_status (stream,msgno,T);
     MM_FLAGS (stream,msgno);
   }
-				/* find header position */
-  i = tenex_hdrpos (stream,msgno,&j);
-  lseek (LOCAL->fd,i + j,L_SET);
-				/* go to text position */
   if (flags & FT_INTERNAL) {	/* if internal representation wanted */
+				/* find header position */
+    i = tenex_hdrpos (stream,msgno,&j);
     if (i > LOCAL->buflen) {	/* resize if not enough space */
       fs_give ((void **) &LOCAL->buf);
       LOCAL->buf = (char *) fs_get (LOCAL->buflen = i + 1);
     }
+				/* go to text position */
+    lseek (LOCAL->fd,i + j,L_SET);
 				/* slurp the data */
     read (LOCAL->fd,LOCAL->buf,i);
+				/* set up stringstruct for internal */
+    INIT (bs,mail_string,LOCAL->buf,i);
   }
-  else {			/* get readin buffer */
-    s = (char *) fs_get ((i = tenex_size (stream,msgno) - j) + 1);
-    s[i] = '\0';		/* tie off string */
-    read (LOCAL->fd,s,i);	/* slurp the data */
+  else {			/* normal form, previous text cached? */
+    if (elt->private.uid == LOCAL->uid)
+      i = elt->private.msg.text.text.size;
+    else {			/* not cached, cache it now */
+      LOCAL->uid = elt->private.uid;
+				/* find header position */
+      i = tenex_hdrpos (stream,msgno,&j);
+				/* go to text position */
+      lseek (LOCAL->fd,i + j,L_SET);
+      s = (char *) fs_get ((i = tenex_size (stream,msgno) - j) + 1);
+      s[i] = '\0';		/* tie off string */
+      read (LOCAL->fd,s,i);	/* slurp the data */
 				/* make CRLF copy of string */
-    i = strcrlfcpy (&LOCAL->buf,&LOCAL->buflen,s,i);
-    fs_give ((void **) &s);	/* free readin buffer */
-  }
+      i = elt->private.msg.text.text.size =
+	strcrlfcpy (&LOCAL->text.data,&LOCAL->text.size,s,i);
+      fs_give ((void **) &s);	/* free readin buffer */
+    }
 				/* set up stringstruct */
-  INIT (bs,mail_string,LOCAL->buf,i);
+    INIT (bs,mail_string,LOCAL->text.data,i);
+  }
   return T;			/* success */
 }
 
@@ -596,6 +686,7 @@ long tenex_ping (MAILSTREAM *stream)
 	(LOCAL->filetime < sbuf.st_mtime)) LOCAL->shouldcheck = T;
 				/* check for changed message status */
     if (LOCAL->mustcheck || LOCAL->shouldcheck) {
+      LOCAL->filetime = sbuf.st_mtime;
       if (LOCAL->shouldcheck)	/* babble when we do this unilaterally */
 	MM_NOTIFY (stream,"[CHECK] Checking for flag updates",NIL);
       while (i <= stream->nmsgs) tenex_elt (stream,i++);
@@ -651,15 +742,14 @@ void tenex_snarf (MAILSTREAM *stream)
   MAILSTREAM *sysibx = NIL;
   int ld;
 				/* give up if can't get exclusive permission */
-  if ((time (0) < (LOCAL->lastsnarf + 30)) ||
-      (!strcmp (sysinbox (),stream->mailbox)) ||
-      ((ld = lockfd (LOCAL->fd,lock,LOCK_EX)) < 0)) return;
-  MM_CRITICAL (stream);		/* go critical */
-				/* see if anything there */
-  if (!stat (sysinbox (),&sbuf) && sbuf.st_size) {
-    fstat (LOCAL->fd,&sbuf);	/* yes, get current file size */
-				/* sizes match and can get sysibx mailbox? */
-    if ((sbuf.st_size == LOCAL->filesize) && 
+  if ((time (0) >= (LOCAL->lastsnarf +
+		    (long) mail_parameters (NIL,GET_SNARFINTERVAL,NIL))) &&
+      strcmp (sysinbox (),stream->mailbox) &&
+      ((ld = lockfd (LOCAL->fd,lock,LOCK_EX)) >= 0)) {
+    MM_CRITICAL (stream);	/* go critical */
+				/* sizes match and anything in sysinbox? */
+    if (!stat (sysinbox (),&sbuf) && sbuf.st_size &&
+	!fstat (LOCAL->fd,&sbuf) && (sbuf.st_size == LOCAL->filesize) && 
 	(sysibx = mail_open (sysibx,sysinbox (),OP_SILENT)) &&
 	(!sysibx->rdonly) && (r = sysibx->nmsgs)) {
 				/* yes, go to end of file in our mailbox */
@@ -669,6 +759,7 @@ void tenex_snarf (MAILSTREAM *stream)
 				/* snarf message from system INBOX */
 	hdr = cpystr (mail_fetchheader_full(sysibx,i,NIL,&hdrlen,FT_INTERNAL));
 	txt = mail_fetchtext_full (sysibx,i,&txtlen,FT_INTERNAL|FT_PEEK);
+				/* if have a message */
 	if (j = hdrlen + txtlen) {
 				/* calculate header line */
 	  mail_date (LOCAL->buf,elt = mail_elt (sysibx,i));
@@ -684,6 +775,7 @@ void tenex_snarf (MAILSTREAM *stream)
 	}
 	fs_give ((void **) &hdr);
       }
+
 				/* make sure all the updates take */
       if (fsync (LOCAL->fd)) r = 0;
       if (r) {			/* delete all the messages we copied */
@@ -701,10 +793,10 @@ void tenex_snarf (MAILSTREAM *stream)
       LOCAL->filetime = sbuf.st_mtime;
     }
     if (sysibx) mail_close (sysibx);
+    MM_NOCRITICAL (stream);	/* release critical */
+    unlockfd (ld,lock);		/* release exclusive parse/append permission */
+    LOCAL->lastsnarf = time (0);/* note time of last snarf */
   }
-  MM_NOCRITICAL (stream);	/* release critical */
-  unlockfd (ld,lock);		/* release exclusive parse/append permission */
-  LOCAL->lastsnarf = time (0);	/* note time of last snarf */
 }
 
 /* Tenex mail expunge mailbox
@@ -748,6 +840,8 @@ void tenex_expunge (MAILSTREAM *stream)
     MM_LOG ("Unable to lock expunge mailbox",ERROR);
     return;
   }
+				/* make sure see any newly-arrived messages */
+  if (!tenex_parse (stream)) return;
 				/* get exclusive access */
   if (flock (LOCAL->fd,LOCK_EX|LOCK_NB)) {
     (*bn) (BLOCK_FILELOCK,NIL);
@@ -872,6 +966,7 @@ long tenex_copy (MAILSTREAM *stream,char *sequence,char *mailbox,long options)
 				/* get exclusive parse/append permission */
   if ((ld = lockfd (fd,lock,LOCK_EX)) < 0) {
     MM_LOG ("Unable to lock copy mailbox",ERROR);
+    MM_NOCRITICAL (stream);
     return NIL;
   }
   fstat (fd,&sbuf);		/* get current file size */
@@ -895,8 +990,10 @@ long tenex_copy (MAILSTREAM *stream,char *sequence,char *mailbox,long options)
     MM_LOG (LOCAL->buf,ERROR);
     ftruncate (fd,sbuf.st_size);
   }
-  tp[0] = sbuf.st_atime;	/* preserve atime and mtime */
-  tp[1] = sbuf.st_mtime;
+  if (ret) tp[0] = time (0) - 1;/* set atime to now-1 if successful copy */
+				/* else preserve \Marked status */
+  else tp[0] = (sbuf.st_ctime > sbuf.st_atime) ? sbuf.st_atime : time(0);
+  tp[1] = sbuf.st_mtime;	/* preserve mtime */
   utime (file,tp);		/* set the times */
   close (fd);			/* close the file */
   unlockfd (ld,lock);		/* release exclusive parse/append permission */
@@ -945,12 +1042,7 @@ long tenex_append (MAILSTREAM *stream,char *mailbox,append_t af,void *data)
 				/* make sure valid mailbox */
   if (!tenex_isvalid (mailbox,tmp)) switch (errno) {
   case ENOENT:			/* no such file? */
-    if (((mailbox[0] == 'I') || (mailbox[0] == 'i')) &&
-	((mailbox[1] == 'N') || (mailbox[1] == 'n')) &&
-	((mailbox[2] == 'B') || (mailbox[2] == 'b')) &&
-	((mailbox[3] == 'O') || (mailbox[3] == 'o')) &&
-	((mailbox[4] == 'X') || (mailbox[4] == 'x')) && !mailbox[5])
-      dummy_create (NIL,"mail.txt");
+    if (!compare_cstring (mailbox,"INBOX")) dummy_create (NIL,"mail.txt");
     else {
       MM_NOTIFY (stream,"[TRYCREATE] Must create mailbox before append",NIL);
       return NIL;
@@ -1029,8 +1121,10 @@ long tenex_append (MAILSTREAM *stream,char *mailbox,append_t af,void *data)
     MM_LOG (tmp,ERROR);
     ret = NIL;
   }
-  tp[0] = sbuf.st_atime;	/* preserve atime and mtime */
-  tp[1] = sbuf.st_mtime;
+  if (ret) tp[0] = time (0) - 1;/* set atime to now-1 if successful copy */
+				/* else preserve \Marked status */
+  else tp[0] = (sbuf.st_ctime > sbuf.st_atime) ? sbuf.st_atime : time(0);
+  tp[1] = sbuf.st_mtime;	/* preserve mtime */
   utime (file,tp);		/* set the times */
   fclose (df);			/* close the file */
   unlockfd (ld,lock);		/* release exclusive parse/append permission */
@@ -1081,7 +1175,7 @@ long tenex_parse (MAILSTREAM *stream)
 {
   struct stat sbuf;
   MESSAGECACHE *elt = NIL;
-  char c,*s,*t,*x;
+  unsigned char c,*s,*t,*x;
   char tmp[MAILTMPLEN];
   unsigned long i,j;
   long curpos = LOCAL->filesize;
@@ -1112,7 +1206,7 @@ long tenex_parse (MAILSTREAM *stream)
     LOCAL->buf[i] = '\0';	/* tie off buffer just in case */
     if (!(s = strchr (LOCAL->buf,'\012'))) {
       sprintf (tmp,"Unable to find newline at %lu in %lu bytes, text: %s",
-	       (unsigned long) curpos,i,LOCAL->buf);
+	       (unsigned long) curpos,i,(char *) LOCAL->buf);
       MM_LOG (tmp,ERROR);
       tenex_close (stream,NIL);
       return NIL;
@@ -1121,7 +1215,7 @@ long tenex_parse (MAILSTREAM *stream)
     i = (s + 1) - LOCAL->buf;	/* note start of text offset */
     if (!((s = strchr (LOCAL->buf,',')) && (t = strchr (s+1,';')))) {
       sprintf (tmp,"Unable to parse internal header at %lu: %s",
-	       (unsigned long) curpos,LOCAL->buf);
+	       (unsigned long) curpos,(char *) LOCAL->buf);
       MM_LOG (tmp,ERROR);
       tenex_close (stream,NIL);
       return NIL;
@@ -1142,7 +1236,7 @@ long tenex_parse (MAILSTREAM *stream)
     elt->private.msg.header.text.size = 0;
     x = s;			/* parse the header components */
     if (mail_parse_date (elt,LOCAL->buf) &&
-	(elt->private.msg.full.text.size = strtoul (s,&s,10)) &&
+	(elt->private.msg.full.text.size = strtoul (s,(char **) &s,10)) &&
 	(!(s && *s)) && isdigit (t[0]) && isdigit (t[1]) && isdigit (t[2]) &&
 	isdigit (t[3]) && isdigit (t[4]) && isdigit (t[5]) &&
 	isdigit (t[6]) && isdigit (t[7]) && isdigit (t[8]) &&
@@ -1150,7 +1244,7 @@ long tenex_parse (MAILSTREAM *stream)
       elt->private.special.text.size = i;
     else {			/* oops */
       sprintf (tmp,"Unable to parse internal header elements at %ld: %s,%s;%s",
-	       curpos,LOCAL->buf,x,t);
+	       curpos,(char *) LOCAL->buf,(char *) x,(char *) t);
       MM_LOG (tmp,ERROR);
       tenex_close (stream,NIL);
       return NIL;
@@ -1189,7 +1283,7 @@ long tenex_parse (MAILSTREAM *stream)
   LOCAL->filesize = sbuf.st_size;
   fstat (LOCAL->fd,&sbuf);	/* get status again to ensure time is right */
   LOCAL->filetime = sbuf.st_mtime;
-  if (added) {			/* make sure atime updated */
+  if (added && !stream->rdonly){/* make sure atime updated */
     time_t tp[2];
     tp[0] = time (0);
     tp[1] = LOCAL->filetime;

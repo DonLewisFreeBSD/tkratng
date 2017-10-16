@@ -10,10 +10,10 @@
  *		Internet: MRC@CAC.Washington.EDU
  *
  * Date:	22 November 1989
- * Last Edited:	13 November 2001
+ * Last Edited:	6 December 2004
  * 
  * The IMAP toolkit provided in this Distribution is
- * Copyright 2001 University of Washington.
+ * Copyright 1988-2004 University of Washington.
  * The full text of our legal notices is contained in the file called
  * CPYRIGHT, included with this Distribution.
  */
@@ -26,6 +26,9 @@
 				 * other:  initial text buffer size */
 #define MAXUSERFLAG 64		/* maximum length of a user flag */
 #define MAXAUTHENTICATORS 8	/* maximum number of SASL authenticators */
+				/* maximum number of messages */
+#define MAXMESSAGES (unsigned long) 100000000
+#define MAXLOGINTRIALS 3	/* maximum number of client login attempts */
 
 
 /* These can't be changed without changing code */
@@ -59,6 +62,8 @@
 #define DISABLE_DRIVER (long) 2
 #define ENABLE_AUTHENTICATOR (long) 3
 #define DISABLE_AUTHENTICATOR (long) 4
+#define ENABLE_DEBUG (long) 5
+#define DISABLE_DEBUG (long) 6
 	/* 1xx: c-client globals */
 #define GET_DRIVERS (long) 101
 #define SET_DRIVERS (long) 102
@@ -110,6 +115,10 @@
 #define SET_DEBUGSENSITIVE (long) 148
 #define GET_TCPDEBUG (long) 149
 #define SET_TCPDEBUG (long) 150
+#define GET_FREESTREAMSPAREP (long) 151
+#define SET_FREESTREAMSPAREP (long) 152
+#define GET_FREEBODYSPAREP (long) 153
+#define SET_FREEBODYSPAREP (long) 154
 
 	/* 2xx: environment */
 #define GET_USERNAME (long) 201
@@ -128,10 +137,19 @@
 #define SET_CHROOTSERVER (long) 214
 #define GET_ADVERTISETHEWORLD (long) 215
 #define SET_ADVERTISETHEWORLD (long) 216
-#define GET_DISABLEAUTOMATICSHAREDNAMESPACES (long) 217
-#define SET_DISABLEAUTOMATICSHAREDNAMESPACES (long) 218
+#define GET_DISABLEAUTOSHAREDNS (long) 217
+#define SET_DISABLEAUTOSHAREDNS (long) 218
 #define GET_MAILSUBDIR 219
 #define SET_MAILSUBDIR 220
+#define GET_DISABLE822TZTEXT 221
+#define SET_DISABLE822TZTEXT 222
+#define GET_LIMITEDADVERTISE (long) 223
+#define SET_LIMITEDADVERTISE (long) 224
+#define GET_LOGOUTHOOK (long) 225
+#define SET_LOGOUTHOOK (long) 226
+#define GET_LOGOUTDATA (long) 227
+#define SET_LOGOUTDATA (long) 228
+
 	/* 3xx: TCP/IP */
 #define GET_OPENTIMEOUT (long) 300
 #define SET_OPENTIMEOUT (long) 301
@@ -161,6 +179,10 @@
 #define SET_SSLCERTIFICATEQUERY (long) 325
 #define GET_SSLFAILURE (long) 326
 #define SET_SSLFAILURE (long) 327
+#define GET_NEWSRCCANONHOST (long) 328
+#define SET_NEWSRCCANONHOST (long) 329
+#define GET_KINIT (long) 330
+#define SET_KINIT (long) 331
 
 	/* 4xx: network drivers */
 #define GET_MAXLOGINTRIALS (long) 400
@@ -207,6 +229,16 @@
 #define SET_QUOTAROOT (long) 441
 #define GET_IMAPTRYSSL (long) 442
 #define SET_IMAPTRYSSL (long) 443
+#define GET_FETCHLOOKAHEAD (long) 444
+#define SET_FETCHLOOKAHEAD (long) 445
+#define GET_NNTPRANGE (long) 446
+#define SET_NNTPRANGE (long) 447
+#define GET_NNTPHIDEPATH (long) 448
+#define SET_NNTPHIDEPATH (long) 449
+#define GET_SENDCOMMAND (long) 450
+#define SET_SENDCOMMAND (long) 451
+#define GET_IDLETIMEOUT (long) 452
+#define SET_IDLETIMEOUT (long) 452
 
 	/* 5xx: local file drivers */
 #define GET_MBXPROTECTION (long) 500
@@ -271,22 +303,38 @@
 #define SET_SASLUSESPTRNAME (long) 559
 #define GET_NETFSSTATBUG (long) 560
 #define SET_NETFSSTATBUG (long) 561
+#define GET_SNARFMAILBOXNAME (long) 562
+#define SET_SNARFMAILBOXNAME (long) 563
+#define GET_SNARFINTERVAL (long) 564
+#define SET_SNARFINTERVAL (long) 565
+#define GET_SNARFPRESERVE (long) 566
+#define SET_SNARFPRESERVE (long) 567
+#define GET_INBOXPATH (long) 568
+#define SET_INBOXPATH (long) 569
 
 /* Driver flags */
 
-#define DR_DISABLE (long) 1	/* driver is disabled */
-#define DR_LOCAL (long) 2	/* local file driver */
-#define DR_MAIL (long) 4	/* supports mail */
-#define DR_NEWS (long) 8	/* supports news */
-#define DR_READONLY (long) 16	/* driver only allows readonly access */
-#define DR_NOFAST (long) 32	/* "fast" data is slow (whole msg fetch) */
-#define DR_NAMESPACE (long) 64	/* driver has a special namespace */
-#define DR_LOWMEM (long) 128	/* low amounts of memory available */
-#define DR_LOCKING (long) 256	/* driver does locking */
-#define DR_CRLF (long) 512	/* driver internal form uses CRLF newlines */
-#define DR_NOSTICKY (long) 1024	/* driver does not support sticky UIDs */
-#define DR_RECYCLE (long) 2048	/* driver does stream recycling */
-#define DR_XPOINT (long) 4096	/* needs to be checkpointed when recycling */
+#define DR_DISABLE (long) 0x1	/* driver is disabled */
+#define DR_LOCAL (long) 0x2	/* local file driver */
+#define DR_MAIL (long) 0x4	/* supports mail */
+#define DR_NEWS (long) 0x8	/* supports news */
+#define DR_READONLY (long) 0x10	/* driver only allows readonly access */
+#define DR_NOFAST (long) 0x20	/* "fast" data is slow (whole msg fetch) */
+#define DR_NAMESPACE (long) 0x40/* driver has a special namespace */
+#define DR_LOWMEM (long) 0x80	/* low amounts of memory available */
+#define DR_LOCKING (long) 0x100	/* driver does locking */
+#define DR_CRLF (long) 0x200	/* driver internal form uses CRLF newlines */
+#define DR_NOSTICKY (long) 0x400/* driver does not support sticky UIDs */
+#define DR_RECYCLE (long) 0x800	/* driver does stream recycling */
+#define DR_XPOINT (long) 0x1000	/* needs to be checkpointed when recycling */
+				/* driver has no real internal date */
+#define DR_NOINTDATE (long) 0x2000
+				/* driver does not announce new mail */
+#define DR_NONEWMAIL (long) 0x4000
+				/* driver does not announce new mail when RO */
+#define DR_NONEWMAILRONLY (long) 0x8000
+				/* driver can be halfopen */
+#define DR_HALFOPEN (long) 0x10000
 
 
 /* Cache management function codes */
@@ -302,19 +350,24 @@
 #define CH_EXPUNGE (long) 45	/* delete elt pointer from list */
 
 
-/* Open options */
+/* Mailbox open options
+ * For compatibility with the past, OP_DEBUG must always be 1.
+ */
 
-#define OP_DEBUG (long) 1	/* debug protocol negotiations */
-#define OP_READONLY (long) 2	/* read-only open */
-#define OP_ANONYMOUS (long) 4	/* anonymous open of newsgroup */
-#define OP_SHORTCACHE (long) 8	/* short (elt-only) caching */
-#define OP_SILENT (long) 16	/* don't pass up events (internal use) */
-#define OP_PROTOTYPE (long) 32	/* return driver prototype */
-#define OP_HALFOPEN (long) 64	/* half-open (IMAP connect but no select) */
-#define OP_EXPUNGE (long) 128	/* silently expunge recycle stream */
-#define OP_SECURE (long) 256	/* don't do non-secure authentication */
-#define OP_TRYSSL (long) 512	/* try SSL first */
-#define OP_MULNEWSRC (long) 1024/* use multiple newsrc files */
+#define OP_DEBUG (long) 0x1	/* debug protocol negotiations */
+#define OP_READONLY (long) 0x2	/* read-only open */
+#define OP_ANONYMOUS (long) 0x4	/* anonymous open of newsgroup */
+#define OP_SHORTCACHE (long) 0x8/* short (elt-only) caching */
+#define OP_SILENT (long) 0x10	/* don't pass up events (internal use) */
+#define OP_PROTOTYPE (long) 0x20/* return driver prototype */
+#define OP_HALFOPEN (long) 0x40	/* half-open (IMAP connect but no select) */
+#define OP_EXPUNGE (long) 0x80	/* silently expunge recycle stream */
+#define OP_SECURE (long) 0x100	/* don't do non-secure authentication */
+#define OP_TRYSSL (long) 0x200	/* try SSL first */
+				/* use multiple newsrc files */
+#define OP_MULNEWSRC (long) 0x400
+				/* reserved for application use */
+#define OP_RESERVED (unsigned long) 0xff000000
 
 
 /* Net open options */
@@ -337,69 +390,79 @@
 
 /* Fetch options */
 
-#define FT_UID (long) 1		/* argument is a UID */
-#define FT_PEEK (long) 2	/* peek at data */
-#define FT_NOT (long) 4		/* NOT flag for header lines fetch */
-#define FT_INTERNAL (long) 8	/* text can be internal strings */
-#define FT_PREFETCHTEXT (long) 16 /* IMAP prefetch text when fetching header */
-#define FT_NOHDRS (long) 32	/* suppress fetching extra headers (note that
+#define FT_UID (long) 0x1	/* argument is a UID */
+#define FT_PEEK (long) 0x2	/* peek at data */
+#define FT_NOT (long) 0x4	/* NOT flag for header lines fetch */
+#define FT_INTERNAL (long) 0x8	/* text can be internal strings */
+				/* IMAP prefetch text when fetching header */
+#define FT_PREFETCHTEXT (long) 0x20
+#define FT_NOHDRS (long) 0x40	/* suppress fetching extra headers (note that
 				   this breaks news handling) */
-#define FT_NEEDENV (long) 64	/* (internal use) include envelope */
-#define FT_NEEDBODY (long) 128	/* (internal use) include body structure */
+#define FT_NEEDENV (long) 0x80	/* (internal use) include envelope */
+#define FT_NEEDBODY (long) 0x100/* (internal use) include body structure */
+				/* no fetch lookahead */
+#define FT_NOLOOKAHEAD (long) 0x200
+				/* lookahead in header searching */
+#define FT_SEARCHLOOKAHEAD (long) 0x400
 
 
 /* Flagging options */
 
-#define ST_UID (long) 1		/* argument is a UID sequence */
-#define ST_SILENT (long) 2	/* don't return results */
-#define ST_SET (long) 4		/* set vs. clear */
+#define ST_UID (long) 0x1	/* argument is a UID sequence */
+#define ST_SILENT (long) 0x2	/* don't return results */
+#define ST_SET (long) 0x4	/* set vs. clear */
 
 
 /* Copy options */
 
-#define CP_UID (long) 1		/* argument is a UID sequence */
-#define CP_MOVE (long) 2	/* delete from source after copying */
+#define CP_UID (long) 0x1	/* argument is a UID sequence */
+#define CP_MOVE (long) 0x2	/* delete from source after copying */
 
 
-/* Search/sort options */
+/* Search/sort/thread options */
 
-#define SE_UID (long) 1		/* return UID */
-#define SE_FREE (long) 2	/* free search program after finished */
-#define SE_NOPREFETCH (long) 4	/* no search prefetching */
-#define SO_FREE (long) 8	/* free sort program after finished */
-#define SO_NOSERVER (long) 16	/* don't do server-based sort */
-#define SE_RETAIN (long) 32	/* retain previous search results */
-#define SO_OVERVIEW (long) 64	/* use overviews in searching (NNTP only) */
-#define SE_NEEDBODY (long) 128	/* include body structure in prefetch */
-#define SE_NOHDRS (long) 256	/* suppress prefetching extra headers (note
+#define SE_UID (long) 0x1	/* return UID */
+#define SE_FREE (long) 0x2	/* free search program after finished */
+#define SE_NOPREFETCH (long) 0x4/* no search prefetching */
+#define SO_FREE (long) 0x8	/* free sort program after finished */
+#define SE_NOSERVER (long) 0x10	/* don't do server-based search/sort/thread */
+#define SE_RETAIN (long) 0x20	/* retain previous search results */
+#define SO_OVERVIEW (long) 0x40	/* use overviews in searching (NNTP only) */
+#define SE_NEEDBODY (long) 0x80	/* include body structure in prefetch */
+#define SE_NOHDRS (long) 0x100	/* suppress prefetching extra headers (note
 				   that this breaks news handling) */
+#define SE_NOLOCAL (long) 0x200	/* no local retry (IMAP only) */
+
+#define SO_NOSERVER SE_NOSERVER	/* compatibility name */
+#define SE_SILLYOK (long) 0x400	/* allow silly searches */
 
 
 /* Status options */
 
-#define SA_MESSAGES (long) 1	/* number of messages */
-#define SA_RECENT (long) 2	/* number of recent messages */
-#define SA_UNSEEN (long) 4	/* number of unseen messages */
-#define SA_UIDNEXT (long) 8	/* next UID to be assigned */
-#define SA_UIDVALIDITY (long) 16/* UID validity value */
+#define SA_MESSAGES (long) 0x1	/* number of messages */
+#define SA_RECENT (long) 0x2	/* number of recent messages */
+#define SA_UNSEEN (long) 0x4	/* number of unseen messages */
+#define SA_UIDNEXT (long) 0x8	/* next UID to be assigned */
+				/* UID validity value */
+#define SA_UIDVALIDITY (long) 0x10
 
 
 /* Mailgets flags */
 
-#define MG_UID (long) 1		/* message number is a UID */
-#define MG_COPY (long) 2	/* must return copy of argument */
+#define MG_UID (long) 0x1	/* message number is a UID */
+#define MG_COPY (long) 0x2	/* must return copy of argument */
 
 /* SASL authenticator categories */
 
-#define AU_SECURE (long) 1	/* /secure allowed */
-#define AU_AUTHUSER (long) 2	/* /authuser=xxx allowed */
+#define AU_SECURE (long) 0x1	/* /secure allowed */
+#define AU_AUTHUSER (long) 0x2	/* /authuser=xxx allowed */
 
 
 /* Garbage collection flags */
 
-#define GC_ELT (long) 1		/* message cache elements */
-#define GC_ENV (long) 2		/* envelopes and bodies */
-#define GC_TEXTS (long) 4	/* cached texts */
+#define GC_ELT (long) 0x1	/* message cache elements */
+#define GC_ENV (long) 0x2	/* envelopes and bodies */
+#define GC_TEXTS (long) 0x4	/* cached texts */
 
 
 /* mm_log()/mm_notify() condition codes */
@@ -415,20 +478,35 @@
  * used by tenex, mtx, and mbx corresponds to these bits.
  */
 
-#define fSEEN 1
-#define fDELETED 2
-#define fFLAGGED 4
-#define fANSWERED 8
-#define fOLD 16
-#define fDRAFT 32
+#define fSEEN 0x1
+#define fDELETED 0x2
+#define fFLAGGED 0x4
+#define fANSWERED 0x8
+#define fOLD 0x10
+#define fDRAFT 0x20
 
 /* Bits for mm_list() and mm_lsub() */
 
-#define LATT_NOINFERIORS (long) 1
-#define LATT_NOSELECT (long) 2
-#define LATT_MARKED (long) 4
-#define LATT_UNMARKED (long) 8
-#define LATT_REFERRAL (long) 16
+/* Note that (LATT_NOINFERIORS LATT_HASCHILDREN LATT_HASNOCHILDREN) and
+ * (LATT_NOSELECT LATT_MARKED LATT_UNMARKED) each have eight possible states,
+ * but only four of these are valid.  The other four are silly states which
+ * while invalid can unfortunately be expressed in the IMAP protocol.
+ */
+
+				/* terminal node in hierarchy */
+#define LATT_NOINFERIORS (long) 0x1
+				/* name can not be selected */
+#define LATT_NOSELECT (long) 0x2
+				/* changed since last accessed */
+#define LATT_MARKED (long) 0x4
+				/* accessed since last changed */
+#define LATT_UNMARKED (long) 0x8
+				/* name has referral to remote mailbox */
+#define LATT_REFERRAL (long) 0x10
+				/* has selectable inferiors */
+#define LATT_HASCHILDREN (long) 0x20
+				/* has no selectable inferiors */
+#define LATT_HASNOCHILDREN (long) 0x40
 
 
 /* Sort functions */
@@ -457,6 +535,11 @@
 #define REFAPPEND (long) 10
 
 
+/* sendcommand_t codes */
+
+				/* expunge response deferred */
+#define SC_EXPUNGEDEFERRED (long) 1
+
 /* Block notification codes */
 
 #define BLOCK_NONE 0		/* not blocked */
@@ -468,7 +551,8 @@
 #define BLOCK_TCPWRITE 13	/* blocked on TCP write */
 #define BLOCK_TCPCLOSE 14	/* blocked on TCP close */
 #define BLOCK_FILELOCK 20	/* blocked on file locking */
-
+
+
 /* In-memory sized-text */
 
 #define SIZEDTEXT struct mail_sizedtext
@@ -513,6 +597,7 @@ typedef struct net_mailbox {
   unsigned int notlsflag : 1;	/* do not do TLS flag */
   unsigned int readonlyflag : 1;/* want readonly */
   unsigned int norsh : 1;	/* don't use rsh/ssh */
+  unsigned int loser : 1;	/* server is a loser */
 } NETMBX;
 
 /* Item in an address list */
@@ -525,6 +610,10 @@ ADDRESS {
   char *mailbox;		/* mailbox name */
   char *host;			/* domain name of mailbox's host */
   char *error;			/* error in address from SMTP module */
+  struct {
+    char *type;			/* address type (default "rfc822") */
+    char *addr;			/* address as xtext */
+  } orcpt;
   ADDRESS *next;		/* pointer to next address in list */
 };
 
@@ -532,11 +621,11 @@ ADDRESS {
 /* Message envelope */
 
 typedef struct mail_envelope {
-  unsigned int ngbogus : 1;	/* newsgroups may be bogus */
   unsigned int incomplete : 1;	/* envelope may be incomplete */
+  unsigned int imapenvonly : 1;	/* envelope only has IMAP envelope */
   char *remail;			/* remail header if any */
   ADDRESS *return_path;		/* error return address */
-  char *date;			/* message composition date string */
+  unsigned char *date;		/* message composition date string */
   ADDRESS *from;		/* originator address list */
   ADDRESS *sender;		/* sender address list */
   ADDRESS *reply_to;		/* reply address list */
@@ -615,6 +704,7 @@ BODY {
     PARAMETER *parameter;	/* disposition parameters */
   } disposition;
   STRINGLIST *language;		/* body language */
+  char *location;		/* body content URI */
   PARTTEXT mime;		/* MIME header */
   PARTTEXT contents;		/* body part contents */
   union {			/* different ways of accessing contents */
@@ -626,6 +716,7 @@ BODY {
     unsigned long bytes;	/* size of text in octets */
   } size;
   char *md5;			/* MD5 checksum */
+  void *sparep;			/* spare pointer reserved for main program */
 };
 
 
@@ -669,6 +760,7 @@ typedef struct message_cache {
     MESSAGE msg;		/* internal message pointers */
     unsigned int sequence : 1;	/* saved sequence bit */
     unsigned int dirty : 1;	/* driver internal use */
+    unsigned int filter : 1;	/* driver internal use */
     unsigned long data;		/* driver internal use */
   } private;
 			/* internal date */
@@ -696,6 +788,11 @@ typedef struct message_cache {
   unsigned int spare : 1;	/* first spare bit */
   unsigned int spare2 : 1;	/* second spare bit */
   unsigned int spare3 : 1;	/* third spare bit */
+  unsigned int spare4 : 1;	/* fourth spare bit */
+  unsigned int spare5 : 1;	/* fifth spare bit */
+  unsigned int spare6 : 1;	/* sixth spare bit */
+  unsigned int spare7 : 1;	/* seventh spare bit */
+  unsigned int spare8 : 1;	/* eighth spare bit */
   void *sparep;			/* spare pointer */
   unsigned long user_flags;	/* user-assignable flags */
 } MESSAGECACHE;
@@ -868,8 +965,10 @@ SORTCACHE {
   char *from;			/* from string */
   char *to;			/* to string */
   char *cc;			/* cc string */
-  char *subject;		/* subject string */
+  char *subject;		/* extracted subject string */
+  char *original_subject;	/* original subject string */
   char *message_id;		/* message-id string */
+  char *unique;			/* unique string, normally message-id */
   STRINGLIST *references;	/* references string */
 };
 
@@ -929,6 +1028,7 @@ typedef struct mail_stream {
   unsigned int perm_draft : 1;	/* permanent Draft flag */
   unsigned int kwd_create : 1;	/* can create new keywords */
   unsigned int uid_nosticky : 1;/* UIDs are not preserved */
+  unsigned int unhealthy : 1;	/* unhealthy protocol negotiations */
   unsigned long perm_user_flags;/* mask of permanent user flags */
   unsigned long gensym;		/* generated tag */
   unsigned long nmsgs;		/* # of associated msgs */
@@ -943,6 +1043,11 @@ typedef struct mail_stream {
   ENVELOPE *env;		/* scratch buffer for envelope */
   BODY *body;			/* scratch buffer for body */
   SIZEDTEXT text;		/* scratch buffer for text */
+  struct {
+    char *name;			/* mailbox name to snarf from */
+    unsigned long time;		/* last snarf time */
+    long options;		/* snarf open options */
+  } snarf;
   union {			/* internal use only */
     struct {			/* search temporaries */
       STRINGLIST *string;	/* string(s) to search */
@@ -950,16 +1055,26 @@ typedef struct mail_stream {
       char *text;		/* cache of fetched text */
     } search;
   } private;
+			/* reserved for use by main program */
+  void *sparep;			/* spare pointer */
+  unsigned int spare : 1;	/* first spare bit */
+  unsigned int spare2 : 1;	/* second spare bit */
+  unsigned int spare3 : 1;	/* third spare bit */
+  unsigned int spare4 : 1;	/* fourth spare bit */
+  unsigned int spare5 : 1;	/* fifth spare bit */
+  unsigned int spare6 : 1;	/* sixth spare bit */
+  unsigned int spare7 : 1;	/* seventh spare bit */
+  unsigned int spare8 : 1;	/* eighth spare bit */
 } MAILSTREAM;
-
-
+
 /* Mail I/O stream handle */
 
 typedef struct mail_stream_handle {
   MAILSTREAM *stream;		/* pointer to mail stream */
   unsigned short sequence;	/* sequence of what we expect stream to be */
 } MAILHANDLE;
-
+
+
 /* Message overview */
 
 typedef struct mail_overview {
@@ -1034,6 +1149,8 @@ typedef struct send_stream {
   long replycode;		/* last reply code */
   unsigned int debug : 1;	/* stream debug flag */
   unsigned int sensitive : 1;	/* sensitive data in progress */
+  unsigned int loser : 1;	/* server is a loser */
+  unsigned int saslcancel : 1;	/* SASL cancelled by protocol */
   union {			/* protocol specific */
     struct {			/* SMTP specific */
       unsigned int ok : 1;	/* supports ESMTP */
@@ -1066,6 +1183,7 @@ typedef struct send_stream {
 	  unsigned int success : 1;
 	} notify;
 	unsigned int full : 1;	/* return full headers */
+	char *envid;		/* envelope identifier as xtext */
       } dsn;
       struct {			/* size declaration */
 	unsigned int ok : 1;	/* supports SIZE */
@@ -1076,6 +1194,22 @@ typedef struct send_stream {
     } esmtp;
     struct {			/* NNTP specific */
       unsigned int post : 1;	/* supports POST */
+      struct {			/* NNTP extensions */
+	unsigned int ok : 1;	/* supports extensions */
+				/* supports LISTGROUP */
+	unsigned int listgroup : 1;
+	unsigned int over : 1;	/* supports OVER */
+	unsigned int hdr : 1;	/* supports HDR */
+	unsigned int pat : 1;	/* supports PAT */
+				/* supports STARTTLS */
+	unsigned int starttls : 1;
+				/* server has MULTIDOMAIN */
+	unsigned int multidomain : 1;
+				/* supports AUTHINFO USER */
+	unsigned int authuser : 1;
+				/* supported authenticators */
+	unsigned int sasl : MAXAUTHENTICATORS;
+      } ext;
     } nntp;
   } protocol;
 } SENDSTREAM;
@@ -1103,12 +1237,14 @@ typedef void (*smtpverbose_t) (char *buffer);
 typedef void (*imapenvelope_t) (MAILSTREAM *stream,unsigned long msgno,
 				ENVELOPE *env);
 typedef char *(*imapreferral_t) (MAILSTREAM *stream,char *url,long code);
-typedef void (*overview_t) (MAILSTREAM *stream,unsigned long uid,OVERVIEW *ov);
+typedef void (*overview_t) (MAILSTREAM *stream,unsigned long uid,OVERVIEW *ov,
+			    unsigned long msgno);
 typedef unsigned long *(*sorter_t) (MAILSTREAM *stream,char *charset,
 				    SEARCHPGM *spg,SORTPGM *pgm,long flags);
 typedef void (*parseline_t) (ENVELOPE *env,char *hdr,char *data,char *host);
 typedef ADDRESS *(*parsephrase_t) (char *phrase,char *end,char *host);
 typedef void *(*blocknotify_t) (int reason,void *data);
+typedef long (*kinit_t) (char *host,char *reason);
 typedef void (*getacl_t) (MAILSTREAM *stream,char *mailbox,ACLLIST *acl);
 typedef void (*listrights_t) (MAILSTREAM *stream,char *mailbox,char *id,
 			      char *alwaysrights,STRINGLIST *possiblerights);
@@ -1117,17 +1253,20 @@ typedef void (*quota_t) (MAILSTREAM *stream,char *qroot,QUOTALIST *qlist);
 typedef void (*quotaroot_t) (MAILSTREAM *stream,char *mbx,STRINGLIST *qroot);
 typedef void (*sortresults_t) (MAILSTREAM *stream,unsigned long *list,
 			       unsigned long size);
+typedef void (*sendcommand_t) (MAILSTREAM *stream,char *cmd,long flags);
 typedef char *(*newsrcquery_t) (MAILSTREAM *stream,char *mulname,char *name);
 typedef char *(*userprompt_t) (void);
 typedef long (*append_t) (MAILSTREAM *stream,void *data,char **flags,
 			  char **date,STRING **message);
-typedef void (*freeenvelopesparep_t) (void **sparep);
 typedef void (*freeeltsparep_t) (void **sparep);
+typedef void (*freeenvelopesparep_t) (void **sparep);
+typedef void (*freebodysparep_t) (void **sparep);
+typedef void (*freestreamsparep_t) (void **sparep);
 typedef void *(*sslstart_t) (void *stream,char *host,unsigned long flags);
 typedef long (*sslcertificatequery_t) (char *reason,char *host,char *cert);
 typedef void (*sslfailure_t) (char *host,char *reason,unsigned long flags);
-
-
+typedef void (*logouthook_t) (void *data);
+
 /* Globals */
 
 extern char *body_types[];	/* defined body type strings */
@@ -1252,7 +1391,7 @@ DRIVER {
 				/* per-message modify flags */
   void (*flagmsg) (MAILSTREAM *stream,MESSAGECACHE *elt);
 				/* search for message based on criteria */
-  void (*search) (MAILSTREAM *stream,char *charset,SEARCHPGM *pgm,long flags);
+  long (*search) (MAILSTREAM *stream,char *charset,SEARCHPGM *pgm,long flags);
 				/* sort messages */
   unsigned long *(*sort) (MAILSTREAM *stream,char *charset,SEARCHPGM *spg,
 			  SORTPGM *pgm,long flags);
@@ -1379,6 +1518,7 @@ void *mail_parameters (MAILSTREAM *stream,long function,void *value);
 DRIVER *mail_valid (MAILSTREAM *stream,char *mailbox,char *purpose);
 DRIVER *mail_valid_net (char *name,DRIVER *drv,char *host,char *mailbox);
 long mail_valid_net_parse (char *name,NETMBX *mb);
+long mail_valid_net_parse_work (char *name,NETMBX *mb,char *service);
 void mail_scan (MAILSTREAM *stream,char *ref,char *pat,char *contents);
 void mail_list (MAILSTREAM *stream,char *ref,char *pat);
 void mail_lsub (MAILSTREAM *stream,char *ref,char *pat);
@@ -1398,6 +1538,9 @@ MAILSTREAM *mail_stream (MAILHANDLE *handle);
 void mail_fetch_fast (MAILSTREAM *stream,char *sequence,long flags);
 void mail_fetch_flags (MAILSTREAM *stream,char *sequence,long flags);
 void mail_fetch_overview (MAILSTREAM *stream,char *sequence,overview_t ofn);
+void mail_fetch_overview_sequence (MAILSTREAM *stream,char *sequence,
+				   overview_t ofn);
+void mail_fetch_overview_default (MAILSTREAM *stream,overview_t ofn);
 ENVELOPE *mail_fetch_structure (MAILSTREAM *stream,unsigned long msgno,
 				BODY **body,long flags);
 char *mail_fetch_message (MAILSTREAM *stream,unsigned long msgno,
@@ -1426,9 +1569,9 @@ void mail_fetchsubject (char *s,MAILSTREAM *stream,unsigned long msgno,
 			long length);
 MESSAGECACHE *mail_elt (MAILSTREAM *stream,unsigned long msgno);
 void mail_flag (MAILSTREAM *stream,char *sequence,char *flag,long flags);
-void mail_search_full (MAILSTREAM *stream,char *charset,SEARCHPGM *pgm,
+long mail_search_full (MAILSTREAM *stream,char *charset,SEARCHPGM *pgm,
 		       long flags);
-void mail_search_default (MAILSTREAM *stream,char *charset,SEARCHPGM *pgm,
+long mail_search_default (MAILSTREAM *stream,char *charset,SEARCHPGM *pgm,
 			  long flags);
 long mail_ping (MAILSTREAM *stream);
 void mail_check (MAILSTREAM *stream);
@@ -1443,10 +1586,11 @@ void mail_gc (MAILSTREAM *stream,long gcflags);
 void mail_gc_msg (MESSAGE *msg,long gcflags);
 void mail_gc_body (BODY *body);
 
-BODY *mail_body (MAILSTREAM *stream,unsigned long msgno,char *section);
+BODY *mail_body (MAILSTREAM *stream,unsigned long msgno,
+		 unsigned char *section);
 char *mail_date (char *string,MESSAGECACHE *elt);
 char *mail_cdate (char *string,MESSAGECACHE *elt);
-long mail_parse_date (MESSAGECACHE *elt,char *string);
+long mail_parse_date (MESSAGECACHE *elt,unsigned char *string);
 void mail_exists (MAILSTREAM *stream,unsigned long nmsgs);
 void mail_recent (MAILSTREAM *stream,unsigned long recent);
 void mail_expunged (MAILSTREAM *stream,unsigned long msgno);
@@ -1467,13 +1611,16 @@ long mail_search_text (MAILSTREAM *stream,unsigned long msgno,char *section,
 long mail_search_body (MAILSTREAM *stream,unsigned long msgno,BODY *body,
 		       char *prefix,unsigned long section,long flags);
 long mail_search_string (SIZEDTEXT *s,char *charset,STRINGLIST **st);
-long mail_search_keyword (MAILSTREAM *stream,MESSAGECACHE *elt,STRINGLIST *st);
+long mail_search_keyword (MAILSTREAM *stream,MESSAGECACHE *elt,STRINGLIST *st,
+			  long flag);
 long mail_search_addr (ADDRESS *adr,STRINGLIST *st);
 char *mail_search_gets (readfn_t f,void *stream,unsigned long size,
 			GETS_DATA *md);
 SEARCHPGM *mail_criteria (char *criteria);
 int mail_criteria_date (unsigned short *date);
 int mail_criteria_string (STRINGLIST **s);
+unsigned short mail_shortdate (unsigned int year,unsigned int month,
+			       unsigned int day);
 unsigned long *mail_sort (MAILSTREAM *stream,char *charset,SEARCHPGM *spg,
 			  SORTPGM *pgm,long flags);
 unsigned long *mail_sort_cache (MAILSTREAM *stream,SORTPGM *pgm,SORTCACHE **sc,
@@ -1482,7 +1629,8 @@ unsigned long *mail_sort_msgs (MAILSTREAM *stream,char *charset,SEARCHPGM *spg,
 			       SORTPGM *pgm,long flags);
 SORTCACHE **mail_sort_loadcache (MAILSTREAM *stream,SORTPGM *pgm);
 unsigned int mail_strip_subject (char *t,char **ret);
-unsigned int mail_strip_subject_aux (char *t,char **ret);
+char *mail_strip_subject_wsp (char *s);
+char *mail_strip_subject_blob (char *s);
 int mail_sort_compare (const void *a1,const void *a2);
 unsigned long mail_longdate (MESSAGECACHE *elt);
 THREADNODE *mail_thread (MAILSTREAM *stream,char *type,char *charset,
@@ -1495,7 +1643,8 @@ THREADNODE *mail_thread_orderedsubject (MAILSTREAM *stream,char *charset,
 THREADNODE *mail_thread_references (MAILSTREAM *stream,char *charset,
 				    SEARCHPGM *spg,long flags,
 				    sorter_t sorter);
-void mail_thread_loadcache (MAILSTREAM *stream,unsigned long uid,OVERVIEW *ov);
+void mail_thread_loadcache (MAILSTREAM *stream,unsigned long uid,OVERVIEW *ov,
+			    unsigned long msgno);
 char *mail_thread_parse_msgid (char *s,char **ss);
 STRINGLIST *mail_thread_parse_references (char *s,long flag);
 long mail_thread_check_child (container_t mother,container_t daughter);
@@ -1504,8 +1653,8 @@ container_t mail_thread_prune_dummy_work (container_t msg,container_t ane);
 THREADNODE *mail_thread_c2node (MAILSTREAM *stream,container_t con,long flags);
 THREADNODE *mail_thread_sort (THREADNODE *thr,THREADNODE **tc);
 int mail_thread_compare_date (const void *a1,const void *a2);
-long mail_sequence (MAILSTREAM *stream,char *sequence);
-long mail_uid_sequence (MAILSTREAM *stream,char *sequence);
+long mail_sequence (MAILSTREAM *stream,unsigned char *sequence);
+long mail_uid_sequence (MAILSTREAM *stream,unsigned char *sequence);
 long mail_parse_flags (MAILSTREAM *stream,char *flag,unsigned long *uf);
 long mail_usable_network_stream (MAILSTREAM *stream,char *name);
 

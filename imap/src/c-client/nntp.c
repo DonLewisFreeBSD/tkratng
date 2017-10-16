@@ -10,10 +10,10 @@
  *		Internet: MRC@CAC.Washington.EDU
  *
  * Date:	10 February 1992
- * Last Edited:	17 October 2001
+ * Last Edited:	6 December 2004
  * 
  * The IMAP toolkit provided in this Distribution is
- * Copyright 2001 University of Washington.
+ * Copyright 1988-2004 University of Washington.
  * The full text of our legal notices is contained in the file called
  * CPYRIGHT, included with this Distribution.
  */
@@ -31,15 +31,137 @@
 #include "flstring.h"
 #include "utf8.h"
 
+/* Constants */
+
+#define NNTPSSLPORT (long) 563	/* assigned SSL TCP contact port */
+#define NNTPGREET (long) 200	/* NNTP successful greeting */
+				/* NNTP successful greeting w/o posting priv */
+#define NNTPGREETNOPOST (long) 201
+#define NNTPEXTOK (long) 202	/* NNTP extensions OK */
+#define NNTPGOK (long) 211	/* NNTP group selection OK */
+#define NNTPGLIST (long) 215	/* NNTP group list being returned */
+#define NNTPARTICLE (long) 220	/* NNTP article file */
+#define NNTPHEAD (long) 221	/* NNTP header text */
+#define NNTPBODY (long) 222	/* NNTP body text */
+#define NNTPOVER (long) 224	/* NNTP overview text */
+#define NNTPOK (long) 240	/* NNTP OK code */
+#define NNTPAUTHED (long) 281	/* NNTP successful authentication */
+				/* NNTP successful authentication with data */
+#define NNTPAUTHEDDATA (long) 282
+#define NNTPREADY (long) 340	/* NNTP ready for data */
+#define NNTPWANTAUTH2 (long) 380/* NNTP authentication needed (old) */
+#define NNTPWANTPASS (long) 381	/* NNTP password needed */
+#define NNTPTLSSTART (long) 382	/* NNTP continue with TLS negotiation */
+#define NNTPCHALLENGE (long) 383/* NNTP challenge, want response */
+#define NNTPSOFTFATAL (long) 400/* NNTP soft fatal code */
+#define NNTPWANTAUTH (long) 480	/* NNTP authentication needed */
+#define NNTPBADCMD (long) 500	/* NNTP unrecognized command */
+#define IDLETIMEOUT (long) 3	/* defined in NNTPEXT WG base draft */
+
+
+/* NNTP I/O stream local data */
+	
+typedef struct nntp_local {
+  SENDSTREAM *nntpstream;	/* NNTP stream for I/O */
+  unsigned int dirty : 1;	/* disk copy of .newsrc needs updating */
+  unsigned int tlsflag : 1;	/* TLS session */
+  unsigned int notlsflag : 1;	/* TLS not used in session */
+  unsigned int sslflag : 1;	/* SSL session */
+  unsigned int novalidate : 1;	/* certificate not validated */
+  unsigned int xover : 1;	/* supports XOVER */
+  unsigned int xhdr : 1;	/* supports XHDR */
+  char *name;			/* remote newsgroup name */
+  char *user;			/* mailbox user */
+  char *newsrc;			/* newsrc file */
+  char *over_fmt;		/* overview format */
+  unsigned long msgno;		/* current text message number */
+  FILE *txt;			/* current text */
+  unsigned long txtsize;	/* current text size */
+} NNTPLOCAL;
+
+
+/* Convenient access to local data */
+
+#define LOCAL ((NNTPLOCAL *) stream->local)
+
+
+/* Convenient access to protocol-specific data */
+
+#define NNTP stream->protocol.nntp
+
+
+/* Convenient access to extensions */
+
+#define EXTENSION LOCAL->nntpstream->protocol.nntp.ext
+
+/* Function prototypes */
+
+DRIVER *nntp_valid (char *name);
+DRIVER *nntp_isvalid (char *name,char *mbx);
+void *nntp_parameters (long function,void *value);
+void nntp_scan (MAILSTREAM *stream,char *ref,char *pat,char *contents);
+void nntp_list (MAILSTREAM *stream,char *ref,char *pat);
+void nntp_lsub (MAILSTREAM *stream,char *ref,char *pat);
+long nntp_canonicalize (char *ref,char *pat,char *pattern,char *wildmat);
+long nntp_subscribe (MAILSTREAM *stream,char *mailbox);
+long nntp_unsubscribe (MAILSTREAM *stream,char *mailbox);
+long nntp_create (MAILSTREAM *stream,char *mailbox);
+long nntp_delete (MAILSTREAM *stream,char *mailbox);
+long nntp_rename (MAILSTREAM *stream,char *old,char *newname);
+long nntp_status (MAILSTREAM *stream,char *mbx,long flags);
+long nntp_getmap (MAILSTREAM *stream,char *name,
+		  unsigned long first,unsigned long last,
+		  unsigned long rnmsgs,unsigned long nmsgs,char *tmp);
+MAILSTREAM *nntp_mopen (MAILSTREAM *stream);
+void nntp_mclose (MAILSTREAM *stream,long options);
+void nntp_fetchfast (MAILSTREAM *stream,char *sequence,long flags);
+void nntp_flags (MAILSTREAM *stream,char *sequence,long flags);
+long nntp_overview (MAILSTREAM *stream,overview_t ofn);
+long nntp_parse_overview (OVERVIEW *ov,char *text,MESSAGECACHE *elt);
+long nntp_over (MAILSTREAM *stream,char *sequence);
+char *nntp_header (MAILSTREAM *stream,unsigned long msgno,unsigned long *size,
+		   long flags);
+long nntp_text (MAILSTREAM *stream,unsigned long msgno,STRING *bs,long flags);
+FILE *nntp_article (MAILSTREAM *stream,char *msgid,unsigned long *size,
+		    unsigned long *hsiz);
+void nntp_flagmsg (MAILSTREAM *stream,MESSAGECACHE *elt);
+long nntp_search (MAILSTREAM *stream,char *charset,SEARCHPGM *pgm,long flags);
+long nntp_search_msg (MAILSTREAM *stream,unsigned long msgno,SEARCHPGM *pgm,
+		      OVERVIEW *ov);
+unsigned long *nntp_sort (MAILSTREAM *stream,char *charset,SEARCHPGM *spg,
+			  SORTPGM *pgm,long flags);
+SORTCACHE **nntp_sort_loadcache (MAILSTREAM *stream,SORTPGM *pgm,
+				 unsigned long start,unsigned long last,
+				 long flags);
+THREADNODE *nntp_thread (MAILSTREAM *stream,char *type,char *charset,
+			 SEARCHPGM *spg,long flags);
+long nntp_ping (MAILSTREAM *stream);
+void nntp_check (MAILSTREAM *stream);
+void nntp_expunge (MAILSTREAM *stream);
+long nntp_copy (MAILSTREAM *stream,char *sequence,char *mailbox,long options);
+long nntp_append (MAILSTREAM *stream,char *mailbox,append_t af,void *data);
+
+long nntp_extensions (SENDSTREAM *stream,long flags);
+long nntp_send (SENDSTREAM *stream,char *command,char *args);
+long nntp_send_work (SENDSTREAM *stream,char *command,char *args);
+long nntp_send_auth (SENDSTREAM *stream,long flags);
+long nntp_send_auth_work (SENDSTREAM *stream,NETMBX *mb,char *pwd,long flags);
+void *nntp_challenge (void *s,unsigned long *len);
+long nntp_response (void *s,char *response,unsigned long size);
+long nntp_reply (SENDSTREAM *stream);
+long nntp_fake (SENDSTREAM *stream,char *text);
+long nntp_soutr (void *stream,char *s);
+
 /* Driver dispatch used by MAIL */
 
 DRIVER nntpdriver = {
   "nntp",			/* driver name */
+				/* driver flags */
 #ifdef INADEQUATE_MEMORY
   DR_LOWMEM |
 #endif
-				/* driver flags */
-  DR_NEWS|DR_READONLY|DR_NOFAST|DR_NAMESPACE|DR_CRLF|DR_RECYCLE|DR_XPOINT,
+  DR_NEWS|DR_READONLY|DR_NOFAST|DR_NAMESPACE|DR_CRLF|DR_RECYCLE|DR_XPOINT |
+    DR_NOINTDATE|DR_NONEWMAIL|DR_HALFOPEN,
   (DRIVER *) NIL,		/* next driver */
   nntp_valid,			/* mailbox is valid for us */
   nntp_parameters,		/* manipulate parameters */
@@ -81,9 +203,11 @@ MAILSTREAM nntpproto = {&nntpdriver};
 
 
 				/* driver parameters */
-static long nntp_maxlogintrials = MAXLOGINTRIALS;
+static unsigned long nntp_maxlogintrials = MAXLOGINTRIALS;
 static long nntp_port = 0;
 static long nntp_sslport = 0;
+static unsigned long nntp_range = 0;
+static long nntp_hidepath = 0;
 
 /* NNTP validate mailbox
  * Accepts: mailbox name
@@ -107,7 +231,7 @@ DRIVER *nntp_isvalid (char *name,char *mbx)
 {
   NETMBX mb;
   if (!mail_valid_net_parse (name,&mb) || strcmp (mb.service,nntpdriver.name)||
-      mb.authuser[0] || mb.anoflag || mb.secflag) return NIL;
+      mb.anoflag) return NIL;
   if (mb.mailbox[0] != '#') strcpy (mbx,mb.mailbox);
 			/* namespace format name */
   else if ((mb.mailbox[1] == 'n') && (mb.mailbox[2] == 'e') &&
@@ -144,11 +268,32 @@ void *nntp_parameters (long function,void *value)
   case GET_SSLNNTPPORT:
     value = (void *) nntp_sslport;
     break;
-  case SET_NEWSRC:
-    fatal ("SET_NEWSRC not permitted");
+  case SET_NNTPRANGE:
+    nntp_range = (unsigned long) value;
+    break;
+  case GET_NNTPRANGE:
+    value = (void *) nntp_range;
+    break;
+  case SET_NNTPHIDEPATH:
+    nntp_hidepath = (long) value;
+    break;
+  case GET_NNTPHIDEPATH:
+    value = (void *) nntp_hidepath;
+    break;
   case GET_NEWSRC:
     if (value)
       value = (void *) ((NNTPLOCAL *) ((MAILSTREAM *) value)->local)->newsrc;
+    break;
+  case GET_IDLETIMEOUT:
+    value = (void *) IDLETIMEOUT;
+    break;
+  case ENABLE_DEBUG:
+    if (value)
+      ((NNTPLOCAL *) ((MAILSTREAM *) value)->local)->nntpstream->debug = T;
+    break;
+  case DISABLE_DEBUG:
+    if (value)
+      ((NNTPLOCAL *) ((MAILSTREAM *) value)->local)->nntpstream->debug = NIL;
     break;
   default:
     value = NIL;		/* error case */
@@ -167,7 +312,7 @@ void *nntp_parameters (long function,void *value)
 void nntp_scan (MAILSTREAM *stream,char *ref,char *pat,char *contents)
 {
   char tmp[MAILTMPLEN];
-  if (nntp_canonicalize (ref,pat,tmp))
+  if (nntp_canonicalize (ref,pat,tmp,NIL))
     mm_log ("Scan not valid for NNTP mailboxes",ERROR);
 }
 
@@ -181,10 +326,10 @@ void nntp_scan (MAILSTREAM *stream,char *ref,char *pat,char *contents)
 void nntp_list (MAILSTREAM *stream,char *ref,char *pat)
 {
   MAILSTREAM *st = stream;
-  char *s,*t,*lcl,pattern[MAILTMPLEN],name[MAILTMPLEN];
+  char *s,*t,*lcl,pattern[MAILTMPLEN],name[MAILTMPLEN],wildmat[MAILTMPLEN];
   int showuppers = pat[strlen (pat) - 1] == '%';
   if (!pat || !*pat) {
-    if (nntp_canonicalize (ref,"*",pattern)) {
+    if (nntp_canonicalize (ref,"*",pattern,NIL)) {
 				/* tie off name at root */
       if ((s = strchr (pattern,'}')) && (s = strchr (s+1,'.'))) *++s = '\0';
       else pattern[0] = '\0';
@@ -192,10 +337,11 @@ void nntp_list (MAILSTREAM *stream,char *ref,char *pat)
     }
   }
 				/* ask server for open newsgroups */
-  else if (nntp_canonicalize (ref,pat,pattern) &&
+  else if (nntp_canonicalize (ref,pat,pattern,wildmat) &&
 	   ((stream && LOCAL && LOCAL->nntpstream) ||
-	    (stream = mail_open (NIL,pattern,OP_HALFOPEN))) &&
-	   ((nntp_send (LOCAL->nntpstream,"LIST","ACTIVE") == NNTPGLIST) ||
+	    (stream = mail_open (NIL,pattern,OP_HALFOPEN|OP_SILENT))) &&
+	   ((nntp_send (LOCAL->nntpstream,"LIST ACTIVE",
+			wildmat[0] ? wildmat : NIL) == NNTPGLIST) ||
 	    (nntp_send (LOCAL->nntpstream,"LIST",NIL) == NNTPGLIST))) {
 				/* namespace format name? */
     if (*(lcl = strchr (strcpy (name,pattern),'}') + 1) == '#') lcl += 6;
@@ -233,7 +379,7 @@ void nntp_lsub (MAILSTREAM *stream,char *ref,char *pat)
   void *sdb = NIL;
   char *s,mbx[MAILTMPLEN];
 				/* return data from newsrc */
-  if (nntp_canonicalize (ref,pat,mbx)) newsrc_lsub (stream,mbx);
+  if (nntp_canonicalize (ref,pat,mbx,NIL)) newsrc_lsub (stream,mbx);
   if (*pat == '{') {		/* if remote pattern, must be NNTP */
     if (!nntp_valid (pat)) return;
     ref = NIL;			/* good NNTP pattern, punt reference */
@@ -248,17 +394,19 @@ void nntp_lsub (MAILSTREAM *stream,char *ref,char *pat)
     mm_lsub (stream,NIL,s,NIL);
   while (s = sm_read (&sdb));	/* until no more subscriptions */
 }
-
-
+
 /* NNTP canonicalize newsgroup name
  * Accepts: reference
  *	    pattern
  *	    returned single pattern
+ *	    returned wildmat pattern
  * Returns: T on success, NIL on failure
  */
 
-long nntp_canonicalize (char *ref,char *pat,char *pattern)
+long nntp_canonicalize (char *ref,char *pat,char *pattern,char *wildmat)
 {
+  char *s;
+  DRIVER *ret;
   if (ref && *ref) {		/* have a reference */
     if (!nntp_valid (ref)) return NIL;
     strcpy (pattern,ref);	/* copy reference to pattern */
@@ -270,7 +418,14 @@ long nntp_canonicalize (char *ref,char *pat,char *pattern)
     else strcat (pattern,pat);	/* anything else is just appended */
   }
   else strcpy (pattern,pat);	/* just have basic name */
-  return nntp_valid (pattern) ? T : NIL;
+  if ((ret = wildmat ?		/* if valid and wildmat */
+       nntp_isvalid (pattern,wildmat) : nntp_valid (pattern)) && wildmat) {
+				/* don't return wildmat if specials present */
+    if (strpbrk (wildmat,",?![\\]")) wildmat[0] = '\0';
+				/* replace all % with * */
+    for (s = wildmat; s = strchr (s,'%'); *s = '*');
+  }
+  return ret ? LONGT : NIL;
 }
 
 /* NNTP subscribe to mailbox
@@ -344,12 +499,13 @@ long nntp_status (MAILSTREAM *stream,char *mbx,long flags)
 {
   MAILSTATUS status;
   NETMBX mb;
-  unsigned long i;
+  unsigned long i,j,k,rnmsgs;
   long ret = NIL;
   char *s,*name,*state,tmp[MAILTMPLEN];
   char *old = (stream && !stream->halfopen) ? LOCAL->name : NIL;
   MAILSTREAM *tstream = NIL;
-  if (!(mail_valid_net_parse (mbx,&mb) && *mb.mailbox &&
+  if (!(mail_valid_net_parse (mbx,&mb) && !strcmp (mb.service,"nntp") &&
+	*mb.mailbox &&
 	((mb.mailbox[0] != '#') ||
 	 ((mb.mailbox[1] == 'n') && (mb.mailbox[2] == 'e') &&
 	  (mb.mailbox[3] == 'w') && (mb.mailbox[4] == 's') &&
@@ -368,36 +524,53 @@ long nntp_status (MAILSTREAM *stream,char *mbx,long flags)
 
   if (nntp_send (LOCAL->nntpstream,"GROUP",name) == NNTPGOK) {
     status.flags = flags;	/* status validity flags */
-    status.messages = strtoul (LOCAL->nntpstream->reply + 4,&s,10);
-    i = strtoul (s,&s,10);
-    status.uidnext = strtoul (s,NIL,10) + 1;
-				/* initially empty */
-    status.recent = status.unseen = 0;
-				/* don't bother if empty or don't want this */
-    if (status.messages && (flags & (SA_RECENT | SA_UNSEEN))) {
-      if (state = newsrc_state (stream,name)) {
-				/* in case have to do XHDR Date */
-	sprintf (tmp,"%lu-%lu",i,status.uidnext - 1);
-				/* only bother if there appear to be holes */
-	if ((status.messages < (status.uidnext - i)) &&
-	    ((nntp_send (LOCAL->nntpstream,"LISTGROUP",name) == NNTPGOK)
-	     || (nntp_send (LOCAL->nntpstream,"XHDR Date",tmp) == NNTPHEAD))) {
-	  while ((s = net_getline (LOCAL->nntpstream->netstream)) &&
-		 strcmp (s,".")) {
-	    newsrc_check_uid (state,strtoul (s,NIL,10),&status.recent,
-			      &status.unseen);
-	    fs_give ((void **) &s);
-	  }
-	  if (s) fs_give ((void **) &s);
-	}
-				/* assume c-client/NNTP map is entire range */
-	else while (i < status.uidnext)
-	  newsrc_check_uid (state,i++,&status.recent,&status.unseen);
-	fs_give ((void **) &state);
-      }
-				/* no .newsrc state, all messages new */
-      else status.recent = status.unseen = status.messages;
+    k = strtoul (LOCAL->nntpstream->reply + 4,&s,10);
+    i = strtoul (s,&s,10);	/* first assigned UID */
+				/* next UID to be assigned */
+    status.uidnext = (j = strtoul (s,NIL,10)) + 1;
+				/* maximum number of messages */
+    rnmsgs = status.messages = (i | j) ? status.uidnext - i : 0;
+    if (k > status.messages) {	/* check for absurdity */
+      sprintf (tmp,"NNTP SERVER BUG (impossible message count): %lu > %lu",
+	       k,status.messages);
+      mm_log (tmp,WARN);
     }
+				/* restrict article range if needed */
+    if (nntp_range && (status.messages > nntp_range)) {
+      i = status.uidnext - (status.messages = nntp_range);
+      if (k > nntp_range) k = nntp_range;
+    }
+				/* initially zero */
+    status.recent = status.unseen = 0;
+    if (!status.messages);	/* empty case */
+				/* use server guesstimate in simple case */
+    else if (!(flags & (SA_RECENT | SA_UNSEEN))) status.messages = k;
+
+				/* have newsrc state? */
+    else if (state = newsrc_state (stream,name)) {
+				/* yes, get the UID/sequence map */
+      if (nntp_getmap (stream,name,i,status.uidnext - 1,rnmsgs,
+		       status.messages,tmp)) {
+				/* calculate true count */
+	for (status.messages = 0;
+	     (s = net_getline (LOCAL->nntpstream->netstream)) &&
+	       strcmp (s,"."); ) {
+				/* only count if in range */
+	  if (((k = atol (s)) >= i) && (k < status.uidnext)) {
+	    newsrc_check_uid (state,k,&status.recent,&status.unseen);
+	    status.messages++;
+	  }
+	  fs_give ((void **) &s);
+	}
+	if (s) fs_give ((void **) &s);
+      }
+				/* assume c-client/NNTP map is entire range */
+      else while (i < status.uidnext)
+	newsrc_check_uid (state,i++,&status.recent,&status.unseen);
+      fs_give ((void **) &state);
+    }
+				/* no .newsrc state, all messages new */
+    else status.recent = status.unseen = status.messages;
 				/* UID validity is a constant */
     status.uidvalidity = stream->uid_validity;
 				/* pass status to main program */
@@ -414,6 +587,48 @@ long nntp_status (MAILSTREAM *stream,char *mbx,long flags)
   return ret;			/* success */
 }
 
+/* NNTP get map
+ * Accepts: stream
+ *	    newsgroup name
+ *	    first UID in map range
+ *	    last UID in map range
+ *	    reported total number of messages in newsgroup
+ *	    calculated number of messages in range
+ *	    temporary buffer
+ * Returns: T on success, NIL on failure
+ */
+
+long nntp_getmap (MAILSTREAM *stream,char *name,
+		  unsigned long first,unsigned long last,
+		  unsigned long rnmsgs,unsigned long nmsgs,char *tmp)
+{
+  short trylistgroup = NIL;
+  if (rnmsgs > (nmsgs * 8))	/* small subrange? */
+    trylistgroup = T;		/* yes, can try LISTGROUP if [X]HDR fails */
+  else switch ((int) nntp_send (LOCAL->nntpstream,"LISTGROUP",name)) {
+  case NNTPGOK:			/* got data */
+    return LONGT;
+  default:			/* else give up if server claims LISTGROUP */
+    if (EXTENSION.listgroup) return NIL;
+  }
+				/* build range */
+  sprintf (tmp,"%lu-%lu",first,last);
+  if (EXTENSION.hdr)		/* have HDR extension? */
+    return (nntp_send (LOCAL->nntpstream,"HDR Date",tmp) == NNTPHEAD) ?
+      LONGT : NIL;
+  if (LOCAL->xhdr)		/* try the experimental extension then */
+    switch ((int) nntp_send (LOCAL->nntpstream,"XHDR Date",tmp)) {
+    case NNTPHEAD:		/* got an overview? */
+      return LONGT;
+    case NNTPBADCMD:		/* unknown command? */
+      LOCAL->xhdr = NIL;	/* disable future XHDR attempts */
+    }
+  if (trylistgroup &&		/* no [X]HDR, maybe do LISTGROUP after all */
+      (nntp_send (LOCAL->nntpstream,"LISTGROUP",name) == NNTPGOK))
+    return LONGT;
+  return NIL;
+}
+
 /* NNTP open
  * Accepts: stream to open
  * Returns: stream on success, NIL on failure
@@ -421,8 +636,9 @@ long nntp_status (MAILSTREAM *stream,char *mbx,long flags)
 
 MAILSTREAM *nntp_mopen (MAILSTREAM *stream)
 {
-  unsigned long i,j,k,nmsgs;
+  unsigned long i,j,k,nmsgs,rnmsgs;
   char *s,*mbx,tmp[MAILTMPLEN];
+  FILE *f;
   NETMBX mb;
   char *newsrc = (char *) mail_parameters (NIL,GET_NEWSRC,NIL);
   newsrcquery_t nq = (newsrcquery_t) mail_parameters (NIL,GET_NEWSRCQUERY,NIL);
@@ -436,16 +652,21 @@ MAILSTREAM *nntp_mopen (MAILSTREAM *stream)
     nstream = LOCAL->nntpstream;/* remember NNTP protocol stream */
     sprintf (tmp,"Reusing connection to %s",net_host (nstream->netstream));
     if (!stream->silent) mm_log (tmp,(long) NIL);
+    if (stream->rdonly) mb.readonlyflag = T;
     if (LOCAL->tlsflag) mb.tlsflag = T;
     if (LOCAL->notlsflag) mb.notlsflag = T;
     if (LOCAL->sslflag) mb.sslflag = T;
     if (LOCAL->novalidate) mb.novalidate = T;
+    if (LOCAL->nntpstream->loser) mb.loser = T;
+    if (stream->secure) mb.secflag = T;
     LOCAL->nntpstream = NIL;	/* keep nntp_mclose() from punting it */
     nntp_mclose (stream,NIL);	/* do close action */
     stream->dtb = &nntpdriver;	/* reattach this driver */
   }
-				/* in case /debug switch given */
+				/* copy flags */
   if (mb.dbgflag) stream->debug = T;
+  if (mb.readonlyflag) stream->rdonly = T;
+  if (mb.secflag) stream->secure = T;
   mb.trysslflag = stream->tryssl = (mb.trysslflag || stream->tryssl) ? T : NIL;
   if (!nstream) {		/* open NNTP now if not already open */
     char *hostlist[2];
@@ -456,21 +677,29 @@ MAILSTREAM *nntp_mopen (MAILSTREAM *stream)
     if (mb.notlsflag) strcat (tmp,"/notls");
     if (mb.sslflag) strcat (tmp,"/ssl");
     if (mb.novalidate) strcat (tmp,"/novalidate-cert");
-    if (stream->secure) strcat (tmp,"/secure");
+    if (mb.loser) strcat (tmp,"/loser");
+    if (mb.secflag) strcat (tmp,"/secure");
     if (mb.user[0]) sprintf (tmp + strlen (tmp),"/user=\"%s\"",mb.user);
     hostlist[1] = NIL;
-    if (!(nstream = nntp_open (hostlist,OP_READONLY +
-			       (stream->debug ? OP_DEBUG : NIL)))) return NIL;
+    if (!(nstream = nntp_open (hostlist,NOP_READONLY |
+			       (stream->debug ? NOP_DEBUG : NIL)))) return NIL;
   }
 
 				/* always zero messages if halfopen */
-  if (stream->halfopen) i = j = k = nmsgs = 0;
+  if (stream->halfopen) i = j = k = rnmsgs = nmsgs = 0;
 				/* otherwise open the newsgroup */
   else if (nntp_send (nstream,"GROUP",mbx) == NNTPGOK) {
     k = strtoul (nstream->reply + 4,&s,10);
     i = strtoul (s,&s,10);
     stream->uid_last = j = strtoul (s,&s,10);
-    nmsgs = (i | j) ? 1 + j - i : 0;
+    rnmsgs = nmsgs = (i | j) ? 1 + j - i : 0;
+    if (k > nmsgs) {		/* check for absurdity */
+      sprintf (tmp,"NNTP SERVER BUG (impossible message count): %lu > %lu",
+	       k,nmsgs);
+      mm_log (tmp,WARN);
+    }
+				/* restrict article range if needed */
+    if (nntp_range && (nmsgs > nntp_range)) i = 1 + j - (nmsgs = nntp_range);
   }
   else {			/* no such newsgroup */
     mm_log (nstream->reply,ERROR);
@@ -479,19 +708,23 @@ MAILSTREAM *nntp_mopen (MAILSTREAM *stream)
   }
 				/* instantiate local data */
   stream->local = memset (fs_get (sizeof (NNTPLOCAL)),0,sizeof (NNTPLOCAL));
+  LOCAL->nntpstream = nstream;
 				/* save state for future recycling */
   if (mb.tlsflag) LOCAL->tlsflag = T;
   if (mb.notlsflag) LOCAL->notlsflag = T;
   if (mb.sslflag) LOCAL->sslflag = T;
   if (mb.novalidate) LOCAL->novalidate = T;
-  LOCAL->nntpstream = nstream;
+  if (mb.loser) LOCAL->nntpstream->loser = T;
+				/* assume present until proven otherwise */
+  LOCAL->xhdr = LOCAL->xover = T;
   LOCAL->name = cpystr (mbx);	/* copy newsgroup name */
   if (stream->mulnewsrc) {	/* want to use multiple .newsrc files? */
     strcpy (tmp,newsrc);
     s = tmp + strlen (tmp);	/* end of string */
     *s++ = '-';			/* hyphen delimiter and host */
-    lcase (strcpy (s,net_host (nstream->netstream)));
-    LOCAL->newsrc = cpystr (nq ? (*nq) (stream,tmp,newsrc) : newsrc);
+    lcase (strcpy (s,(long) mail_parameters (NIL,GET_NEWSRCCANONHOST,NIL) ?
+		   net_host (nstream->netstream) : mb.host));
+    LOCAL->newsrc = cpystr (nq ? (*nq) (stream,tmp,newsrc) : tmp);
   }
   else LOCAL->newsrc = cpystr (newsrc);
   if (mb.user[0]) LOCAL->user = cpystr (mb.user);
@@ -506,31 +739,50 @@ MAILSTREAM *nntp_mopen (MAILSTREAM *stream)
   if (LOCAL->notlsflag) strcat (tmp,"/notls");
   if (LOCAL->sslflag) strcat (tmp,"/ssl");
   if (LOCAL->novalidate) strcat (tmp,"/novalidate-cert");
+  if (LOCAL->nntpstream->loser) strcat (tmp,"/loser");
   if (stream->secure) strcat (tmp,"/secure");
+  if (stream->rdonly) strcat (tmp,"/readonly");
   if (LOCAL->user) sprintf (tmp + strlen (tmp),"/user=\"%s\"",LOCAL->user);
   if (stream->halfopen) strcat (tmp,"}<no_mailbox>");
   else sprintf (tmp + strlen (tmp),"}#news.%s",mbx);
   fs_give ((void **) &stream->mailbox);
   stream->mailbox = cpystr (tmp);
 
+  if (EXTENSION.over &&		/* get overview format if have OVER */
+      (nntp_send (LOCAL->nntpstream,"LIST","OVERVIEW.FMT") == NNTPGLIST) &&
+      (f = netmsg_slurp (LOCAL->nntpstream->netstream,&k,NIL))) {
+    fread (LOCAL->over_fmt = (char *) fs_get ((size_t) k + 3),
+	   (size_t) 1,(size_t) k,f);
+    LOCAL->over_fmt[k] = '\0';
+    fclose (f);			/* flush temp file */
+  }
   if (nmsgs) {			/* if any messages exist */
     short silent = stream->silent;
     stream->silent = T;		/* don't notify main program yet */
     mail_exists (stream,nmsgs);	/* silently set the cache to the guesstimate */
-    sprintf (tmp,"%lu-%lu",i,j);/* in case have to do XHDR Date */
-    if ((k < nmsgs) &&	/* only bother if there appear to be holes */
-	((nntp_send (nstream,"LISTGROUP",mbx) == NNTPGOK) ||
-	 (nntp_send (nstream,"XHDR Date",tmp) == NNTPHEAD))) {
-      nmsgs = 0;		/* have holes, calculate true count */
-      while ((s = net_getline (nstream->netstream)) && strcmp (s,".")) {
-	mail_elt (stream,++nmsgs)->private.uid = atol (s);
+				/* get UID/sequence map, nuke holes */
+    if (nntp_getmap (stream,mbx,i,j,rnmsgs,nmsgs,tmp)) {
+      for (nmsgs = 0;		/* calculate true count */
+	   (s = net_getline (nstream->netstream)) && strcmp (s,"."); ) {
+	if ((k = atol (s)) > j){/* discard too high article numbers */
+	  sprintf (tmp,"NNTP SERVER BUG (out of range article ID): %lu > %lu",
+		   k,j);
+	  mm_notify (stream,tmp,NIL);
+	  stream->unhealthy = T;
+	}
+	else if (k >= i) {	/* silently ignore too-low article numbers */
+				/* guard against server returning extra msgs */
+	  if (nmsgs == stream->nmsgs) mail_exists (stream,nmsgs+1);
+				/* create elt for this message, set UID */
+	  mail_elt (stream,++nmsgs)->private.uid = k;
+	}
 	fs_give ((void **) &s);
       }
       if (s) fs_give ((void **) &s);
     }
 				/* assume c-client/NNTP map is entire range */
-    else for (k = 1; k <= nmsgs; k++)
-      mail_elt (stream,k)->private.uid = i++;
+    else for (k = 1; k <= nmsgs; k++) mail_elt (stream,k)->private.uid = i++;
+    stream->unhealthy = NIL;	/* set healthy */
     stream->nmsgs = 0;		/* whack it back down */
     stream->silent = silent;	/* restore old silent setting */
     mail_exists (stream,nmsgs);	/* notify upper level that messages exist */
@@ -559,6 +811,7 @@ void nntp_mclose (MAILSTREAM *stream,long options)
   MESSAGECACHE *elt;
   if (LOCAL) {			/* only if a file is open */
     nntp_check (stream);	/* dump final checkpoint */
+    if (LOCAL->over_fmt) fs_give ((void **) &LOCAL->over_fmt);
     if (LOCAL->name) fs_give ((void **) &LOCAL->name);
     if (LOCAL->user) fs_give ((void **) &LOCAL->user);
     if (LOCAL->newsrc) fs_give ((void **) &LOCAL->newsrc);
@@ -590,7 +843,7 @@ void nntp_fetchfast (MAILSTREAM *stream,char *sequence,long flags)
 			  mail_uid_sequence (stream,sequence) :
 			  mail_sequence (stream,sequence)))
     for (i = 1; i <= stream->nmsgs; i++) {
-      if ((elt = mail_elt (stream,i))->sequence &&
+      if ((elt = mail_elt (stream,i))->sequence && (elt->valid = T) &&
 	  !(elt->day && !elt->rfc822_size)) {
 	ENVELOPE **env = NIL;
 	ENVELOPE *e = NIL;
@@ -659,7 +912,7 @@ long nntp_overview (MAILSTREAM *stream,overview_t ofn)
 	       mail_uid (stream,j - 1));
       i = j;			/* advance beyond gap */
 				/* ask server for overview data to cache */
-      if (nntp_send (LOCAL->nntpstream,"XOVER",tmp) == NNTPOVER) {
+      if (nntp_over (stream,tmp)) {
 	while ((s = net_getline (LOCAL->nntpstream->netstream)) &&
 	       strcmp (s,".")) {
 				/* death to embedded newlines */
@@ -675,15 +928,17 @@ long nntp_overview (MAILSTREAM *stream,overview_t ofn)
 	  }
 	  else {		/* shouldn't happen, snarl if it does */
 	    sprintf (tmp,"Server returned data for unknown UID %lu",uid);
-	    mm_log (tmp,WARN);
+	    mm_notify (stream,tmp,WARN);
+	    stream->unhealthy = T;
 	  }
 				/* flush the overview */
 	  fs_give ((void **) &s);
 	}
+	stream->unhealthy = NIL;/* set healthy */
 				/* flush the terminating dot */
 	if (s) fs_give ((void **) &s);
       }
-      else i = stream->nmsgs;	/* XOVER failed, punt cache load */
+      else i = stream->nmsgs;	/* OVER failed, punt cache load */
     }
 
 				/* now scan sequence to return overviews */
@@ -692,15 +947,17 @@ long nntp_overview (MAILSTREAM *stream,overview_t ofn)
       uid = mail_uid (stream,i);/* UID for this message */
 				/* parse cached overview */
       if (nntp_parse_overview (&ov,s = (char *) elt->private.data,elt))
-	(*ofn) (stream,uid,&ov);
+	(*ofn) (stream,uid,&ov,i);
       else {			/* parse failed */
-	(*ofn) (stream,uid,NIL);
+	(*ofn) (stream,uid,NIL,i);
 	if (s && *s) {		/* unusable cached entry? */
 	  sprintf (tmp,"Unable to parse overview for UID %lu: %.500s",uid,s);
-	  mm_log (tmp,WARN);
+	  mm_notify (stream,tmp,WARN);
+	  stream->unhealthy = T;
 				/* erase it from the cache */
 	  fs_give ((void **) &s);
 	}
+	stream->unhealthy = NIL;/* set healthy */
 				/* insert empty cached text as necessary */
 	if (!s) elt->private.data = (unsigned long) cpystr ("");
       }
@@ -711,9 +968,51 @@ long nntp_overview (MAILSTREAM *stream,overview_t ofn)
   return T;
 }
 
-/* Parse OVERVIEW struct from cached NNTP XOVER response
+/* Send OVER to NNTP server
+ * Accepts: mail stream
+ *	    sequence to send
+ * Returns: T if success and overviews will follow, else NIL
+ */
+
+long nntp_over (MAILSTREAM *stream,char *sequence)
+{
+  unsigned char *s;
+				/* test for Netscape Collabra server */
+  if (EXTENSION.over && LOCAL->xover &&
+      nntp_send (LOCAL->nntpstream,"OVER","0") == NNTPOVER) {
+    /* "Netscape-Collabra/3.52 03615 NNTP" responds to the OVER command with
+     * a bogus "Subject:From:Date:Bytes:Lines" response followed by overviews
+     * which lack the Message-ID and References:.  This violates the draft
+     * NNTP specification (draft-ietf-nntpext-base-18.txt as of this writing).
+     * XOVER works fine.
+     */
+    while ((s = net_getline (LOCAL->nntpstream->netstream)) && strcmp (s,".")){
+      if (!isdigit (*s)) {	/* is it that fetid piece of reptile dung? */
+	EXTENSION.over = NIL;	/* sure smells like it */
+	mm_log ("Working around Netscape Collabra bug",WARN);
+      }
+      fs_give ((void **) &s);	/* flush the overview */
+    }
+    if (s) fs_give ((void **) &s);
+				/* don't do this test again */
+    if (EXTENSION.over) LOCAL->xover = NIL;
+  }
+  if (EXTENSION.over)		/* have OVER extension? */
+    return (nntp_send (LOCAL->nntpstream,"OVER",sequence) == NNTPOVER) ?
+      LONGT : NIL;
+  if (LOCAL->xover)		/* try the experiment extension then */
+    switch ((int) nntp_send (LOCAL->nntpstream,"XOVER",sequence)) {
+    case NNTPOVER:		/* got an overview? */
+      return LONGT;
+    case NNTPBADCMD:		/* unknown command? */
+      LOCAL->xover = NIL;	/* disable future XOVER attempts */
+    }
+  return NIL;
+}
+
+/* Parse OVERVIEW struct from cached NNTP OVER response
  * Accepts: struct to load
- *	    cached XOVER response
+ *	    cached OVER response
  *	    internaldate
  * Returns: T if success, NIL if fail
  */
@@ -785,22 +1084,27 @@ char *nntp_header (MAILSTREAM *stream,unsigned long msgno,unsigned long *size,
   if (!(elt = mail_elt (stream,msgno))->private.msg.header.text.data) {
     sprintf (tmp,"%lu",mail_uid (stream,msgno));
 				/* get header text */
-    if ((nntp_send (LOCAL->nntpstream,"HEAD",tmp) == NNTPHEAD) &&
-	(f = netmsg_slurp (LOCAL->nntpstream->netstream,size,NIL))) {
-      fread (elt->private.msg.header.text.data =
-	     (unsigned char *) fs_get ((size_t) *size + 3),
-	     (size_t) 1,(size_t) *size,f);
-      fclose (f);		/* flush temp file */
+    switch (nntp_send (LOCAL->nntpstream,"HEAD",tmp)) {
+    case NNTPHEAD:
+      if (f = netmsg_slurp (LOCAL->nntpstream->netstream,size,NIL)) {
+	fread (elt->private.msg.header.text.data =
+	       (unsigned char *) fs_get ((size_t) *size + 3),
+	       (size_t) 1,(size_t) *size,f);
+	fclose (f);		/* flush temp file */
 				/* tie off header with extra CRLF and NUL */
-      elt->private.msg.header.text.data[*size] = '\015';
-      elt->private.msg.header.text.data[++*size] = '\012';
-      elt->private.msg.header.text.data[++*size] = '\0';
-      elt->private.msg.header.text.size = *size;
-      elt->valid = T;		/* make elt valid now */
-    }
-    else {			/* failed, mark as deleted and empty */
+	elt->private.msg.header.text.data[*size] = '\015';
+	elt->private.msg.header.text.data[++*size] = '\012';
+	elt->private.msg.header.text.data[++*size] = '\0';
+	elt->private.msg.header.text.size = *size;
+	elt->valid = T;		/* make elt valid now */
+	break;
+      }
+				/* fall into default case */
+    default:			/* failed, mark as deleted and empty */
       elt->valid = elt->deleted = T;
+    case NNTPSOFTFATAL:		/* don't mark deleted if stream dead */
       *size = elt->private.msg.header.text.size = 0;
+      break;
     }
   }
 				/* just return size of text */
@@ -832,12 +1136,17 @@ long nntp_text (MAILSTREAM *stream,unsigned long msgno,STRING *bs,long flags)
   LOCAL->msgno = msgno;		/* note cached message */
   if (!LOCAL->txt) {		/* have file for this message? */
     sprintf (tmp,"%lu",elt->private.uid);
-    if (nntp_send (LOCAL->nntpstream,"BODY",tmp) != NNTPBODY)
-      elt->deleted = T;		/* failed mark as deleted */
-    else LOCAL->txt = netmsg_slurp (LOCAL->nntpstream->netstream,
-				    &LOCAL->txtsize,NIL);
+    switch (nntp_send (LOCAL->nntpstream,"BODY",tmp)) {
+    case NNTPBODY:
+      if (LOCAL->txt = netmsg_slurp (LOCAL->nntpstream->netstream,
+				     &LOCAL->txtsize,NIL)) break;
+				/* fall into default case */
+    default:			/* failed, mark as deleted */
+      elt->deleted = T;
+    case NNTPSOFTFATAL:		/* don't mark deleted if stream dead */
+      return NIL;
+    }
   }
-  if (!LOCAL->txt) return NIL;	/* error if don't have a file */
   if (!(flags & FT_PEEK)) {	/* mark seen if needed */
     elt->seen = T;
     mm_flags (stream,elt->msgno);
@@ -884,9 +1193,10 @@ void nntp_flagmsg (MAILSTREAM *stream,MESSAGECACHE *elt)
  *	    character set
  *	    search program
  *	    option flags
+ * Returns: T on success, NIL on failure
  */
 
-void nntp_search (MAILSTREAM *stream,char *charset,SEARCHPGM *pgm,long flags)
+long nntp_search (MAILSTREAM *stream,char *charset,SEARCHPGM *pgm,long flags)
 {
   unsigned long i;
   MESSAGECACHE *elt;
@@ -904,7 +1214,7 @@ void nntp_search (MAILSTREAM *stream,char *charset,SEARCHPGM *pgm,long flags)
 	  ((charset[2] == 'F') || (charset[2] == 'f')) &&
 	  (charset[3] == '-') && (charset[4] == '8') && !charset[5])))) {
     if (utf8_text (NIL,charset,NIL,T)) utf8_searchpgm (pgm,charset);
-    else return;		/* charset unknown */
+    else return NIL;		/* charset unknown */
   }
   if (flags & SO_OVERVIEW) {	/* only if specified to use overview */
 				/* identify messages that will be searched */
@@ -930,6 +1240,7 @@ void nntp_search (MAILSTREAM *stream,char *charset,SEARCHPGM *pgm,long flags)
     if (ov.from) mail_free_address (&ov.from);
     if (ov.subject) fs_give ((void **) &ov.subject);
   }
+  return LONGT;
 }
 
 /* NNTP search message
@@ -985,8 +1296,8 @@ long nntp_search_msg (MAILSTREAM *stream,unsigned long msgno,SEARCHPGM *pgm,
       (pgm->seen && !elt->seen) ||
       (pgm->unseen && elt->seen)) return NIL;
 				/* keywords */
-  if ((pgm->keyword && !mail_search_keyword (stream,elt,pgm->keyword)) ||
-      (pgm->unkeyword && mail_search_keyword (stream,elt,pgm->unkeyword)))
+  if ((pgm->keyword && !mail_search_keyword (stream,elt,pgm->keyword,LONGT)) ||
+      (pgm->unkeyword && mail_search_keyword (stream,elt,pgm->unkeyword,NIL)))
     return NIL;
   if (ov) {			/* only do this if real searching */
     MESSAGECACHE delt;
@@ -997,7 +1308,7 @@ long nntp_search_msg (MAILSTREAM *stream,unsigned long msgno,SEARCHPGM *pgm,
     if ((pgm->sentbefore || pgm->senton || pgm->sentsince ||
 	 (pgm->before || pgm->on || pgm->since)) &&
 	(!mail_parse_date (&delt,ov->date) ||
-	 !(d = (delt.year << 9) + (delt.month << 5) + delt.day) ||
+	 !(d = mail_shortdate (delt.year,delt.month,delt.day)) ||
 	 (pgm->sentbefore && (d >= pgm->sentbefore)) ||
 	 (pgm->senton && (d != pgm->senton)) ||
 	 (pgm->sentsince && (d < pgm->sentsince)) ||
@@ -1147,8 +1458,8 @@ unsigned long *nntp_sort (MAILSTREAM *stream,char *charset,SEARCHPGM *spg,
 /* Mail load sortcache
  * Accepts: mail stream, already searched
  *	    sort program
- *	    first UID to XOVER
- *	    last UID to XOVER
+ *	    first UID to OVER
+ *	    last UID to OVER
  *	    option flags
  * Returns: vector of sortcache pointers matching search
  */
@@ -1187,14 +1498,12 @@ SORTCACHE **nntp_sort_loadcache (MAILSTREAM *stream,SORTPGM *pgm,
     if (start != last) sprintf (tmp,"%lu-%lu",start,last);
     else sprintf (tmp,"%lu",start);
 				/* get it from the NNTP server */
-    if (!(nntp_send (LOCAL->nntpstream,"XOVER",tmp) == NNTPOVER))
-				/* ugh, have to get it the slow way */
-      return mail_sort_loadcache (stream,pgm);
+    if (!nntp_over (stream,tmp)) return mail_sort_loadcache (stream,pgm);
     while ((s = net_getline (LOCAL->nntpstream->netstream)) && strcmp (s,".")){
 				/* death to embedded newlines */
       for (t = v = s; c = *v++;) if ((c != '\012') && (c != '\015')) *t++ = c;
       *t++ = '\0';		/* tie off resulting string */
-				/* parse XOVER response */
+				/* parse OVER response */
       if ((i = mail_msgno (stream,atol (s))) &&
 	  (t = strchr (s,'\t')) && (v = strchr (++t,'\t'))) {
 	*v++ = '\0';		/* tie off subject */
@@ -1339,18 +1648,23 @@ SENDSTREAM *nntp_open_full (NETDRIVER *dv,char **hostlist,char *service,
   NETSTREAM *netstream = NIL;
   NETMBX mb;
   char tmp[MAILTMPLEN];
+  long extok = LONGT;
+  NETDRIVER *ssld = (NETDRIVER *) mail_parameters (NIL,GET_SSLDRIVER,NIL);
+  sslstart_t stls = (sslstart_t) mail_parameters (NIL,GET_SSLSTART,NIL);
   if (!(hostlist && *hostlist)) mm_log ("Missing NNTP service host",ERROR);
   else do {			/* try to open connection */
     sprintf (tmp,"{%.200s/%.20s}",*hostlist,service ? service : "nntp");
-    if (!mail_valid_net_parse (tmp,&mb) || mb.anoflag || mb.secflag ||
-	mb.tlsflag || mb.authuser[0]) {
+    if (!mail_valid_net_parse (tmp,&mb) || mb.anoflag) {
       sprintf (tmp,"Invalid host specifier: %.80s",*hostlist);
       mm_log (tmp,ERROR);
     }
     else {			/* light tryssl flag if requested */
-      mb.trysslflag = (options & OP_TRYSSL) ? T : NIL;
+      mb.trysslflag = (options & NOP_TRYSSL) ? T : NIL;
+				/* default port */
+      if (mb.port) port = mb.port;
+      else if (!port) port = nntp_port ? nntp_port : NNTPTCPPORT;
       if (netstream =		/* try to open ordinary connection */
-	  net_open (&mb,dv,nntp_port ? nntp_port : port,
+	  net_open (&mb,dv,port,
 		    (NETDRIVER *) mail_parameters (NIL,GET_SSLDRIVER,NIL),
 		    "*nntps",nntp_sslport ? nntp_sslport : NNTPSSLPORT)) {
 	stream = (SENDSTREAM *) fs_get (sizeof (SENDSTREAM));
@@ -1359,38 +1673,80 @@ SENDSTREAM *nntp_open_full (NETDRIVER *dv,char **hostlist,char *service,
 	stream->netstream = netstream;
 	stream->host = cpystr ((int) mail_parameters (NIL,GET_TRUSTDNS,NIL) ?
 			       net_host (netstream) : mb.host);
-	stream->debug = (mb.dbgflag || (options & OP_DEBUG)) ? T : NIL;
-				/* get server greeting */
+	stream->debug = (mb.dbgflag || (options & NOP_DEBUG)) ? T : NIL;
+	if (mb.loser) stream->loser = T;
+				/* process greeting */
 	switch ((int) nntp_reply (stream)) {
 	case NNTPGREET:		/* allow posting */
 	  NNTP.post = T;
 	  mm_notify (NIL,stream->reply + 4,(long) NIL);
 	  break;
 	case NNTPGREETNOPOST:	/* posting not allowed, must be readonly */
-	  if (options & OP_READONLY) {
-	    mm_notify (NIL,stream->reply + 4,(long) NIL);
-	    break;
-	  }
-				/* falls through */
-	default:		/* anything else is an error */
+	  NNTP.post = NIL;
+	  break;
+	default:
 	  mm_log (stream->reply,ERROR);
 	  stream = nntp_close (stream);
+	  break;
 	}
       }
     }
   } while (!stream && *++hostlist);
 
-  if (stream && mb.user[0]) {	/* have a session, log in if have user name */
-    if ((int) mail_parameters (NIL,GET_TRUSTDNS,NIL)) {
-				/* remote name for authentication */
-      strncpy (mb.host,(int) mail_parameters (NIL,GET_SASLUSESPTRNAME,NIL) ?
-	       net_remotehost (netstream) : net_host (netstream),NETMAXHOST-1);
-      mb.host[NETMAXHOST-1] = '\0';
+				/* get extensions */
+  if (stream && extok)
+    extok = nntp_extensions (stream,(mb.secflag ? AU_SECURE : NIL) |
+			     (mb.authuser[0] ? AU_AUTHUSER : NIL));
+  if (stream && !dv && stls && NNTP.ext.starttls &&
+      !mb.sslflag && !mb.notlsflag &&
+      (nntp_send_work (stream,"STARTTLS",NNTP.ext.multidomain ? mb.host : NIL)
+       == NNTPTLSSTART)) {
+    mb.tlsflag = T;		/* TLS OK, get into TLS at this end */
+    stream->netstream->dtb = ssld;
+				/* negotiate TLS */
+    if (stream->netstream->stream =
+	(*stls) (stream->netstream->stream,mb.host,
+		 NET_TLSCLIENT | (mb.novalidate ? NET_NOVALIDATECERT:NIL)))
+      extok = nntp_extensions (stream,(mb.secflag ? AU_SECURE : NIL) |
+			       (mb.authuser[0] ? AU_AUTHUSER : NIL));
+    else {
+      sprintf (tmp,"Unable to negotiate TLS with this server: %.80s",mb.host);
+      mm_log (tmp,ERROR);
+				/* close without doing QUIT */
+      if (stream->netstream) net_close (stream->netstream);
+      stream->netstream = NIL;
+      stream = nntp_close (stream);
     }
-    if (!nntp_send_auth_work (stream,&mb,tmp)) stream = nntp_close (stream);
   }
+  else if (mb.tlsflag) {	/* user specified /tls but can't do it */
+    mm_log ("Unable to negotiate TLS with this server",ERROR);
+    return NIL;
+  }
+  if (stream) {			/* have a session? */
+    if (mb.user[0]) {		/* yes, have user name? */
+      if ((int) mail_parameters (NIL,GET_TRUSTDNS,NIL)) {
+				/* remote name for authentication */
+	strncpy (mb.host,(int) mail_parameters (NIL,GET_SASLUSESPTRNAME,NIL) ?
+		 net_remotehost (netstream) : net_host (netstream),
+		 NETMAXHOST-1);
+	mb.host[NETMAXHOST-1] = '\0';
+      }
+      if (!nntp_send_auth_work (stream,&mb,tmp,NIL))
+	stream = nntp_close (stream);
+    }
+				/* authenticate if no-post and not readonly */
+    else if (!(NNTP.post || (options & NOP_READONLY) ||
+	       nntp_send_auth (stream,NIL))) stream = nntp_close (stream);
+  }
+
 				/* in case server demands MODE READER */
   if (stream) switch ((int) nntp_send_work (stream,"MODE","READER")) {
+  case NNTPGREET:
+    NNTP.post = T;
+    break;
+  case NNTPGREETNOPOST:
+    NNTP.post = NIL;
+    break;
   case NNTPWANTAUTH:		/* server wants auth first, do so and retry */
   case NNTPWANTAUTH2:		/* remote name for authentication */
     if ((int) mail_parameters (NIL,GET_TRUSTDNS,NIL)) {
@@ -1398,11 +1754,89 @@ SENDSTREAM *nntp_open_full (NETDRIVER *dv,char **hostlist,char *service,
 	       net_remotehost (netstream) : net_host (netstream),NETMAXHOST-1);
       mb.host[NETMAXHOST-1] = '\0';
     }
-    if (nntp_send_auth_work(stream,&mb,tmp)) nntp_send(stream,"MODE","READER");
+    if (nntp_send_auth_work (stream,&mb,tmp,NIL))
+      switch ((int) nntp_send (stream,"MODE","READER")) {
+      case NNTPGREET:
+	NNTP.post = T;
+	break;
+      case NNTPGREETNOPOST:
+	NNTP.post = NIL;
+	break;
+      }
     else stream = nntp_close (stream);
     break;
   }
+  if (stream) {			/* looks like we have a stream? */
+				/* yes, make sure can post if not readonly */
+    if (!(NNTP.post || (options & NOP_READONLY))) stream = nntp_close (stream);
+    else if (extok) nntp_extensions (stream,(mb.secflag ? AU_SECURE : NIL) |
+				     (mb.authuser[0] ? AU_AUTHUSER : NIL));
+  }
   return stream;
+}
+
+/* NNTP extensions
+ * Accepts: stream
+ *	    authenticator flags
+ * Returns: T on success, NIL on failure
+ */
+
+long nntp_extensions (SENDSTREAM *stream,long flags)
+{
+  unsigned long i;
+  char *t,*args;
+				/* zap all old extensions */
+  memset (&NNTP.ext,0,sizeof (NNTP.ext));
+  if (stream->loser) return NIL;/* nothing at all for losers */
+				/* get server extensions */
+  switch ((int) nntp_send_work (stream,"LIST","EXTENSIONS")) {
+  case NNTPEXTOK:		/* what NNTP base spec says */
+  case NNTPGLIST:		/* some servers do this instead */
+    break;
+  default:			/* no LIST EXTENSIONS on this server */
+    return NIL;
+  }
+  NNTP.ext.ok = T;		/* server offers extensions */
+  while ((t = net_getline (stream->netstream)) && (t[1] || (*t != '.'))) {
+    if (stream->debug) mm_dlog (t);
+				/* get optional capability arguments */
+    if (args = strchr (t,' ')) *args++ = '\0';
+    if (!compare_cstring (t,"LISTGROUP")) NNTP.ext.listgroup = T;
+    else if (!compare_cstring (t,"OVER")) NNTP.ext.over = T;
+    else if (!compare_cstring (t,"HDR")) NNTP.ext.hdr = T;
+    else if (!compare_cstring (t,"PAT")) NNTP.ext.pat = T;
+    else if (!compare_cstring (t,"STARTTLS")) NNTP.ext.starttls = T;
+    else if (!compare_cstring (t,"MULTIDOMAIN")) NNTP.ext.multidomain = T;
+
+    else if (!compare_cstring (t,"AUTHINFO") && args) {
+      char *sasl = NIL;
+      for (args = strtok (args," "); args; args = strtok (NIL," ")) {
+	if (!compare_cstring (args,"USER")) NNTP.ext.authuser = T;
+	else if (((args[0] == 'S') || (args[0] == 's')) &&
+		 ((args[1] == 'A') || (args[1] == 'a')) &&
+		 ((args[2] == 'S') || (args[2] == 's')) &&
+		 ((args[3] == 'L') || (args[3] == 'l')) && (args[4] == ':'))
+	  sasl = args + 5;
+      }
+      if (sasl) {		/* if SASL, look up authenticators */
+	for (sasl = strtok (sasl,","); sasl; sasl = strtok (NIL,","))
+	  if ((i = mail_lookup_auth_name (sasl,flags)) &&
+	      (--i < MAXAUTHENTICATORS))
+	    NNTP.ext.sasl |= (1 << i);
+				/* disable LOGIN if PLAIN also advertised */
+	if ((i = mail_lookup_auth_name ("PLAIN",NIL)) &&
+	    (--i < MAXAUTHENTICATORS) && (NNTP.ext.sasl & (1 << i)) &&
+	    (i = mail_lookup_auth_name ("LOGIN",NIL)) &&
+	    (--i < MAXAUTHENTICATORS)) NNTP.ext.sasl &= ~(1 << i);
+      }
+    }
+    fs_give ((void **) &t);
+  }
+  if (t) {			/* flush end of text indicator */
+    if (stream->debug) mm_dlog (t);
+    fs_give ((void **) &t);
+  }
+  return LONGT;
 }
 
 /* NNTP close connection
@@ -1413,7 +1847,7 @@ SENDSTREAM *nntp_open_full (NETDRIVER *dv,char **hostlist,char *service,
 SENDSTREAM *nntp_close (SENDSTREAM *stream)
 {
   if (stream) {			/* send "QUIT" */
-    nntp_send (stream,"QUIT",NIL);
+    if (stream->netstream) nntp_send (stream,"QUIT",NIL);
 				/* do close actions */
     if (stream->netstream) net_close (stream->netstream);
     if (stream->host) fs_give ((void **) &stream->host);
@@ -1439,8 +1873,8 @@ long nntp_mail (SENDSTREAM *stream,ENVELOPE *env,BODY *body)
    * First, we give ourselves a frontal lobotomy, and put in some UUCP
    *  syntax.  It doesn't matter that it's completely bogus UUCP, and
    *  that UUCP has nothing to do with anything we're doing.  It's been
-   *  alleged that "Path: not-for-mail" is all that's needed, but without
-   *  proof, it's probably not safe to make assumptions.
+   *  alleged that "Path: not-for-mail" is also acceptable, but we won't
+   *  make assumptions unless the user says so.
    *
    * Second, we bop ourselves on the head with a ball-peen hammer.  How
    *  dare we be so presumptious as to insert a *comment* in a Date:
@@ -1461,12 +1895,13 @@ long nntp_mail (SENDSTREAM *stream,ENVELOPE *env,BODY *body)
   if (s = strstr (env->date," (")) *s = NIL;
   do if ((ret = nntp_send_work (stream,"POST",NIL)) == NNTPREADY)
 				/* output data, return success status */
-    ret = (net_soutr (stream->netstream,path) &&
+    ret = (net_soutr (stream->netstream,
+		      nntp_hidepath ? "Path: not-for-mail\015\012" : path) &&
 	   rfc822_output (tmp,env,body,nntp_soutr,stream->netstream,T)) ?
 	     nntp_send_work (stream,".",NIL) :
 	       nntp_fake (stream,"NNTP connection broken (message text)");
   while (((ret == NNTPWANTAUTH) || (ret == NNTPWANTAUTH2)) &&
-	 nntp_send_auth (stream));
+	 nntp_send_auth (stream,LONGT));
   if (s) *s = ' ';		/* put the comment in the date back */
   if (ret == NNTPOK) return LONGT;
   else if (ret < 400) {		/* if not an error reply */
@@ -1489,7 +1924,8 @@ long nntp_send (SENDSTREAM *stream,char *command,char *args)
   switch ((int) (ret = nntp_send_work (stream,command,args))) {
   case NNTPWANTAUTH:		/* authenticate and retry */
   case NNTPWANTAUTH2:
-    if (nntp_send_auth (stream)) ret = nntp_send_work (stream,command,args);
+    if (nntp_send_auth (stream,LONGT))
+      ret = nntp_send_work (stream,command,args);
     else {			/* we're probably hosed, nuke the session */
       nntp_send (stream,"QUIT",NIL);
 				/* close net connection */
@@ -1514,7 +1950,7 @@ long nntp_send_work (SENDSTREAM *stream,char *command,char *args)
   long ret;
   char *s = (char *) fs_get (strlen (command) + (args ? strlen (args) + 1 : 0)
 			     + 3);
-  if (!stream->netstream) ret = nntp_fake (stream,"No-op dead stream");
+  if (!stream->netstream) ret = nntp_fake (stream,"NNTP connection lost");
   else {			/* build the complete command */
     if (args) sprintf (s,"%s %s",command,args);
     else strcpy (s,command);
@@ -1530,10 +1966,11 @@ long nntp_send_work (SENDSTREAM *stream,char *command,char *args)
 
 /* NNTP send authentication if needed
  * Accepts: SEND stream
+ *	    flags (non-NIL to get new extensions)
  * Returns: T if need to redo command, NIL otherwise
  */
 
-long nntp_send_auth (SENDSTREAM *stream)
+long nntp_send_auth (SENDSTREAM *stream,long flags)
 {
   NETMBX mb;
   char tmp[MAILTMPLEN];
@@ -1547,28 +1984,86 @@ long nntp_send_auth (SENDSTREAM *stream)
     strcat (tmp,"/ssl");
   strcat (tmp,"}<none>");
   mail_valid_net_parse (tmp,&mb);
-  return nntp_send_auth_work (stream,&mb,tmp);
+  return nntp_send_auth_work (stream,&mb,tmp,flags);
 }
-
-
+
 /* NNTP send authentication worker routine
  * Accepts: SEND stream
  *	    NETMBX structure
  *	    scratch buffer of length MAILTMPLEN
+ *	    flags (non-NIL to get new extensions)
  * Returns: T if authenticated, NIL otherwise
  */
 
-long nntp_send_auth_work (SENDSTREAM *stream,NETMBX *mb,char *pwd)
+long nntp_send_auth_work (SENDSTREAM *stream,NETMBX *mb,char *pwd,long flags)
 {
-  long trial = 0;
+  unsigned long trial,auths;
+  char tmp[MAILTMPLEN],usr[MAILTMPLEN];
+  AUTHENTICATOR *at;
+  char *lsterr = NIL;
   long ret = NIL;
-  if (stream->netstream) do {
+				/* try SASL first */
+  for (auths = NNTP.ext.sasl, stream->saslcancel = NIL;
+       !ret && stream->netstream && auths &&
+       (at = mail_lookup_auth (find_rightmost_bit (&auths) + 1)); ) {
+    if (lsterr) {		/* previous authenticator failed? */
+      sprintf (tmp,"Retrying using %s authentication after %.80s",
+	       at->name,lsterr);
+      mm_log (tmp,NIL);
+      fs_give ((void **) &lsterr);
+    }
+    trial = 0;			/* initial trial count */
+    tmp[0] = '\0';		/* empty buffer */
+    if (stream->netstream) do {
+      if (lsterr) {
+	sprintf (tmp,"Retrying %s authentication after %.80s",at->name,lsterr);
+	mm_log (tmp,WARN);
+	fs_give ((void **) &lsterr);
+      }
+      stream->saslcancel = NIL;
+      if (nntp_send (stream,"AUTHINFO SASL",at->name)) {
+				/* hide client authentication responses */
+	if (!(at->flags & AU_SECURE)) stream->sensitive = T;
+	if ((*at->client) (nntp_challenge,nntp_response,"nntp",mb,stream,
+			   &trial,usr)) {
+	  if (stream->replycode == NNTPAUTHED) ret = LONGT;
+				/* if main program requested cancellation */
+	  else if (!trial) mm_log ("NNTP Authentication cancelled",ERROR);
+	}
+	stream->sensitive = NIL;/* unhide */
+      }
+				/* remember response if error and no cancel */
+      if (!ret && trial) lsterr = cpystr (stream->reply);
+    } while (!ret && stream->netstream && trial &&
+	     (trial < nntp_maxlogintrials));
+  }
+
+  if (lsterr) {			/* SAIL failed? */
+    if (!stream->saslcancel) {	/* don't do this if a cancel */
+      sprintf (tmp,"Can not authenticate to NNTP server: %.80s",lsterr);
+      mm_log (tmp,ERROR);
+    }
+    fs_give ((void **) &lsterr);
+  }
+  else if (mb->secflag)		/* no SASL, can't do /secure */
+    mm_log ("Can't do secure authentication with this server",ERROR);
+  else if (mb->authuser[0])	/* or /authuser */
+    mm_log ("Can't do /authuser with this server",ERROR);
+  /* Always try AUTHINFO USER, even if NNTP.ext.authuser isn't set.  There
+   * are servers that require it but don't return it as an extension.
+   */
+  else for (trial = 0, pwd[0] = 'x';
+	    !ret && pwd[0] && (trial < nntp_maxlogintrials) &&
+	      stream->netstream; ) {
     pwd[0] = NIL;		/* get user name and password */
-    mm_login (mb,mb->user,pwd,trial++);
-				/* user refused to give a password */
-    if (!pwd[0]) mm_log ("Login aborted",ERROR);
+    mm_login (mb,usr,pwd,trial++);
 				/* do the authentication */
-    else switch ((int) nntp_send_work (stream,"AUTHINFO USER",mb->user)) {
+    if (pwd[0]) switch ((int) nntp_send_work (stream,"AUTHINFO USER",usr)) {
+    case NNTPBADCMD:		/* give up if unrecognized command */
+      mm_log (NNTP.ext.authuser ? stream->reply :
+	      "Can't do AUTHINFO USER to this server",ERROR);
+      trial = nntp_maxlogintrials;
+      break;
     case NNTPAUTHED:		/* successful authentication */
       ret = LONGT;		/* guess no password was needed */
       break;
@@ -1583,10 +2078,64 @@ long nntp_send_auth_work (SENDSTREAM *stream,NETMBX *mb,char *pwd)
       if (trial == nntp_maxlogintrials)
 	mm_log ("Too many NNTP authentication failures",ERROR);
     }
-  } while (!ret && pwd[0] && (trial < nntp_maxlogintrials) &&
-	   stream->netstream);
+				/* user refused to give a password */
+    else mm_log ("Login aborted",ERROR);
+  }
   memset (pwd,0,MAILTMPLEN);	/* erase password */
-  return ret;			/* authentication failed */
+				/* get new extensions if needed */
+  if (ret && flags) nntp_extensions (stream,(mb->secflag ? AU_SECURE : NIL) |
+				     (mb->authuser[0] ? AU_AUTHUSER : NIL));
+  return ret;
+}
+
+/* Get challenge to authenticator in binary
+ * Accepts: stream
+ *	    pointer to returned size
+ * Returns: challenge or NIL if not challenge
+ */
+
+void *nntp_challenge (void *s,unsigned long *len)
+{
+  char tmp[MAILTMPLEN];
+  void *ret = NIL;
+  SENDSTREAM *stream = (SENDSTREAM *) s;
+  if ((stream->replycode == NNTPCHALLENGE) &&
+      !(ret = rfc822_base64 ((unsigned char *) stream->reply + 4,
+			     strlen (stream->reply + 4),len))) {
+    sprintf (tmp,"NNTP SERVER BUG (invalid challenge): %.80s",stream->reply+4);
+    mm_log (tmp,ERROR);
+  }
+  return ret;
+}
+
+
+/* Send authenticator response in BASE64
+ * Accepts: MAIL stream
+ *	    string to send
+ *	    length of string
+ * Returns: T, always
+ */
+
+long nntp_response (void *s,char *response,unsigned long size)
+{
+  SENDSTREAM *stream = (SENDSTREAM *) s;
+  unsigned long i,j;
+  char *t,*u;
+  if (response) {		/* make CRLFless BASE64 string */
+    if (size) {
+      for (t = (char *) rfc822_binary ((void *) response,size,&i),u = t,j = 0;
+	   j < i; j++) if (t[j] > ' ') *u++ = t[j];
+      *u = '\0';		/* tie off string */
+      i = nntp_send_work (stream,t,NIL);
+      fs_give ((void **) &t);
+    }
+    else i = nntp_send_work (stream,"",NIL);
+  }
+  else {			/* abort requested */
+    i = nntp_send_work (stream,"*",NIL);
+    stream->saslcancel = T;	/* mark protocol-requested SASL cancel */
+  }
+  return LONGT;
 }
 
 /* NNTP get reply

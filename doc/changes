@@ -1,6 +1,21 @@
 This file lists the changes made to TkRat between versions. It is much
 more detailed than the changes shown to the user when starting a new version.
 
+050603: ***** Released 2.1.5 *****
+
+050602: (bug fix) Upgraded c-client. The older version did crash on
+        some messages.
+
+041108: (bug fix) Fixed illegal double negation syntax.
+
+040510: (bug fix) Fixed problem where running the tkrat command in the
+        build directory did not pick up the libs from the build
+        directory. This happened if the package had been installed in
+        the tcl/tk lib directory.
+
+040430: (bug fix) Initialize c-client localhost to domain of default
+	role instead of local host name.
+
 040126: ***** Released 2.1.4 *****
 
 040126: (bug fix) Fixed problem where some messages turned up empty.

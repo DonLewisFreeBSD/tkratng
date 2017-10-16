@@ -22,8 +22,8 @@ proc TkRatStart {} {
     }
 
     # Initialize variables
-    set tkrat_version 2.1.4
-    set tkrat_version_date 20020809
+    set tkrat_version 2.1.5
+    set tkrat_version_date 20050602
     set idCnt 0
     set inbox ""
     set expAfter {}

@@ -881,7 +881,7 @@ proc FolderReadDo {handler foldercmd name} {
 	    before_new {
 		set index [FolderGetNextUnread $handler $start $dir]
 		if { 0 == [$fh(folder_handler) getFlag $index seen]} {
-		    incr index -$dir
+		    incr index [expr -1 * $dir]
 		    if {$index < 0 || $index >= $fh(size)} {
 			incr index $dir
 		    }

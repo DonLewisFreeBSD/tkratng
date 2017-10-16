@@ -10,10 +10,10 @@
  *		Internet: MRC@CAC.Washington.EDU
  *
  * Date:	24 May 1993
- * Last Edited:	9 April 2001
+ * Last Edited:	14 October 2003
  * 
  * The IMAP toolkit provided in this Distribution is
- * Copyright 2001 University of Washington.
+ * Copyright 1988-2004 University of Washington.
  * The full text of our legal notices is contained in the file called
  * CPYRIGHT, included with this Distribution.
  */
@@ -30,6 +30,18 @@
 #include <dos.h>
 #include "dummy.h"
 #include "misc.h"
+
+/* Function prototypes */
+
+DRIVER *dummy_valid (char *name);
+void *dummy_parameters (long function,void *value);
+MAILSTREAM *dummy_open (MAILSTREAM *stream);
+void dummy_close (MAILSTREAM *stream,long options);
+long dummy_ping (MAILSTREAM *stream);
+void dummy_check (MAILSTREAM *stream);
+void dummy_expunge (MAILSTREAM *stream);
+long dummy_copy (MAILSTREAM *stream,char *sequence,char *mailbox,long options);
+long dummy_append (MAILSTREAM *stream,char *mailbox,append_t af,void *data);
 
 /* Dummy routines */
 
@@ -197,7 +209,7 @@ MAILSTREAM *dummy_open (MAILSTREAM *stream)
   if (!stream->silent) {	/* only if silence not requested */
     mail_exists (stream,0);	/* say there are 0 messages */
     mail_recent (stream,0);
-    stream->uid_validity = 1;
+    stream->uid_validity = time (0);
   }
   stream->inbox = T;		/* note that it's an INBOX */
   return stream;		/* return success */

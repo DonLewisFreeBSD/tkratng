@@ -10,10 +10,10 @@
  *		Internet: MRC@CAC.Washington.EDU
  *
  * Date:	5 July 1988
- * Last Edited:	16 October 2001
+ * Last Edited:	27 April 2004
  * 
  * The IMAP toolkit provided in this Distribution is
- * Copyright 2001 University of Washington.
+ * Copyright 1988-2004 University of Washington.
  * The full text of our legal notices is contained in the file called
  * CPYRIGHT, included with this Distribution.
  *
@@ -36,9 +36,9 @@
  * Returns: string pointer
  */
 
-char *ucase (char *s)
+unsigned char *ucase (unsigned char *s)
 {
-  char *t;
+  unsigned char *t;
 				/* if lowercase covert to upper */
   for (t = s; *t; t++) if (!(*t & 0x80) && islower (*t)) *t = toupper (*t);
   return s;			/* return string */
@@ -50,9 +50,9 @@ char *ucase (char *s)
  * Returns: string pointer
  */
 
-char *lcase (char *s)
+unsigned char *lcase (unsigned char *s)
 {
-  char *t;
+  unsigned char *t;
 				/* if uppercase covert to lower */
   for (t = s; *t; t++) if (!(*t & 0x80) && isupper (*t)) *t = tolower (*t);
   return s;			/* return string */
@@ -378,14 +378,14 @@ int compare_ulong (unsigned long l1,unsigned long l2)
  * Returns: -1 if s1 < s2, 0 if s1 == s2, 1 if s1 > s2
  */
 
-int compare_cstring (char *s1,char *s2)
+int compare_cstring (unsigned char *s1,unsigned char *s2)
 {
   int i;
   if (!s1) return s2 ? -1 : 0;	/* empty string cases */
   else if (!s2) return 1;
   for (; *s1 && *s2; s1++,s2++)
-    if (i = (compare_ulong (isupper (*s1) ? tolower (*s1) : *s1,
-			    isupper (*s2) ? tolower (*s2) : *s2)))
+    if (i = (compare_ulong (islower (*s1) ? toupper (*s1) : *s1,
+			    islower (*s2) ? toupper (*s2) : *s2)))
       return i;			/* found a difference */
   if (*s1) return 1;		/* first string is longer */
   return *s2 ? -1 : 0;		/* second string longer : strings identical */
@@ -398,10 +398,10 @@ int compare_cstring (char *s1,char *s2)
  * Returns: -1 if s1 < s2, 0 if s1 == s2, 1 if s1 > s2
  */
 
-int compare_csizedtext (char *s1,SIZEDTEXT *s2)
+int compare_csizedtext (unsigned char *s1,SIZEDTEXT *s2)
 {
   int i;
-  char *s;
+  unsigned char *s;
   unsigned long j;
   if (!s1) return s2 ? -1 : 0;	/* null string cases */
   else if (!s2) return 1;

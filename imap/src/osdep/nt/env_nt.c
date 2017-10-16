@@ -10,22 +10,25 @@
  *		Internet: MRC@CAC.Washington.EDU
  *
  * Date:	1 August 1988
- * Last Edited:	8 February 2001
+ * Last Edited:	18 January 2005
  * 
  * The IMAP toolkit provided in this Distribution is
- * Copyright 2001 University of Washington.
+ * Copyright 1988-2005 University of Washington.
  * The full text of our legal notices is contained in the file called
  * CPYRIGHT, included with this Distribution.
  */
 
 static char *myUserName = NIL;	/* user name */
 static char *myLocalHost = NIL;	/* local host name */
+static char *myClientAddr = NIL;/* client host address */
 static char *myClientHost = NIL;/* client host name */
+static char *myServerAddr = NIL;/* server host address */
 static char *myServerHost = NIL;/* server host name */
 static char *myHomeDir = NIL;	/* home directory name */
 static char *myNewsrc = NIL;	/* newsrc file name */
 static char *sysInbox = NIL;	/* system inbox name */
 static long list_max_level = 5;	/* maximum level of list recursion */
+static short no822tztext = NIL;	/* disable RFC [2]822 timezone text */
 				/* home namespace */
 static NAMESPACE nshome = {"",'\\',NIL,NIL};
 				/* UNIX other user namespace */
@@ -64,8 +67,6 @@ void *env_parameters (long function,void *value)
 {
   void *ret = NIL;
   switch ((int) function) {
-  case SET_NAMESPACE:
-    fatal ("SET_NAMESPACE not permitted");
   case GET_NAMESPACE:
     ret = (void *) nslist;
     break;
@@ -107,6 +108,11 @@ void *env_parameters (long function,void *value)
     list_max_level = (long) value;
   case GET_LISTMAXLEVEL:
     ret = (void *) list_max_level;
+    break;
+  case SET_DISABLE822TZTEXT:
+    no822tztext = value ? T : NIL;
+  case GET_DISABLE822TZTEXT:
+    ret = (void *) (no822tztext ? VOIDT : NIL);
     break;
   case SET_BLOCKNOTIFY:
     mailblocknotify = (blocknotify_t) value;
@@ -153,7 +159,11 @@ static void do_date (char *date,char *prefix,char *fmt,int suffix)
     char *tz;
     tzset ();			/* get timezone from TZ environment stuff */
     tz = tzname[daylight ? (((struct tm *) t)->tm_isdst > 0) : 0];
-    if (tz && tz[0]) sprintf (date + strlen (date)," (%.50s)",tz);
+    if (tz && tz[0]) {
+      char *s;
+      for (s = tz; *s; s++) if (*s & 0x80) return;
+      sprintf (date + strlen (date)," (%.50s)",tz);
+    }
   }
 }
 
@@ -164,7 +174,8 @@ static void do_date (char *date,char *prefix,char *fmt,int suffix)
 
 void rfc822_date (char *date)
 {
-  do_date (date,"%s, ","%d %s %d %02d:%02d:%02d %+03d%02d",T);
+  do_date (date,"%s, ","%d %s %d %02d:%02d:%02d %+03d%02d",
+	   no822tztext ? NIL : T);
 }
 
 
@@ -223,14 +234,13 @@ void CALLBACK clock_ticked (UINT IDEvent,UINT uReserved,DWORD dwUser,
  * Accepts: server name for syslog or NIL
  *	    /etc/services service name or NIL
  *	    alternate /etc/services service name or NIL
- *	    SASL service name or NIL
  *	    clock interrupt handler
  *	    kiss-of-death interrupt handler
  *	    hangup interrupt handler
  *	    termination interrupt handler
  */
 
-void server_init (char *server,char *service,char *sslservice,char *sasl,
+void server_init (char *server,char *service,char *sslservice,
 		  void *clkint,void *kodint,void *hupint,void *trmint)
 {
   if (!check_nt ()) {
@@ -238,35 +248,28 @@ void server_init (char *server,char *service,char *sslservice,char *sasl,
     server_nli = T;		/* Windows server not logged in */
   }
 				/* only do this if for init call */
-  if (server && service && sslservice && sasl) {
+  if (server && service && sslservice) {
     long port;
     struct servent *sv;
-    struct sockaddr_in sin;
-    int i = sizeof (struct sockaddr_in);
-    /* Don't use tcp_clienthost() since reverse DNS problems may slow down the
-     * greeting message and cause the client to time out.
-     */
-    char *client = getpeername (0,(struct sockaddr *) &sin,(void *) &i) ?
-      "UNKNOWN" : inet_ntoa (sin.sin_addr);
 				/* set server name in syslog */
     openlog (server,LOG_PID,LOG_MAIL);
     fclose (stderr);		/* possibly save a process ID */
     /* Use SSL if SSL service, or if server starts with "s" and not service */
     if (((port = tcp_serverport ()) >= 0)) {
       if ((sv = getservbyname (service,"tcp")) && (port == ntohs (sv->s_port)))
-	syslog (LOG_DEBUG,"%s service init from %s",service,client);
+	syslog (LOG_DEBUG,"%s service init from %s",service,tcp_clientaddr ());
       else if ((sv = getservbyname (sslservice,"tcp")) &&
 	       (port == ntohs (sv->s_port))) {
-	syslog (LOG_DEBUG,"%s SSL service init from %s",sslservice,client);
+	syslog (LOG_DEBUG,"%s SSL service init from %s",sslservice,
+		tcp_clientaddr ());
 	ssl_server_init (server);
       }
       else {			/* not service or SSL service port */
-	syslog (LOG_DEBUG,"port %ld service init from %s",port,client);
+	syslog (LOG_DEBUG,"port %ld service init from %s",port,
+		tcp_clientaddr ());
 	if (*server == 's') ssl_server_init (server);
       }
     }
-				/* set SASL name */
-    mail_parameters (NIL,SET_SERVICENAME,(void *) sasl);
 				/* make sure stdout does binary */
     setmode (fileno (stdin),O_BINARY);
     setmode (fileno (stdout),O_BINARY);
@@ -336,11 +339,12 @@ long server_login (char *user,char *pass,char *authuser,int argc,char *argv[])
       (authuser && (strlen (authuser) >= MAILTMPLEN)))
     syslog (LOG_ALERT,"SYSTEM BREAK-IN ATTEMPT, host=%.80s",tcp_clienthost ());
   else if (logtry > 0) {	/* still have available logins? */
-    if (check_nt ()) {		/* NT: authentication user not supported yet */
-      if (authuser && *authuser);
-      else if (!pass);		/* ditto pass==NIL */
-				/* try to login and impersonate the guy */
-      else if ((
+				/* authentication user not supported */
+    if (authuser && *authuser && compare_cstring (authuser,user))
+      mm_log ("Authentication id must match authorization id",ERROR);
+    if (check_nt ()) {		/* NT: authserver_login() call not supported */
+      if (!pass) mm_log ("Unsupported authentication mechanism",ERROR);
+      else if ((		/* try to login and impersonate the guy */
 #ifdef LOGIN32_LOGON_NETWORK
 		LogonUser (user,".",pass,LOGON32_LOGON_NETWORK,
 			   LOGON32_PROVIDER_DEFAULT,&hdl) ||
@@ -353,10 +357,8 @@ long server_login (char *user,char *pass,char *authuser,int argc,char *argv[])
 			   LOGON32_PROVIDER_DEFAULT,&hdl)) &&
 	       ImpersonateLoggedOnUser (hdl)) return env_init (user,NIL);
     }
-    else {			/* Win9x: authentication user not supported */
-      if (authuser && *authuser);
-				/* done if from authserver_login() */
-      else if (!pass) server_nli = NIL;
+    else {			/* Win9x: done if from authserver_login() */
+      if (!pass) server_nli = NIL;
 				/* otherwise check MD5 database */
       else if (s = auth_md5_pwd (user)) {
 				/* change NLI state based on pwd match */
@@ -576,11 +578,7 @@ char *mailboxfile (char *dst,char *name)
   char *dir = myhomedir ();
   *dst = '\0';			/* default to empty string */
 				/* check for INBOX */
-  if (((name[0] == 'I') || (name[0] == 'i')) &&
-      ((name[1] == 'N') || (name[1] == 'n')) &&
-      ((name[2] == 'B') || (name[2] == 'b')) &&
-      ((name[3] == 'O') || (name[3] == 'o')) &&
-      ((name[4] == 'X') || (name[4] == 'x')) && !name[5]) return dst;
+  if (!compare_cstring (name,"INBOX")) return dst;
 				/* reject names with / */
   if (strchr (name,'/')) return NIL;
   else if (*name == '#') {	/* namespace names */
@@ -696,8 +694,8 @@ void unlockfd (int fd,char *lock)
 
 MAILSTREAM *default_proto (long type)
 {
-  extern MAILSTREAM DEFAULTPROTO;
-  return &DEFAULTPROTO;		/* return default driver's prototype */
+  extern MAILSTREAM CREATEPROTO,APPENDPROTO;
+  return type ? &APPENDPROTO : &CREATEPROTO;
 }
 
 /* Default block notify routine

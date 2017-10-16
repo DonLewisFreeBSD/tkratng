@@ -10,10 +10,10 @@
  *		Internet: MRC@CAC.Washington.EDU
  *
  * Date:	27 July 1988
- * Last Edited:	12 October 2001
+ * Last Edited:	6 July 2004
  * 
  * The IMAP toolkit provided in this Distribution is
- * Copyright 2001 University of Washington.
+ * Copyright 1988-2004 University of Washington.
  * The full text of our legal notices is contained in the file called
  * CPYRIGHT, included with this Distribution.
  *
@@ -21,10 +21,11 @@
  * Copyright 1988 Stanford University
  * and was developed in the Symbolic Systems Resources Group of the Knowledge
  * Systems Laboratory at Stanford University in 1987-88, and was funded by the
- * Biomedical Research Technology Program of the NationalInstitutes of Health
+ * Biomedical Research Technology Program of the National Institutes of Health
  * under grant number RR-00785.
  */
-
+
+
 #include <ctype.h>
 #include <stdio.h>
 #include "mail.h"
@@ -32,8 +33,39 @@
 #include "smtp.h"
 #include "rfc822.h"
 #include "misc.h"
+
+/* Constants */
+
+#define SMTPSSLPORT (long) 465	/* former assigned SSL TCP contact port */
+#define SMTPGREET (long) 220	/* SMTP successful greeting */
+#define SMTPAUTHED (long) 235	/* SMTP successful authentication */
+#define SMTPOK (long) 250	/* SMTP OK code */
+#define SMTPAUTHREADY (long) 334/* SMTP ready for authentication */
+#define SMTPREADY (long) 354	/* SMTP ready for data */
+#define SMTPSOFTFATAL (long) 421/* SMTP soft fatal code */
+#define SMTPWANTAUTH (long) 505	/* SMTP authentication needed */
+#define SMTPWANTAUTH2 (long) 530/* SMTP authentication needed */
+#define SMTPUNAVAIL (long) 550	/* SMTP mailbox unavailable */
+#define SMTPHARDERROR (long) 554/* SMTP miscellaneous hard failure */
 
 
+/* Convenient access to protocol-specific data */
+
+#define ESMTP stream->protocol.esmtp
+
+
+/* Function prototypes */
+
+void *smtp_challenge (void *s,unsigned long *len);
+long smtp_response (void *s,char *response,unsigned long size);
+long smtp_auth (SENDSTREAM *stream,NETMBX *mb,char *tmp);
+long smtp_rcpt (SENDSTREAM *stream,ADDRESS *adr,long *error);
+long smtp_send (SENDSTREAM *stream,char *command,char *args);
+long smtp_reply (SENDSTREAM *stream);
+long smtp_ehlo (SENDSTREAM *stream,char *host,NETMBX *mb);
+long smtp_fake (SENDSTREAM *stream,long code,char *text);
+long smtp_soutr (void *stream,char *s);
+
 /* Mailer parameters */
 
 static unsigned long smtp_maxlogintrials = MAXLOGINTRIALS;
@@ -122,8 +154,11 @@ SENDSTREAM *smtp_open_full (NETDRIVER *dv,char **hostlist,char *service,
     }
     else {			/* light tryssl flag if requested */
       mb.trysslflag = (options & SOP_TRYSSL) ? T : NIL;
+				/* default port */
+      if (mb.port) port = mb.port;
+      else if (!port) port = smtp_port ? smtp_port : SMTPTCPPORT;
       if (netstream =		/* try to open ordinary connection */
-	  net_open (&mb,dv,smtp_port ? smtp_port : port,
+	  net_open (&mb,dv,port,
 		    (NETDRIVER *) mail_parameters (NIL,GET_SSLDRIVER,NIL),
 		    "*smtps",smtp_sslport ? smtp_sslport : SMTPSSLPORT)) {
 	stream = (SENDSTREAM *) memset (fs_get (sizeof (SENDSTREAM)),0,
@@ -147,20 +182,29 @@ SENDSTREAM *smtp_open_full (NETDRIVER *dv,char **hostlist,char *service,
 	else if ((reply = smtp_ehlo (stream,s,&mb)) == SMTPOK) {
 	  NETDRIVER *ssld =(NETDRIVER *)mail_parameters(NIL,GET_SSLDRIVER,NIL);
 	  sslstart_t stls = (sslstart_t) mail_parameters(NIL,GET_SSLSTART,NIL);
-	  ESMTP.ok = T;		/* ESMTP server, has TLS? */
-	  if (stls && ESMTP.service.starttls && !mb.sslflag && !mb.notlsflag &&
+	  ESMTP.ok = T;		/* ESMTP server, start TLS if present */
+	  if (!dv && stls && ESMTP.service.starttls &&
+	      !mb.sslflag && !mb.notlsflag &&
 	      smtp_send (stream,"STARTTLS",NIL) == SMTPGREET) {
 	    mb.tlsflag = T;	/* TLS OK, get into TLS at this end */
 	    stream->netstream->dtb = ssld;
-	    if (!(stream->netstream->stream =
-		  (*stls) (stream->netstream->stream,mb.host,NET_TLSCLIENT |
-			   (mb.novalidate ? NET_NOVALIDATECERT : NIL)))) {
-				/* drat, drop this connection */
+				/* TLS started, negotiate it */
+	    if (!(stream->netstream->stream = (*stls)
+		  (stream->netstream->stream,mb.host,
+		   NET_TLSCLIENT | (mb.novalidate ? NET_NOVALIDATECERT:NIL)))){
+				/* TLS negotiation failed after STARTTLS */
+	      sprintf (tmp,"Unable to negotiate TLS with this server: %.80s",
+		       mb.host);
+	      mm_log (tmp,ERROR);
+				/* close without doing QUIT */
 	      if (stream->netstream) net_close (stream->netstream);
 	      stream->netstream = NIL;
 	      stream = smtp_close (stream);
 	    }
-	    if (stream && ((reply = smtp_ehlo (stream,s,&mb)) != SMTPOK)) {
+				/* re-negotiate EHLO */
+	    else if ((reply = smtp_ehlo (stream,s,&mb)) == SMTPOK)
+	      ESMTP.ok = T;
+	    else {
 	      sprintf (tmp,"SMTP EHLO failure after STARTLS: %.80s",
 		       stream->reply);
 	      mm_log (tmp,ERROR);
@@ -168,9 +212,11 @@ SENDSTREAM *smtp_open_full (NETDRIVER *dv,char **hostlist,char *service,
 	    }
 	  }
 	  else if (mb.tlsflag) {/* user specified /tls but can't do it */
-	    mm_log ("Unable to negotiate TLS with this server",ERROR);
-	    return NIL;
+	    sprintf (tmp,"TLS unavailable with this server: %.80s",mb.host);
+	    mm_log (tmp,ERROR);
+	    stream = smtp_close (stream);
 	  }
+
 				/* remote name for authentication */
 	  if (stream && ((mb.secflag || mb.user[0]))) {
 	    if (ESMTP.auth) {	/* use authenticator? */
@@ -192,7 +238,6 @@ SENDSTREAM *smtp_open_full (NETDRIVER *dv,char **hostlist,char *service,
 	    }
 	  }
 	}
-
 	else if (mb.secflag || mb.user[0]) {
 	  sprintf (tmp,"ESMTP failure: %.80s",stream->reply);
 	  mm_log (tmp,ERROR);
@@ -235,10 +280,12 @@ long smtp_auth (SENDSTREAM *stream,NETMBX *mb,char *tmp)
   char *lsterr = NIL;
   char usr[MAILTMPLEN];
   AUTHENTICATOR *at;
-  for (auths = ESMTP.auth; stream->netstream && auths &&
+  long ret = NIL;
+  for (auths = ESMTP.auth, stream->saslcancel = NIL;
+       !ret && stream->netstream && auths &&
        (at = mail_lookup_auth (find_rightmost_bit (&auths) + 1)); ) {
     if (lsterr) {		/* previous authenticator failed? */
-      sprintf (tmp,"Retrying using %s authentication after %s",
+      sprintf (tmp,"Retrying using %s authentication after %.80s",
 	       at->name,lsterr);
       mm_log (tmp,NIL);
       fs_give ((void **) &lsterr);
@@ -246,30 +293,39 @@ long smtp_auth (SENDSTREAM *stream,NETMBX *mb,char *tmp)
     trial = 0;			/* initial trial count */
     tmp[0] = '\0';		/* empty buffer */
     if (stream->netstream) do {
-      if (tmp[0]) mm_log (tmp,WARN);
+      if (lsterr) {
+	sprintf (tmp,"Retrying %s authentication after %.80s",at->name,lsterr);
+	mm_log (tmp,WARN);
+	fs_give ((void **) &lsterr);
+      }
+      stream->saslcancel = NIL;
       if (smtp_send (stream,"AUTH",at->name)) {
 				/* hide client authentication responses */
 	if (!(at->flags & AU_SECURE)) stream->sensitive = T;
 	if ((*at->client) (smtp_challenge,smtp_response,"smtp",mb,stream,
 			   &trial,usr)) {
-	  if (stream->replycode == SMTPAUTHED) return LONGT;
+	  if (stream->replycode == SMTPAUTHED) {
+	    ESMTP.auth = NIL;	/* disable authenticators */
+	    ret = LONGT;
+	  }
 				/* if main program requested cancellation */
-	  if (!trial) mm_log ("SMTP Authentication cancelled",ERROR);
+	  else if (!trial) mm_log ("SMTP Authentication cancelled",ERROR);
 	}
 	stream->sensitive = NIL;/* unhide */
       }
-      if (trial) {		/* only if not aborting */
-	lsterr = cpystr (stream->reply);
-	sprintf (tmp,"Retrying %s authentication after %s",at->name,lsterr);
-      }
-    } while (stream->netstream && trial && (trial < smtp_maxlogintrials));
+				/* remember response if error and no cancel */
+      if (!ret && trial) lsterr = cpystr (stream->reply);
+    } while (!ret && stream->netstream && trial &&
+	     (trial < smtp_maxlogintrials));
   }
   if (lsterr) {			/* previous authenticator failed? */
-    sprintf (tmp,"Can not authenticate to SMTP server: %s",lsterr);
-    mm_log (tmp,ERROR);
+    if (!stream->saslcancel) {	/* don't do this if a cancel */
+      sprintf (tmp,"Can not authenticate to SMTP server: %.80s",lsterr);
+      mm_log (tmp,ERROR);
+    }
     fs_give ((void **) &lsterr);
   }
-  return NIL;			/* authentication failed */
+  return ret;			/* authentication failed */
 }
 
 /* Get challenge to authenticator in binary
@@ -280,10 +336,16 @@ long smtp_auth (SENDSTREAM *stream,NETMBX *mb,char *tmp)
 
 void *smtp_challenge (void *s,unsigned long *len)
 {
+  char tmp[MAILTMPLEN];
+  void *ret = NIL;
   SENDSTREAM *stream = (SENDSTREAM *) s;
-  return (stream->replycode == SMTPAUTHREADY) ?
-    rfc822_base64 ((unsigned char *) stream->reply+4,
-		   strlen (stream->reply+4),len) : NIL;
+  if ((stream->replycode == SMTPAUTHREADY) &&
+      !(ret = rfc822_base64 ((unsigned char *) stream->reply + 4,
+			     strlen (stream->reply + 4),len))) {
+    sprintf (tmp,"SMTP SERVER BUG (invalid challenge): %.80s",stream->reply+4);
+    mm_log (tmp,ERROR);
+  }
+  return ret;
 }
 
 
@@ -309,8 +371,10 @@ long smtp_response (void *s,char *response,unsigned long size)
     }
     else i = smtp_send (stream,"",NIL);
   }
-				/* abort requested */
-  else i = smtp_send (stream,"*",NIL);
+  else {			/* abort requested */
+    i = smtp_send (stream,"*",NIL);
+    stream->saslcancel = T;	/* mark protocol-requested SASL cancel */
+  }
   return LONGT;
 }
 
@@ -329,6 +393,7 @@ SENDSTREAM *smtp_close (SENDSTREAM *stream)
 				/* clean up */
     if (stream->host) fs_give ((void **) &stream->host);
     if (stream->reply) fs_give ((void **) &stream->reply);
+    if (ESMTP.dsn.envid) fs_give ((void **) &ESMTP.dsn.envid);
     fs_give ((void **) &stream);/* flush the stream */
   }
   return NIL;
@@ -351,16 +416,31 @@ long smtp_mail (SENDSTREAM *stream,char *type,ENVELOPE *env,BODY *body)
    */
   char tmp[8*MAILTMPLEN];
   long error = NIL;
-  long retry;
+  long retry = NIL;
   if (!(env->to || env->cc || env->bcc)) {
   				/* no recipients in request */
     smtp_fake (stream,SMTPHARDERROR,"No recipients specified");
     return NIL;
   }
-  do {
-    retry = NIL;		/* no retry at this point */
-				/* make sure stream is in good shape */
+  do {				/* make sure stream is in good shape */
     smtp_send (stream,"RSET",NIL);
+    if (retry) {		/* need to retry with authentication? */
+      NETMBX mb;
+				/* yes, build remote name for authentication */
+      sprintf (tmp,"{%.200s/smtp%s}<none>",
+	       (int) mail_parameters (NIL,GET_TRUSTDNS,NIL) ?
+	       ((int) mail_parameters (NIL,GET_SASLUSESPTRNAME,NIL) ?
+		net_remotehost (stream->netstream) :
+		net_host (stream->netstream)) :
+	       stream->host,
+	       (stream->netstream->dtb ==
+		(NETDRIVER *) mail_parameters (NIL,GET_SSLDRIVER,NIL)) ?
+	       "/ssl" : "");
+      mail_valid_net_parse (tmp,&mb);
+      if (!smtp_auth (stream,&mb,tmp)) return NIL;
+      retry = NIL;		/* no retry at this point */
+    }
+
     strcpy (tmp,"FROM:<");	/* compose "MAIL FROM:<return-path>" */
 #ifdef RFC2821
     if (env->return_path && env->return_path->host &&
@@ -381,23 +461,23 @@ long smtp_mail (SENDSTREAM *stream,char *type,ENVELOPE *env,BODY *body)
     if (ESMTP.ok) {
       if (ESMTP.eightbit.ok && ESMTP.eightbit.want)
 	strcat (tmp," BODY=8BITMIME");
-      if (ESMTP.dsn.ok && ESMTP.dsn.want)
+      if (ESMTP.dsn.ok && ESMTP.dsn.want) {
 	strcat (tmp,ESMTP.dsn.full ? " RET=FULL" : " RET=HDRS");
+	if (ESMTP.dsn.envid)
+	  sprintf (tmp + strlen (tmp)," ENVID=%.100s",ESMTP.dsn.envid);
+      }
     }
 				/* send "MAIL FROM" command */
     switch (smtp_send (stream,type,tmp)) {
-    case SMTPOK:		/* looks good */
-      break;
+    case SMTPUNAVAIL:		/* mailbox unavailable? */
     case SMTPWANTAUTH:		/* wants authentication? */
     case SMTPWANTAUTH2:
-      if (ESMTP.auth && smtp_send_auth (stream)) {
-	retry = T;
-	break;
-      }
+      if (ESMTP.auth) retry = T;/* yes, retry with authentication */
+    case SMTPOK:		/* looks good */
+      break;
     default:			/* other failure */
       return NIL;
     }
-
 				/* negotiate the recipients */
     if (!retry && env->to) retry = smtp_rcpt (stream,env->to,&error);
     if (!retry && env->cc) retry = smtp_rcpt (stream,env->cc,&error);
@@ -430,7 +510,7 @@ long smtp_mail (SENDSTREAM *stream,char *type,ENVELOPE *env,BODY *body)
 
 long smtp_rcpt (SENDSTREAM *stream,ADDRESS *adr,long *error)
 {
-  char *s,tmp[MAILTMPLEN];
+ char *s,tmp[2*MAILTMPLEN],orcpt[MAILTMPLEN];
   while (adr) {			/* for each address on the list */
 				/* clear any former error */
     if (adr->error) fs_give ((void **) &adr->error);
@@ -471,13 +551,20 @@ long smtp_rcpt (SENDSTREAM *stream,ADDRESS *adr,long *error)
 				/* tie off last comma */
 	  if (*s) s[strlen (s) - 1] = '\0';
 	  else strcat (tmp,"NEVER");
+	  if (adr->orcpt.addr) {
+	    sprintf (orcpt,"%.498s;%.498s",
+		     adr->orcpt.type ? adr->orcpt.type : "rfc822",
+		     adr->orcpt.addr);
+	    sprintf (tmp + strlen (tmp)," ORCPT=%.500s",orcpt);
+	  }
 	}
 	switch (smtp_send (stream,"RCPT",tmp)) {
 	case SMTPOK:		/* looks good */
 	  break;
+	case SMTPUNAVAIL:	/* mailbox unavailable? */
 	case SMTPWANTAUTH:	/* wants authentication? */
 	case SMTPWANTAUTH2:
-	  if (ESMTP.auth && smtp_send_auth (stream)) return T;
+	  if (ESMTP.auth) return T;
 	default:		/* other failure */
 	  *error = T;		/* note that an error occurred */
 	  adr->error = cpystr (stream->reply);
@@ -516,29 +603,6 @@ long smtp_send (SENDSTREAM *stream,char *command,char *args)
   fs_give ((void **) &s);
   return ret;
 }
-
-
-/* SMTP send authentication if needed
- * Accepts: SEND stream
- * Returns: T if need to redo command, NIL otherwise
- */
-
-long smtp_send_auth (SENDSTREAM *stream)
-{
-  NETMBX mb;
-  char tmp[MAILTMPLEN];
-				/* remote name for authentication */
-  sprintf (tmp,"{%.200s/smtp%s}<none>",
-	   (int) mail_parameters (NIL,GET_TRUSTDNS,NIL) ?
-	   ((int) mail_parameters (NIL,GET_SASLUSESPTRNAME,NIL) ?
-	    net_remotehost (stream->netstream) : net_host (stream->netstream)):
-	   stream->host,
-	   (stream->netstream->dtb ==
-	    (NETDRIVER *) mail_parameters (NIL,GET_SSLDRIVER,NIL)) ?
-	   "/ssl" : "");
-  mail_valid_net_parse (tmp,&mb);
-  return smtp_auth (stream,&mb,tmp);
-}
 
 /* Simple Mail Transfer Protocol get reply
  * Accepts: SMTP stream
@@ -575,6 +639,7 @@ long smtp_ehlo (SENDSTREAM *stream,char *host,NETMBX *mb)
   char *s,tmp[MAILTMPLEN];
 				/* clear ESMTP data */
   memset (&ESMTP,0,sizeof (ESMTP));
+  if (mb->loser) return 500;	/* never do EHLO if a loser */
   sprintf (tmp,"EHLO %s",host);	/* build the complete command */
   if (stream->debug) mm_dlog (tmp);
   strcat (tmp,"\015\012");

@@ -420,7 +420,11 @@ RatStdFolderCreate(Tcl_Interp *interp, Tcl_Obj *defPtr)
      * Now it is time to initialize things
      */
     if (initialize) {
-	env_parameters(SET_LOCALHOST, (void*)Tcl_GetHostName());
+        char *role, *domain;
+        
+	role = Tcl_GetVar2(interp, "option", "default_role",TCL_GLOBAL_ONLY);
+        domain = RatGetCurrent(interp, RAT_HOST, role);
+	env_parameters(SET_LOCALHOST, (void*)domain);
 	initialize = 0;
     }
 

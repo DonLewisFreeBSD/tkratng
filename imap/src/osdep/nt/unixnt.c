@@ -10,10 +10,15 @@
  *		Internet: MRC@CAC.Washington.EDU
  *
  * Date:	20 December 1989
- * Last Edited:	14 August 2001
+    if (((mailbox[0] == 'I') || (mailbox[0] == 'i')) &&
+	((mailbox[1] == 'N') || (mailbox[1] == 'n')) &&
+	((mailbox[2] == 'B') || (mailbox[2] == 'b')) &&
+	((mailbox[3] == 'O') || (mailbox[3] == 'o')) &&
+	((mailbox[4] == 'X') || (mailbox[4] == 'x')) && !mailbox[5]) {
+ * Last Edited:	4 November 2004
  * 
  * The IMAP toolkit provided in this Distribution is
- * Copyright 2001 University of Washington.
+ * Copyright 1988-2004 University of Washington.
  * The full text of our legal notices is contained in the file called
  * CPYRIGHT, included with this Distribution.
  */
@@ -30,7 +35,7 @@
  *
  *  Lift a leg, Yunie.  Luv ya forever!!!!
  */
-
+
 #include <stdio.h>
 #include <ctype.h>
 #include <errno.h>
@@ -41,12 +46,90 @@ extern int errno;		/* just in case */
 #include <fcntl.h>
 #include <sys/stat.h>
 #include <sys/utime.h>
-#define DOTLOCK char
 #include "unixnt.h"
 #include "pseudo.h"
 #include "fdstring.h"
 #include "misc.h"
 #include "dummy.h"
+
+/* UNIX I/O stream local data */
+
+typedef struct unix_local {
+  unsigned int dirty : 1;	/* disk copy needs updating */
+  unsigned int pseudo : 1;	/* uses a pseudo message */
+  int fd;			/* mailbox file descriptor */
+  int ld;			/* lock file descriptor */
+  char *lname;			/* lock file name */
+  off_t filesize;		/* file size parsed */
+  time_t filetime;		/* last file time */
+  time_t lastsnarf;		/* last snarf time (for mbox driver) */
+  unsigned char *buf;		/* temporary buffer */
+  unsigned long buflen;		/* current size of temporary buffer */
+  unsigned long uid;		/* current text uid */
+  SIZEDTEXT text;		/* current text */
+  unsigned long textlen;	/* current text length */
+  char *line;			/* returned line */
+} UNIXLOCAL;
+
+
+/* Convenient access to local data */
+
+#define LOCAL ((UNIXLOCAL *) stream->local)
+
+
+/* UNIX protected file structure */
+
+typedef struct unix_file {
+  MAILSTREAM *stream;		/* current stream */
+  off_t curpos;			/* current file position */
+  off_t protect;		/* protected position */
+  off_t filepos;		/* current last written file position */
+  char *buf;			/* overflow buffer */
+  size_t buflen;		/* current overflow buffer length */
+  char *bufpos;			/* current buffer position */
+} UNIXFILE;
+
+/* Function prototypes */
+
+DRIVER *unix_valid (char *name);
+long unix_isvalid_fd (int fd);
+void *unix_parameters (long function,void *value);
+void unix_scan (MAILSTREAM *stream,char *ref,char *pat,char *contents);
+void unix_list (MAILSTREAM *stream,char *ref,char *pat);
+void unix_lsub (MAILSTREAM *stream,char *ref,char *pat);
+long unix_create (MAILSTREAM *stream,char *mailbox);
+long unix_delete (MAILSTREAM *stream,char *mailbox);
+long unix_rename (MAILSTREAM *stream,char *old,char *newname);
+MAILSTREAM *unix_open (MAILSTREAM *stream);
+void unix_close (MAILSTREAM *stream,long options);
+char *unix_header (MAILSTREAM *stream,unsigned long msgno,
+		   unsigned long *length,long flags);
+long unix_text (MAILSTREAM *stream,unsigned long msgno,STRING *bs,long flags);
+char *unix_text_work (MAILSTREAM *stream,MESSAGECACHE *elt,
+		      unsigned long *length,long flags);
+void unix_flagmsg (MAILSTREAM *stream,MESSAGECACHE *elt);
+long unix_ping (MAILSTREAM *stream);
+void unix_check (MAILSTREAM *stream);
+void unix_check (MAILSTREAM *stream);
+void unix_expunge (MAILSTREAM *stream);
+long unix_copy (MAILSTREAM *stream,char *sequence,char *mailbox,long options);
+long unix_append (MAILSTREAM *stream,char *mailbox,append_t af,void *data);
+int unix_append_msg (MAILSTREAM *stream,FILE *sf,char *flags,char *date,
+		     STRING *msg);
+
+void unix_abort (MAILSTREAM *stream);
+char *unix_file (char *dst,char *name);
+int unix_lock (char *file,int flags,int mode,char *lock,int op);
+void unix_unlock (int fd,MAILSTREAM *stream,char *lock);
+int unix_parse (MAILSTREAM *stream,char *lock,int op);
+char *unix_mbxline (MAILSTREAM *stream,STRING *bs,unsigned long *size);
+unsigned long unix_pseudo (MAILSTREAM *stream,char *hdr);
+unsigned long unix_xstatus (MAILSTREAM *stream,char *status,MESSAGECACHE *elt,
+			    long flag);
+long unix_rewrite (MAILSTREAM *stream,unsigned long *nexp,char *lock);
+long unix_extend (MAILSTREAM *stream,unsigned long size);
+void unix_write (UNIXFILE *f,char *s,unsigned long i);
+void unix_phys_write (UNIXFILE *f,char *buf,size_t size);
 
 /* UNIX mail routines */
 
@@ -55,7 +138,8 @@ extern int errno;		/* just in case */
 
 DRIVER unixdriver = {
   "unix",			/* driver name */
-  DR_LOCAL|DR_MAIL,		/* driver flags */
+				/* driver flags */
+  DR_LOCAL|DR_MAIL|DR_NONEWMAILRONLY,
   (DRIVER *) NIL,		/* next driver */
   unix_valid,			/* mailbox is valid for us */
   unix_parameters,		/* manipulate parameters */
@@ -130,10 +214,13 @@ DRIVER *unix_valid (char *name)
 	}
       }
       close (fd);		/* close the file */
-				/* preserve atime and mtime */
-      times.actime = sbuf.st_atime;
-      times.modtime = sbuf.st_mtime;
-      utime (file,&times);	/* set the times */
+				/* \Marked status? */
+      if ((sbuf.st_ctime > sbuf.st_atime) || (sbuf.st_mtime > sbuf.st_atime)) {
+				/* yes, preserve atime and mtime */
+	times.actime = sbuf.st_atime;
+	times.modtime = sbuf.st_mtime;
+	utime (file,&times);	/* set the times */
+      }
     }
   }
   return ret;			/* return what we should */
@@ -201,9 +288,9 @@ void unix_lsub (MAILSTREAM *stream,char *ref,char *pat)
 
 long unix_create (MAILSTREAM *stream,char *mailbox)
 {
-  char *s,mbx[MAILTMPLEN],tmp[MAILTMPLEN], ctmp[MAILTMPLEN];
+  char *s,mbx[MAILTMPLEN],tmp[MAILTMPLEN];
   long ret = NIL;
-  int fd, ctmplen;
+  int fd;
   time_t ti = time (0);
   if (!(s = dummy_file (mbx,mailbox))) {
     sprintf (tmp,"Can't create %.80s: invalid name",mailbox);
@@ -220,11 +307,9 @@ long unix_create (MAILSTREAM *stream,char *mailbox)
     }
     else {			/* initialize header */
       memset (tmp,'\0',MAILTMPLEN);
-      strcpy(ctmp, ctime(&ti));
-      ctmplen = strlen(ctmp);
-      if(ctmp[ctmplen-2] == '\r') ctmp[ctmplen-2] = '\0';
-      else if(ctmp[ctmplen-1] == '\n') ctmp[ctmplen-1] = '\0';
-      sprintf (tmp,"From %s %s\r\nDate: ",pseudo_from,ctmp);
+      sprintf (tmp,"From %s %s",pseudo_from,ctime (&ti));
+      if (s = strpbrk (tmp,"\r\n")) *s = '\0';
+      strcat (tmp,"\r\nDate: ");
       rfc822_fixed_date (s = tmp + strlen (tmp));
       sprintf (s += strlen (s),	/* write the pseudo-header */
 	       "\r\nFrom: %s <%s@%s>\r\nSubject: %s\r\nX-IMAP: %010lu 0000000000\r\nStatus: RO\r\n\r\n%s\r\n\r\n",
@@ -270,12 +355,16 @@ long unix_rename (MAILSTREAM *stream,char *old,char *newname)
   int fd,ld;
   struct stat sbuf;
   mm_critical (stream);		/* get the c-client lock */
-  if (newname && (!((s = dummy_file (tmp,newname)) && *s) ||
-		  ((s = strrchr (s,'\\')) && !s[1])))
-    sprintf (tmp,"Can't rename mailbox %.80s to %.80s: invalid name",
+  if (!dummy_file (file,old) ||
+      (newname && (!(s = dummy_file (tmp,newname)) ||
+		   ((s = strrchr (s,'\\')) && !s[1]))))
+    sprintf (tmp,newname ?
+	     "Can't rename mailbox %.80s to %.80s: invalid name" :
+	     "Can't delete mailbox %.80s: invalid name",
 	     old,newname);
-  else if ((ld = lockname (lock,dummy_file (file,old),NIL)) < 0)
+  else if ((ld = lockname (lock,file,NIL)) < 0)
     sprintf (tmp,"Can't get lock for mailbox %.80s",old);
+
   else {			/* lock out other c-clients */
     if (flock (ld,LOCK_EX|LOCK_NB)) {
       close (ld);		/* couldn't lock, give up on it then */
@@ -289,7 +378,8 @@ long unix_rename (MAILSTREAM *stream,char *old,char *newname)
       unix_unlock(fd,NIL,lockx);/* pacify evil NTFS */
       if (newname) {		/* want rename? */
 				/* found superior to destination name? */
-	if (s && (s != tmp) && ((tmp[1] != ':') || (s != tmp + 2))) {
+	if ((s = strrchr (tmp,'\\')) && (s != tmp) &&
+	    ((tmp[1] != ':') || (s != tmp + 2))) {
 	  c = s[1];		/* remember character after delimiter */
 	  *s = s[1] = '\0';	/* tie off name at delimiter */
 				/* name doesn't exist, create it */
@@ -340,13 +430,19 @@ MAILSTREAM *unix_open (MAILSTREAM *stream)
 				/* note if an INBOX or not */
   stream->inbox = !compare_cstring (stream->mailbox,"INBOX");
 				/* canonicalize the stream mailbox name */
-  dummy_file (tmp,stream->mailbox);
+  if (!dummy_file (tmp,stream->mailbox)) {
+    sprintf (tmp,"Can't open - invalid name: %.80s",stream->mailbox);
+    mm_log (tmp,ERROR);
+    return NIL;
+  }
 				/* flush old name */
   fs_give ((void **) &stream->mailbox);
 				/* save canonical name */
   stream->mailbox = cpystr (tmp);
   LOCAL->fd = LOCAL->ld = -1;	/* no file or state locking yet */
   LOCAL->buf = (char *) fs_get ((LOCAL->buflen = CHUNK) + 1);
+  LOCAL->text.data = (unsigned char *)
+    fs_get ((LOCAL->text.size = MAXMESSAGESIZE) + 1);
   stream->sequence++;		/* bump sequence number */
 
   if (!stream->rdonly) {	/* make lock for read/write access */
@@ -432,21 +528,23 @@ char *unix_header (MAILSTREAM *stream,unsigned long msgno,
 		   unsigned long *length,long flags)
 {
   MESSAGECACHE *elt;
-  char *s;
+  unsigned char *s;
   *length = 0;			/* default to empty */
   if (flags & FT_UID) return "";/* UID call "impossible" */
   elt = mail_elt (stream,msgno);/* get cache */
   if (!unix_hlines) {		/* once only code */
     STRINGLIST *lines = unix_hlines = mail_newstringlist ();
-    lines->text.size = strlen (lines->text.data = (unsigned char *) "Status");
+    lines->text.size = strlen ((char *) (lines->text.data =
+					 (unsigned char *) "Status"));
     lines = lines->next = mail_newstringlist ();
-    lines->text.size = strlen (lines->text.data = (unsigned char *)
-			       "X-Status");
+    lines->text.size = strlen ((char *) (lines->text.data =
+					 (unsigned char *) "X-Status"));
     lines = lines->next = mail_newstringlist ();
-    lines->text.size = strlen (lines->text.data = (unsigned char *)
-			       "X-Keywords");
+    lines->text.size = strlen ((char *) (lines->text.data =
+					 (unsigned char *) "X-Keywords"));
     lines = lines->next = mail_newstringlist ();
-    lines->text.size = strlen (lines->text.data = (unsigned char *) "X-UID");
+    lines->text.size = strlen ((char *) (lines->text.data =
+					 (unsigned char *) "X-UID"));
     lines = lines->next = mail_newstringlist ();
     lines->text.size = strlen ((char *) (lines->text.data =
 					 (unsigned char *) "X-IMAP"));
@@ -521,7 +619,7 @@ char *unix_text_work (MAILSTREAM *stream,MESSAGECACHE *elt,
 {
   FDDATA d;
   STRING bs;
-  char *s,tmp[CHUNK];
+  unsigned char *s,tmp[CHUNK];
 				/* go to text position */
   lseek (LOCAL->fd,elt->private.special.offset +
 	 elt->private.msg.text.offset,L_SET);
@@ -535,19 +633,25 @@ char *unix_text_work (MAILSTREAM *stream,MESSAGECACHE *elt,
     read (LOCAL->fd,LOCAL->buf,elt->private.msg.text.text.size);
 				/* got text, tie off string */
     LOCAL->buf[*length = elt->private.msg.text.text.size] = '\0';
+    return LOCAL->buf;
   }
-  else {			/* need to make a CRLF version */
-    if (elt->rfc822_size > LOCAL->buflen) {
+				/* have it cached already? */
+  if (elt->private.uid != LOCAL->uid) {
+				/* not cached, cache it now */
+    LOCAL->uid = elt->private.uid;
+				/* is buffer big enough? */
+    if (elt->rfc822_size > LOCAL->text.size) {
       /* excessively conservative, but the right thing is too hard to do */
-      fs_give ((void **) &LOCAL->buf);
-      LOCAL->buf = (char *) fs_get ((LOCAL->buflen = elt->rfc822_size) + 1);
+      fs_give ((void **) &LOCAL->text.data);
+      LOCAL->text.data = (unsigned char *)
+	fs_get ((LOCAL->text.size = elt->rfc822_size) + 1);
     }
     d.fd = LOCAL->fd;		/* yes, set up file descriptor */
     d.pos = elt->private.special.offset + elt->private.msg.text.offset;
     d.chunk = tmp;		/* initial buffer chunk */
     d.chunksize = CHUNK;	/* file chunk size */
     INIT (&bs,fd_string,&d,elt->private.msg.text.text.size);
-    for (s = LOCAL->buf; SIZE (&bs);) switch (CHR (&bs)) {
+    for (s = (char *) LOCAL->text.data; SIZE (&bs);) switch (CHR (&bs)) {
     case '\r':			/* carriage return seen */
       *s++ = SNX (&bs);		/* copy it and any succeeding LF */
       if (SIZE (&bs) && (CHR (&bs) == '\n')) *s++ = SNX (&bs);
@@ -558,9 +662,11 @@ char *unix_text_work (MAILSTREAM *stream,MESSAGECACHE *elt,
       *s++ = SNX (&bs);		/* copy characters */
     }
     *s = '\0';			/* tie off buffer */
-    *length = s - LOCAL->buf;	/* calculate length */
+				/* calculate length of cached data */
+    LOCAL->textlen = s - LOCAL->text.data;
   }
-  return LOCAL->buf;
+  *length = LOCAL->textlen;	/* return from cache */
+  return (char *) LOCAL->text.data;
 }
 
 /* UNIX per-message modify flag
@@ -688,11 +794,7 @@ long unix_copy (MAILSTREAM *stream,char *sequence,char *mailbox,long options)
 				/* make sure valid mailbox */
   if (!unix_valid (mailbox)) switch (errno) {
   case ENOENT:			/* no such file? */
-    if (((mailbox[0] == 'I') || (mailbox[0] == 'i')) &&
-	((mailbox[1] == 'N') || (mailbox[1] == 'n')) &&
-	((mailbox[2] == 'B') || (mailbox[2] == 'b')) &&
-	((mailbox[3] == 'O') || (mailbox[3] == 'o')) &&
-	((mailbox[4] == 'X') || (mailbox[4] == 'x')) && !mailbox[5]) {
+    if (!compare_cstring (mailbox,"INBOX")) {
       if (pc) return (*pc) (stream,sequence,mailbox,options);
       unix_create (NIL,"INBOX");/* create empty INBOX */
       break;
@@ -729,7 +831,11 @@ long unix_copy (MAILSTREAM *stream,char *sequence,char *mailbox,long options)
     if ((elt = mail_elt (stream,i))->sequence) {
       lseek (LOCAL->fd,elt->private.special.offset,L_SET);
       read (LOCAL->fd,LOCAL->buf,elt->private.special.text.size);
-      if (write (fd,LOCAL->buf,elt->private.special.text.size) < 0) ret = NIL;
+      if (LOCAL->buf[(j = elt->private.special.text.size) - 2] != '\r') {
+	LOCAL->buf[j - 1] = '\r';
+	LOCAL->buf[j++] = '\n';
+      }
+      if (write (fd,LOCAL->buf,j) < 0) ret = NIL;
       else {			/* internal header succeeded */
 	s = unix_header (stream,i,&j,NIL);
 				/* header size, sans trailing newline */
@@ -751,8 +857,13 @@ long unix_copy (MAILSTREAM *stream,char *sequence,char *mailbox,long options)
     ftruncate (fd,sbuf.st_size);
     ret = NIL;
   }
-  times.actime = sbuf.st_atime;	/* preserve atime */
   times.modtime = time (0);	/* set mtime to now */
+				/* set atime to now-1 if successful copy */
+  if (ret) times.actime = times.modtime - 1;
+		
+  else times.actime =		/* else preserve \Marked status */
+	 ((sbuf.st_ctime > sbuf.st_atime) || (sbuf.st_mtime > sbuf.st_atime)) ?
+	 sbuf.st_atime : times.modtime;
   utime (file,&times);		/* set the times */
   unix_unlock (fd,NIL,lock);	/* unlock and close mailbox */
   mm_nocritical (stream);	/* release critical */
@@ -787,16 +898,16 @@ long unix_append (MAILSTREAM *stream,char *mailbox,append_t af,void *data)
   MESSAGECACHE elt;
   STRING *message;
   long ret = LONGT;
-				/* default stream to prototype */
-  if (!stream) stream = &unixproto;
+  if (!stream) {		/* stream specified? */
+    stream = &unixproto;	/* no, default stream to prototype */
+    for (i = 0; i < NUSERFLAGS && stream->user_flags[i]; ++i)
+      fs_give ((void **) &stream->user_flags[i]);
+    stream->kwd_create = T;	/* allow new flags */
+  }
 				/* make sure valid mailbox */
   if (!unix_valid (mailbox)) switch (errno) {
   case ENOENT:			/* no such file? */
-    if (((mailbox[0] == 'I') || (mailbox[0] == 'i')) &&
-	((mailbox[1] == 'N') || (mailbox[1] == 'n')) &&
-	((mailbox[2] == 'B') || (mailbox[2] == 'b')) &&
-	((mailbox[3] == 'O') || (mailbox[3] == 'o')) &&
-	((mailbox[4] == 'X') || (mailbox[4] == 'x')) && !mailbox[5]) {
+    if (!compare_cstring (mailbox,"INBOX")) {
       unix_create (NIL,"INBOX");/* create empty INBOX */
       break;
     }
@@ -871,17 +982,19 @@ long unix_append (MAILSTREAM *stream,char *mailbox,append_t af,void *data)
   for (; i && ((j = fread (buf,1,min ((long) BUFLEN,i),sf)) &&
 	       (fwrite (buf,1,j,df) == j)); i -= j);
   fclose (sf);			/* done with scratch file */
-  times.actime = sbuf.st_atime;	/* preserve atime */
-				/* make sure append wins */
-  if (i || (fflush (df) == EOF)) {
+  times.modtime = time (0);	/* set mtime to now */
+				/* make sure append wins, fsync() necessary */
+  if (i || (fflush (df) == EOF) || fsync (fd)) {
     sprintf (buf,"Message append failed: %s",strerror (errno));
     mm_log (buf,ERROR);
     ftruncate (fd,sbuf.st_size);/* revert file */
-				/* preserve mtime */
-    times.modtime = sbuf.st_mtime;
+    times.actime =		/* preserve \Marked status */
+      ((sbuf.st_ctime > sbuf.st_atime) || (sbuf.st_mtime > sbuf.st_atime)) ?
+      sbuf.st_atime : times.modtime;
     ret = NIL;			/* return error */
   }
-  else times.modtime = time (0);/* set mtime to now */
+				/* set atime to now-1 if successful copy */
+  else times.actime = times.modtime - 1;
   utime (file,&times);		/* set the times */
   unix_unlock (fd,NIL,lock);	/* unlock and close mailbox */
   fclose (df);			/* note that unix_unlock() released the fd */
@@ -903,6 +1016,7 @@ int unix_append_msg (MAILSTREAM *stream,FILE *sf,char *flags,char *date,
   int ti,zn,c;
   unsigned long i,uf;
   char *x,tmp[MAILTMPLEN];
+  int hdrp = T;
   long f = mail_parse_flags (stream,flags,&uf);
 				/* tie off date without newline */
   if (x = strpbrk (strcpy (tmp,date),"\r\n")) *x = '\0';
@@ -921,14 +1035,20 @@ int unix_append_msg (MAILSTREAM *stream,FILE *sf,char *flags,char *date,
       return NIL;
 				/* tie off flags */
   if ((putc ('\r', sf) == EOF) || (putc ('\n',sf) == EOF)) return NIL;
+
   while (SIZE (msg)) {		/* copy text to scratch file */
-				/* possible delimiter if line starts with F */
-    if ((c = 0xff & SNX (msg)) == 'F') {
+				/* disregard CRs */
+    while ((c = (SIZE (msg)) ? (0xff & SNX (msg)) : '\n') == '\r');
+				/* see if line needs special treatment */
+    if ((c == 'F') || (hdrp && ((c == 'S') || (c == 'X')))) {
 				/* copy line to buffer */
-      for (i = 1,tmp[0] = c; SIZE (msg) && (c != '\n') && (i < MAILTMPLEN);)
-	if (((c = 0xff & SNX (msg)) != '\r') || !(SIZE (msg)) ||
-	    (CHR (msg) != '\n')) {
-	  if (c == '\n') tmp[i++] = '\r';
+      for (i = 1,tmp[0] = c; (c != '\n') && (i < (MAILTMPLEN - 1)); )
+	switch (c = (SIZE (msg)) ? (0xff & SNX (msg)) : '\n') {
+	case '\r':		/* ignore CR */
+	  break;
+	case '\n':		/* write CRLF for NL */
+	  tmp[i++] = '\r';
+	default:		/* other characters */
 	  tmp[i++] = c;
 	}
       if ((i > 4) && (tmp[1] == 'r') && (tmp[2] == 'o') && (tmp[3] == 'm') &&
@@ -937,15 +1057,43 @@ int unix_append_msg (MAILSTREAM *stream,FILE *sf,char *flags,char *date,
 	if (!(ti = unix_fromwidget || (c != '\n'))) VALID (tmp,x,ti,zn);
 	if (ti && (putc ('>',sf) == EOF)) return NIL;
       }
+				/* insert X- before metadata header */
+      else if ((((i > 6) && (tmp[0] == 'S') && (tmp[1] == 't') &&
+		 (tmp[2] == 'a') && (tmp[3] == 't') && (tmp[4] == 'u') &&
+		 (tmp[5] == 's') && (tmp[6] == ':')) ||
+		(((i > 5) && (tmp[0] == 'X') && (tmp[1] == '-')) &&
+		 (((tmp[2] == 'U') && (tmp[3] == 'I') && (tmp[4] == 'D') &&
+		   (tmp[5] == ':')) ||
+		  ((i > 6) && (tmp[2] == 'I') && (tmp[3] == 'M') &&
+		   (tmp[4] == 'A') && (tmp[5] == 'P') &&
+		   ((tmp[6] == ':') ||
+		    ((i > 10) && (tmp[6] == 'b') && (tmp[7] == 'a') &&
+		     (tmp[8] == 's') && (tmp[9] == 'e') &&
+		     (tmp[10] == ':')))) ||
+		  ((i > 8) && (tmp[2] == 'S') && (tmp[3] == 't') &&
+		   (tmp[4] == 'a') && (tmp[5] == 't') && (tmp[6] == 'u') &&
+		   (tmp[7] == 's') && (tmp[8] == ':')) ||
+		  ((i > 10) && (tmp[2] == 'K') && (tmp[3] == 'e') &&
+		   (tmp[4] == 'y') && (tmp[5] == 'w') && (tmp[6] == 'o') &&
+		   (tmp[7] == 'r') && (tmp[8] == 'd') && (tmp[9] == 's') &&
+		   (tmp[10] == ':'))))) && (fputs ("X-Original-",sf) == EOF))
+	return NIL;
 				/* write buffered text */
       if (fwrite (tmp,1,i,sf) != i) return NIL;
-      if (c == '\n') continue;	/* all done if got a complete line */
+				/* set up to copy remainder of line */
+      if ((c != '\n') && SIZE (msg)) c = 0xff & SNX (msg);
+      else continue;		/* end of line or end of message */
     }
-				/* copy line, writing CRLF for NL */
-    do if (((c == '\r') && SIZE (msg) && ((c = 0xff & SNX (msg)) != '\n') &&
-	    (putc ('\r',sf) == EOF)) || (((c == '\n') &&
-					  (putc ('\r',sf) == EOF)) ||
-					 (putc (c,sf) == EOF))) return NIL;
+				/* check for end of header */
+    if (hdrp && (c == '\n')) hdrp = NIL;
+    do switch (c) {		/* copy line, writing CRLF for NL */
+    case '\r':			/* ignore CR */
+      break;
+    case '\n':			/* insert CR before LF */
+      if (putc ('\r',sf) == EOF) return NIL;
+    default:
+      if (putc (c,sf) == EOF) return NIL;
+    }
     while ((c != '\n') && SIZE (msg) && ((c = 0xff & SNX (msg)) ? c : T));
   }
 				/* write trailing newline and return */
@@ -971,6 +1119,7 @@ void unix_abort (MAILSTREAM *stream)
     if (LOCAL->lname) fs_give ((void **) &LOCAL->lname);
 				/* free local text buffers */
     if (LOCAL->buf) fs_give ((void **) &LOCAL->buf);
+    if (LOCAL->text.data) fs_give ((void **) &LOCAL->text.data);
     if (LOCAL->line) fs_give ((void **) &LOCAL->line);
 				/* nuke the local data */
     fs_give ((void **) &stream->local);
@@ -985,7 +1134,7 @@ void unix_abort (MAILSTREAM *stream)
  *	    type of locking operation (LOCK_SH or LOCK_EX)
  */
 
-int unix_lock (char *file,int flags,int mode,DOTLOCK *lock,int op)
+int unix_lock (char *file,int flags,int mode,char *lock,int op)
 {
   int fd,ld,j;
   int i = LOCKTIMEOUT * 60 - 1;
@@ -1031,17 +1180,37 @@ int unix_lock (char *file,int flags,int mode,DOTLOCK *lock,int op)
  *	    (optional) lock file name
  */
 
-void unix_unlock (int fd,MAILSTREAM *stream,DOTLOCK *lock)
+void unix_unlock (int fd,MAILSTREAM *stream,char *lock)
 {
-  struct stat sbuf;
-  struct utimbuf times;
-  fstat (fd,&sbuf);		/* get file times */
-				/* if stream and csh would think new mail */
-  if (stream && (sbuf.st_atime <= sbuf.st_mtime)) {
-				/* set times to now */
-    times.modtime = times.actime = time (0);
+  if (stream) {			/* need to muck with times? */
+    struct stat sbuf;
+    struct utimbuf times;
+    time_t now = time (0);
+    fstat (fd,&sbuf);		/* get file times */
+    if (LOCAL->ld >= 0) {	/* yes, readwrite session? */
+      times.actime = now;	/* set atime to now */
+				/* set mtime to (now - 1) if necessary */
+      times.modtime = (now > sbuf.st_mtime) ? sbuf.st_mtime : now - 1;
+    }
+    else if (stream->recent) {	/* readonly with recent messages */
+      if ((sbuf.st_atime >= sbuf.st_mtime) ||
+	  (sbuf.st_atime >= sbuf.st_ctime))
+				/* keep past mtime, whack back atime */
+	times.actime = (times.modtime = (sbuf.st_mtime < now) ?
+			sbuf.st_mtime : now) - 1;
+      else now = 0;		/* no time change needed */
+    }
+				/* readonly with no recent messages */
+    else if ((sbuf.st_atime < sbuf.st_mtime) ||
+	     (sbuf.st_atime < sbuf.st_ctime)) {
+      times.actime = now;	/* set atime to now */
+				/* set mtime to (now - 1) if necessary */
+      times.modtime = (now > sbuf.st_mtime) ? sbuf.st_mtime : now - 1;
+    }
+    else now = 0;		/* no time change needed */
 				/* set the times, note change */
-    if (!utime (stream->mailbox,&times)) LOCAL->filetime = times.modtime;
+    if (now && !utime (stream->mailbox,&times))
+      LOCAL->filetime = times.modtime;
   }
   flock (fd,LOCK_UN);		/* release flock'ers */
   if (!stream) close (fd);	/* close the file if no stream */
@@ -1056,11 +1225,11 @@ void unix_unlock (int fd,MAILSTREAM *stream,DOTLOCK *lock)
  * Returns: T if parse OK, critical & mailbox is locked shared; NIL if failure
  */
 
-int unix_parse (MAILSTREAM *stream,DOTLOCK *lock,int op)
+int unix_parse (MAILSTREAM *stream,char *lock,int op)
 {
   int zn;
   unsigned long i,j,k,m;
-  char c,*s,*t,*u,tmp[MAILTMPLEN],date[30];
+  unsigned char c,*s,*t,*u,tmp[MAILTMPLEN],date[30];
   int ti = 0,retain = T;
   unsigned long nmsgs = stream->nmsgs;
   unsigned long prevuid = nmsgs ? mail_elt (stream,nmsgs)->private.uid : 0;
@@ -1116,7 +1285,8 @@ int unix_parse (MAILSTREAM *stream,DOTLOCK *lock,int op)
       t = NIL,zn = 0;
       if (i) VALID (s,t,ti,zn);	/* see if valid From line */
       if (!ti) {		/* someone pulled the rug from under us */
-	sprintf(tmp,"Unexpected changes to mailbox (try restarting): %.20s",s);
+	sprintf (tmp,"Unexpected changes to mailbox (try restarting): %.20s",
+		 (char *) s);
 	mm_log (tmp,ERROR);
 	unix_unlock (LOCAL->fd,stream,lock);
 	unix_abort (stream);
@@ -1156,7 +1326,7 @@ int unix_parse (MAILSTREAM *stream,DOTLOCK *lock,int op)
 	date[7] = t[ti + 1]; date[8] = t[ti + 2];
 	date[9] = t[ti + 3]; date[10] = t[ti + 4];
 				/* zzz */
-	t = zn ? (t + zn + 1) : "LCL";
+	t = zn ? (t + zn + 1) : (unsigned char *) "LCL";
 	date[21] = *t++; date[22] = *t++; date[23] = *t++;
 	if ((date[21] != '+') && (date[21] != '-')) date[24] = '\0';
 	else {			/* numeric time zone */
@@ -1165,7 +1335,7 @@ int unix_parse (MAILSTREAM *stream,DOTLOCK *lock,int op)
 	}
 				/* set internal date */
 	if (!mail_parse_date (elt,date)) {
-	  sprintf (tmp,"Unable to parse internal date: %s",date);
+	  sprintf (tmp,"Unable to parse internal date: %s",(char *) date);
 	  mm_log (tmp,WARN);
 	}
 
@@ -1339,7 +1509,7 @@ int unix_parse (MAILSTREAM *stream,DOTLOCK *lock,int op)
 	  default:		/* ordinary header line */
 	    if ((*s == 'S') || (*s == 's') ||
 		(((*s == 'X') || (*s == 'x')) && (s[1] == '-'))) {
-	      char *e,*v;
+	      unsigned char *e,*v;
 				/* must match what mail_filter() does */
 	      for (u = s,v = tmp,e = u + min (i,MAILTMPLEN - 1);
 		   (u < e) && ((c = (*u ? *u : (*u = ' '))) != ':') &&
@@ -1356,7 +1526,7 @@ int unix_parse (MAILSTREAM *stream,DOTLOCK *lock,int op)
 		  !compare_cstring (tmp,"X-IMAPBASE")) {
 		char err[MAILTMPLEN];
 		sprintf (err,"Discarding bogus %s header in message %lu",
-			 tmp,elt->msgno);
+			 (char *) tmp,elt->msgno);
 		mm_log (err,WARN);
 		retain = NIL;	/* don't retain continuation */
 		break;		/* different case or something */
@@ -1375,7 +1545,7 @@ int unix_parse (MAILSTREAM *stream,DOTLOCK *lock,int op)
 	    else {
 	      char err[MAILTMPLEN];
 	      sprintf (err,"Discarding bogus continuation in msg %lu: %.80s",
-		      elt->msgno,s);
+		      elt->msgno,(char *) s);
 	      if (u = strpbrk (err,"\r\n")) *u = '\0';
 	      mm_log (err,WARN);
 	      break;		/* different case or something */
@@ -1604,7 +1774,8 @@ unsigned long unix_xstatus (MAILSTREAM *stream,char *status,MESSAGECACHE *elt,
   *s++ = 'S'; *s++ = 't'; *s++ = 'a'; *s++ = 't'; *s++ = 'u'; *s++ = 's';
   *s++ = ':'; *s++ = ' ';
   if (elt->seen) *s++ = 'R';
-  *s++ = 'O'; *s++ = '\r'; *s++ = '\n';
+  if (flag) *s++ = 'O';		/* only write O if have a UID */
+  *s++ = '\r'; *s++ = '\n';
   *s++ = 'X'; *s++ = '-'; *s++ = 'S'; *s++ = 't'; *s++ = 'a'; *s++ = 't';
   *s++ = 'u'; *s++ = 's'; *s++ = ':'; *s++ = ' ';
   if (elt->deleted) *s++ = 'D';
@@ -1648,7 +1819,7 @@ unsigned long unix_xstatus (MAILSTREAM *stream,char *status,MESSAGECACHE *elt,
 
 #define OVERFLOWBUFLEN 8192	/* initial overflow buffer length */
 
-long unix_rewrite (MAILSTREAM *stream,unsigned long *nexp,DOTLOCK *lock)
+long unix_rewrite (MAILSTREAM *stream,unsigned long *nexp,char *lock)
 {
   MESSAGECACHE *elt;
   UNIXFILE f;
@@ -1668,6 +1839,10 @@ long unix_rewrite (MAILSTREAM *stream,unsigned long *nexp,DOTLOCK *lock)
 	  elt->private.msg.text.text.size + 2;
       flag = 1;			/* only count X-IMAPbase once */
     }
+  if (!size) {			/* no messages and no pseudo, make one now */
+    size = unix_pseudo (stream,LOCAL->buf);
+    LOCAL->pseudo = T;
+  }
 				/* extend the file as necessary */
   if (ret = unix_extend (stream,size)) {
     /* Set up buffered I/O file structure
@@ -1832,7 +2007,7 @@ long unix_extend (MAILSTREAM *stream,unsigned long size)
 	if (mm_diskerror (stream,e,NIL)) {
 	  fsync (LOCAL->fd);	/* user chose to punt */
 	  sprintf (LOCAL->buf,"Unable to extend mailbox: %s",strerror (e));
-	  mm_log (LOCAL->buf,ERROR);
+	  if (!stream->silent) mm_log (LOCAL->buf,ERROR);
 	  return NIL;
 	}
       }

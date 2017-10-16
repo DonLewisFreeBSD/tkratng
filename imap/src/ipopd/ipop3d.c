@@ -10,10 +10,10 @@
  *		Internet: MRC@CAC.Washington.EDU
  *
  * Date:	1 November 1990
- * Last Edited:	22 October 2001
+ * Last Edited:	16 September 2004
  * 
  * The IMAP toolkit provided in this Distribution is
- * Copyright 2001 University of Washington.
+ * Copyright 1988-2004 University of Washington.
  * The full text of our legal notices is contained in the file called
  * CPYRIGHT, included with this Distribution.
  */
@@ -57,7 +57,7 @@ extern int errno;		/* just in case */
 
 /* Global storage */
 
-char *version = "2001.78";	/* server version */
+char *version = "2004.89";	/* server version */
 short state = AUTHORIZATION;	/* server state */
 short critical = NIL;		/* non-zero if in critical code */
 MAILSTREAM *stream = NIL;	/* mailbox stream */
@@ -72,6 +72,7 @@ char *user = NIL;		/* user name */
 char *pass = NIL;		/* password */
 char *initial = NIL;		/* initial response */
 long *msg = NIL;		/* message translation vector */
+logouthook_t lgoh = NIL;	/* logout hook */
 char *sayonara = "+OK Sayonara\015\012";
 
 
@@ -82,7 +83,7 @@ void clkint ();
 void kodint ();
 void hupint ();
 void trmint ();
-int login (char *t,int argc,char *argv[]);
+int pass_login (char *t,int argc,char *argv[]);
 char *apop_login (char *chal,char *user,char *md5,int argc,char *argv[]);
 char *responder (void *challenge,unsigned long clen,unsigned long *rlen);
 int mbxopen (char *mailbox);
@@ -97,10 +98,14 @@ int main (int argc,char *argv[])
   char *s,*t;
   char tmp[TMPLEN];
   time_t autologouttime;
+  char *pgmname = (argc && argv[0]) ?
+    (((s = strrchr (argv[0],'/')) || (s = strrchr (argv[0],'\\'))) ?
+     s+1 : argv[0]) : "ipop3d";
+				/* set service name before linkage */
+  mail_parameters (NIL,SET_SERVICENAME,(void *) "pop");
 #include "linkage.c"
 				/* initialize server */
-  server_init (((s = strrchr (argv[0],'/')) || (s = strrchr (argv[0],'\\'))) ?
-	       s+1 : argv[0],"pop3","pop3s","pop",clkint,kodint,hupint,trmint);
+  server_init (pgmname,"pop3","pop3s",clkint,kodint,hupint,trmint);
   challenge[0] = '\0';		/* find the CRAM-MD5 authenticator */
   if (i = mail_lookup_auth_name ("CRAM-MD5",NIL)) {
     AUTHENTICATOR *a = mail_lookup_auth (i);
@@ -113,12 +118,11 @@ int main (int argc,char *argv[])
   /* There are reports of POP3 clients which get upset if anything appears
    * between the "+OK" and the "POP3" in the greeting.
    */
-  PSOUT ("+OK POP3");
+  PSOUT ("+OK POP3 ");
   if (!challenge[0]) {		/* if no MD5 enable, output host name */
-    PBOUT (' ');
     PSOUT (tcp_serverhost ());
+    PBOUT (' ');
   }
-  PSOUT (" v");
   PSOUT (version);
   PSOUT (" server ready");
   if (challenge[0]) {		/* if MD5 enable, output challenge here */
@@ -146,6 +150,9 @@ int main (int argc,char *argv[])
 	if (state == TRANSACTION) mail_close (stream);
 	stream = NIL;
 	state = LOGOUT;
+				/* do logout hook if needed */
+	if (lgoh = (logouthook_t) mail_parameters (NIL,GET_LOGOUTHOOK,NIL))
+	  (*lgoh) (mail_parameters (NIL,GET_LOGOUTDATA,NIL));
 	_exit (1);
       }
     }
@@ -168,26 +175,19 @@ int main (int argc,char *argv[])
 	PSOUT ("TOP\015\012LOGIN-DELAY 180\015\012UIDL\015\012");
 	if (s = ssl_start_tls (NIL)) fs_give ((void *) &s);
 	else PSOUT ("STLS\015\012");
-	if (mail_parameters (NIL,GET_DISABLEPLAINTEXT,NIL)) {
-	  PSOUT ("SASL");	/* display secure server authenticators */
-	  for (auth = mail_lookup_auth (1); auth; auth = auth->next)
-	    if (auth->server) {
-	      if (auth->flags & AU_SECURE) {
-		PBOUT (' ');
-		PSOUT (auth->name);
-	      }
+	if (i = !mail_parameters (NIL,GET_DISABLEPLAINTEXT,NIL))
+	  PSOUT ("USER\015\012");
+				/* display secure server authenticators */
+	for (auth = mail_lookup_auth (1), s = "SASL"; auth; auth = auth->next)
+	  if (auth->server && (i || (auth->flags & AU_SECURE))) {
+	    if (s) {
+	      PSOUT (s);
+	      s = NIL;
 	    }
-	}
-	else {			/* display all authentication means */
-	  PSOUT ("USER\015\012SASL");
-	  for (auth = mail_lookup_auth (1); auth; auth = auth->next)
-	    if (auth->server) {
-	      PBOUT (' ');
-	      PSOUT (auth->name);
-	    }
-	}
-	CRLF;
-	PSOUT (".\015\012");
+	    PBOUT (' ');
+	    PSOUT (auth->name);
+	  }
+	PSOUT (s ? ".\015\012" : "\015\012.\015\012");
       }
 
       else switch (state) {	/* else dispatch based on state */
@@ -214,18 +214,9 @@ int main (int argc,char *argv[])
 	  else {
 	    AUTHENTICATOR *auth;
 	    PSOUT ("+OK Supported authentication mechanisms:\015\012");
-	    if (mail_parameters (NIL,GET_DISABLEPLAINTEXT,NIL)) {
-	      for (auth = mail_lookup_auth (1); auth; auth = auth->next)
-		if (auth->server) {
-		  if (auth->flags & AU_SECURE) {
-		    PSOUT (auth->name);
-		    CRLF;
-		  }
-		}
-	    }
-				/* display all authentication means */
-	    else for (auth = mail_lookup_auth (1); auth; auth = auth->next)
-	      if (auth->server) {
+	    i = !mail_parameters (NIL,GET_DISABLEPLAINTEXT,NIL);
+	    for (auth = mail_lookup_auth (1); auth; auth = auth->next)
+	      if (auth->server && (i || (auth->flags & AU_SECURE))) {
 		PSOUT (auth->name);
 		CRLF;
 	      }
@@ -256,7 +247,7 @@ int main (int argc,char *argv[])
 	else if (!strcmp (s,"RPOP"))
 	  PSOUT ("-ERR Nice try, bunkie\015\012");
 	else if (!strcmp (s,"STLS")) {
-	  if (t = ssl_start_tls (argv[0])) {
+	  if (t = ssl_start_tls (pgmname)) {
 	    PSOUT ("-ERR STLS failed: ");
 	    PSOUT (t);
 	    CRLF;
@@ -285,7 +276,7 @@ int main (int argc,char *argv[])
 	}
 	else if (!mail_parameters (NIL,GET_DISABLEPLAINTEXT,NIL) &&
 		 user && *user && !strcmp (s,"PASS"))
-	  state = login (t,argc,argv);
+	  state = pass_login (t,argc,argv);
 	else PSOUT ("-ERR Unknown AUTHORIZATION state command\015\012");
 	break;
 
@@ -399,8 +390,9 @@ int main (int argc,char *argv[])
 	  if (t && *t && (i =strtoul (t,&s,10)) && (i <= nmsgs) &&
 	      (msg[i] > 0)) {
 				/* skip whitespace */
-	    while (isspace (*s)) s++;
-	    if (isdigit (*s)) {	/* make sure line count argument good */
+	    while (*s == ' ') s++;
+				/* make sure line count argument good */
+	    if ((*s >= '0') && (*s <= '9')) {
 	      MESSAGECACHE *elt = mail_elt (stream,msg[i]);
 	      j = strtoul (s,NIL,10);
 				/* update highest message accessed */
@@ -459,7 +451,11 @@ int main (int argc,char *argv[])
 	       tcp_clienthost ());
   PSOUT (sayonara);		/* "now it's time to say sayonara..." */
   PFLUSH ();			/* make sure output finished */
-  return 0;			/* all done */
+				/* do logout hook if needed */
+  if (lgoh = (logouthook_t) mail_parameters (NIL,GET_LOGOUTHOOK,NIL))
+    (*lgoh) (mail_parameters (NIL,GET_LOGOUTDATA,NIL));
+  exit (0);			/* all done */
+  return 0;			/* stupid compilers */
 }
 
 /* Clock interrupt
@@ -479,6 +475,9 @@ void clkint ()
     }
     state = LOGOUT;
     stream = NIL;
+				/* do logout hook if needed */
+    if (lgoh = (logouthook_t) mail_parameters (NIL,GET_LOGOUTHOOK,NIL))
+      (*lgoh) (mail_parameters (NIL,GET_LOGOUTDATA,NIL));
     _exit (1);			/* die die die */
   }
 }
@@ -492,7 +491,7 @@ void kodint ()
 				/* only if idle */
   if (idletime && ((time (0) - idletime) > KODTIMEOUT)) {
     alarm (0);			/* disable all interrupts */
-    server_init (NIL,NIL,NIL,NIL,SIG_IGN,SIG_IGN,SIG_IGN,SIG_IGN);
+    server_init (NIL,NIL,NIL,SIG_IGN,SIG_IGN,SIG_IGN,SIG_IGN);
     PSOUT ("-ERR Received Kiss of Death\015\012");
     syslog (LOG_INFO,"Killed (lost mailbox lock) user=%.80s host=%.80s",
 	    user ? user : "???",tcp_clienthost ());
@@ -504,6 +503,9 @@ void kodint ()
       }
       state = LOGOUT;
       stream = NIL;
+				/* do logout hook if needed */
+      if (lgoh = (logouthook_t) mail_parameters (NIL,GET_LOGOUTHOOK,NIL))
+	(*lgoh) (mail_parameters (NIL,GET_LOGOUTDATA,NIL));
       _exit (1);		/* die die die */
     }
   }
@@ -516,7 +518,7 @@ void kodint ()
 void hupint ()
 {
   alarm (0);			/* disable all interrupts */
-  server_init (NIL,NIL,NIL,NIL,SIG_IGN,SIG_IGN,SIG_IGN,SIG_IGN);
+  server_init (NIL,NIL,NIL,SIG_IGN,SIG_IGN,SIG_IGN,SIG_IGN);
   syslog (LOG_INFO,"Hangup user=%.80s host=%.80s",user ? user : "???",
 	  tcp_clienthost ());
   if (critical) state = LOGOUT;	/* must defer if in critical code */
@@ -527,6 +529,9 @@ void hupint ()
     }
     state = LOGOUT;
     stream = NIL;
+				/* do logout hook if needed */
+    if (lgoh = (logouthook_t) mail_parameters (NIL,GET_LOGOUTHOOK,NIL))
+      (*lgoh) (mail_parameters (NIL,GET_LOGOUTDATA,NIL));
     _exit (1);			/* die die die */
   }
 }
@@ -538,20 +543,15 @@ void hupint ()
 void trmint ()
 {
   alarm (0);			/* disable all interrupts */
-  server_init (NIL,NIL,NIL,NIL,SIG_IGN,SIG_IGN,SIG_IGN,SIG_IGN);
+  server_init (NIL,NIL,NIL,SIG_IGN,SIG_IGN,SIG_IGN,SIG_IGN);
   PSOUT ("-ERR Killed\015\012");
   syslog (LOG_INFO,"Killed user=%.80s host=%.80s",user ? user : "???",
 	  tcp_clienthost ());
   if (critical) state = LOGOUT;	/* must defer if in critical code */
-  else {			/* try to gracefully close the stream */
-    if ((state == TRANSACTION) && !stream->lock) {
-      rset ();
-      mail_close (stream);
-    }
-    state = LOGOUT;
-    stream = NIL;
-    _exit (1);			/* die die die */
-  }
+  /* Make no attempt at graceful closure since a shutdown may be in
+   * progress, and we won't have any time to do mail_close() actions.
+   */
+  else _exit (1);		/* die die die */
 }
 
 /* Parse PASS command
@@ -559,7 +559,7 @@ void trmint ()
  * Returns: new state
  */
 
-int login (char *t,int argc,char *argv[])
+int pass_login (char *t,int argc,char *argv[])
 {
   char tmp[TMPLEN];
 				/* flush old passowrd */
@@ -636,10 +636,13 @@ char *responder (void *challenge,unsigned long clen,unsigned long *rlen)
       char *e = ferror (stdin) ?
 	strerror (errno) : "Command stream end of file";
       alarm (0);		/* disable all interrupts */
-      server_init (NIL,NIL,NIL,NIL,SIG_IGN,SIG_IGN,SIG_IGN,SIG_IGN);
+      server_init (NIL,NIL,NIL,SIG_IGN,SIG_IGN,SIG_IGN,SIG_IGN);
       syslog (LOG_INFO,"%s, while reading authentication host=%.80s",
 	      e,tcp_clienthost ());
       state = UPDATE;
+				/* do logout hook if needed */
+      if (lgoh = (logouthook_t) mail_parameters (NIL,GET_LOGOUTHOOK,NIL))
+	(*lgoh) (mail_parameters (NIL,GET_LOGOUTDATA,NIL));
       _exit (1);
     }
   }
@@ -652,10 +655,13 @@ char *responder (void *challenge,unsigned long clen,unsigned long *rlen)
 	char *e = ferror (stdin) ?
 	  strerror (errno) : "Command stream end of file";
 	alarm (0);		/* disable all interrupts */
-	server_init (NIL,NIL,NIL,NIL,SIG_IGN,SIG_IGN,SIG_IGN,SIG_IGN);
+	server_init (NIL,NIL,NIL,SIG_IGN,SIG_IGN,SIG_IGN,SIG_IGN);
 	syslog (LOG_INFO,"%s, while reading auth char user=%.80s host=%.80s",
 		e,user ? user : "???",tcp_clienthost ());
 	state = UPDATE;
+				/* do logout hook if needed */
+	if (lgoh = (logouthook_t) mail_parameters (NIL,GET_LOGOUTHOOK,NIL))
+	  (*lgoh) (mail_parameters (NIL,GET_LOGOUTDATA,NIL));
 	_exit (1);
       }
     }
@@ -876,12 +882,24 @@ void mm_log (char *string,long errflg)
   case WARN:			/* warning */
     syslog (LOG_DEBUG,"%s",string);
     break;
+  case BYE:			/* driver broke connection */
+    if (state != UPDATE) {
+      alarm (0);		/* disable all interrupts */
+      server_init (NIL,NIL,NIL,SIG_IGN,SIG_IGN,SIG_IGN,SIG_IGN);
+      syslog (LOG_INFO,"Mailbox closed (%.80s) user=%.80s host=%.80s",
+	      string,user ? user : "???",tcp_clienthost ());
+				/* do logout hook if needed */
+      if (lgoh = (logouthook_t) mail_parameters (NIL,GET_LOGOUTHOOK,NIL))
+	(*lgoh) (mail_parameters (NIL,GET_LOGOUTDATA,NIL));
+      _exit (1);
+    }
+    break;
   case ERROR:			/* error that broke command */
   default:			/* default should never happen */
     syslog (LOG_NOTICE,"%s",string);
     break;
   }
-}
+}    
 
 
 /* Log an event to debugging telemetry

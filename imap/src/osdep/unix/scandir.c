@@ -36,19 +36,19 @@ int scandir (char *dirname,struct direct ***namelist,select_t select,
   DIR *dirp = opendir (dirname);/* open directory and get status poop */
   if ((!dirp) || (fstat (dirp->dd_fd,&stb) < 0)) return -1;
   nlmax = stb.st_size / 24;	/* guesstimate at number of files */
-  names = (struct direct **) fs_get (nlmax * sizeof (struct direct *));
+  names = (struct direct **) malloc (nlmax * sizeof (struct direct *));
   nitems = 0;			/* initially none found */
   while (d = readdir (dirp)) {	/* read directory item */
 				/* matches select criterion? */
     if (select && !(*select) (d)) continue;
 				/* get size of direct record for this file */
-    p = (struct direct *) fs_get (DIR_SIZE (d));
+    p = (struct direct *) malloc (DIR_SIZE (d));
     p->d_ino = d->d_ino;	/* copy the poop */
     strcpy (p->d_name,d->d_name);
     if (++nitems >= nlmax) {	/* if out of space, try bigger guesstimate */
       void *s = (void *) names;	/* stupid language */
       nlmax *= 2;		/* double it */
-      fs_resize ((void **) &s,nlmax * sizeof (struct direct *));
+      realloc ((void **) &s,nlmax * sizeof (struct direct *));
       names = (struct direct **) s;
     }
     names[nitems - 1] = p;	/* store this file there */

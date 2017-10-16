@@ -10,14 +10,28 @@
  *		Internet: MRC@CAC.Washington.EDU
  *
  * Date:	10 September 1993
- * Last Edited:	20 February 2001
+ * Last Edited:	13 September 2004
  * 
  * The IMAP toolkit provided in this Distribution is
- * Copyright 2001 University of Washington.
+ * Copyright 1988-2004 University of Washington.
  * The full text of our legal notices is contained in the file called
  * CPYRIGHT, included with this Distribution.
  */
 
+/*
+ *** These lines are claimed to be necessary to build on Debian Linux on an
+ *** Alpha.
+ */
+
+#ifndef _XOPEN_SOURCE
+#define _XOPEN_SOURCE 1
+#endif /* _XOPEN_SOURCE */
+#ifndef _BSD_SOURCE
+#define _BSD_SOURCE 1
+#endif /* _BSD_SOURCE */
+
+/* end Debian Linux on Alpha strangeness */
+
 #include <stdlib.h>
 #include <string.h>
 #include <unistd.h>
