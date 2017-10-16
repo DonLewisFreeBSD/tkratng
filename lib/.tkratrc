@@ -1,0 +1,62 @@
+# Stubs for commands the library expects to find
+
+proc RatLog {level message time} {
+    puts "ratLog: $level $message $time"
+}
+
+proc RatStatus {message} {
+    puts "RatStatus: $message"
+}
+
+proc RatFormatDate {year month day hour min sec} {
+    puts "RatFormatDate $year $month $day $hour $min $sec"
+    return DATE
+}
+
+proc RatLogin {host trial user prot} {
+    puts "RatLogin called {$host $trial $user $prot}"
+    return {ruric *}
+}
+
+proc RatWantSave {} {
+    return
+}
+
+proc RatEncodingCompat {wanted avail} {
+    set wanted [string tolower $wanted]
+    set avail [string tolower $avail]
+    if ![string compare $wanted $avail] {
+	return 1
+    }
+    if {![string compare us-ascii $wanted] && [regexp iso-8859- $avail]} {
+	return 1
+    }
+    return 0
+}
+
+proc RatDSNRecieve {subject action recipient id} {
+    puts "RatDSNRecieve"
+    puts "\tSubject: $subject"
+    puts "\tAction: $action"
+    puts "\tRecipient: $recipient"
+    puts "\tId: $id"
+}
+
+proc bgerror {message} {
+    puts "BgError: $message"
+}
+
+set compressProg gzip
+set compressSuffix .gz
+
+if [llength [info commands wm]] {
+    wm withdraw .
+    bind . <Destroy> RatCleanup
+}
+
+set tkrat_version 0.50
+set tkrat_patchlevel X
+source ../tkrat/options.tcl
+OptionsInit
+OptionsRead
+puts ".tkratrc read"

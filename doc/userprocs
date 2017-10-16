@@ -1,0 +1,75 @@
+
+			User defined procedures
+
+
+   TkRat software and its included text is Copyright 1996-2002 by
+   Martin Forssén.
+
+   The full text of the legal notices is contained in the file called
+   COPYRIGHT, included with this distribution.
+
+User defined procedures is a way for the user to have more control over
+certain features. The procedures are ordinary tcl procedures (i.e. they are
+written in tcl7.5). None of the procedures must exist, they will be used
+only if they exists.
+
+The user may define procedures in the ~/.ratatosk/userproc file (or
+whatever the userproc option is set to). If the procedures need any global
+varaibles these must start with "ratUP_". The following procedures may
+be defined:
+
+RatUP_IsMe mailbox domain personal adl
+	mailbox  -	Mailbox name
+	domain   -	The domain part
+	personal -	The personal name phrase (if any)
+	adl      -	At-domain-list source route
+    This procedure should determine if the address is pointing to me or not.
+    It should return a boolean value, which should be true if the address
+    is pointing at me.
+
+RatUP_Translate mailbox domain personal adl
+	mailbox  -	Mailbox name
+	domain   -	The domain part
+	personal -	The personal name phrase (if any)
+	adl      -	At-domain-list source route (probably empty)
+    When we are replying to a message all addresses we are sending it to
+    are run through this procedure. It is expected to return a list with
+    four elements {mailbox domain personal adl}.
+
+RatUP_Signature message
+	message -	The name of a global array which may contain
+			information about the message the signature will be
+			appended to
+    This function should return a text string which will later be
+    appended to the first text part of the message. The message argument is
+    the name of a global array which MAY contain information about the message.
+    See the section on RatSend in the interface-file. Note that this routine
+    gets called before the user has had any chance to edit the message so
+    there will not be any interesting information available at all for
+    new messages.  It only contains interesting things for replies and
+    forwards.
+
+RatUP_Bell
+    This function should notify the user that new mail has arrived. If
+    this function does not exist then the terminal bell is rung.
+
+RatUP_ShowURL url
+	url -	An URL to show
+    This function may get called when the user presses the left mousebutton
+    over an URL in a message. It is expected to invoke a browser (in the
+    background).
+
+RatUP_Citation message
+	message -	The handler for the message which is being cited
+    This function should return a string which will be prepended to all
+    lines in the body of the cited message. It wil be called when you reply
+    to a message.
+
+RatUP_NetsyncFolder spec
+	spec -	A network folder specification {host:port}mailbox
+    This function is should return a boolean value which indicates if
+    the disconnected folder given as arguments should be synchronized
+    at this moment or not. That means that this function will be called
+    once for each disconnected mailbox when you select "Network Sync"
+    from the menu. It will NOT be called when you select "Network sync.
+    folder" from the admin menu to synchronize the current folder.

@@ -1,0 +1,56 @@
+#!/bin/sh
+# the next line restarts using wish \
+exec @wish@ "$0" "$@"
+
+wm withdraw .
+
+# Change to test directory
+cd [file dirname $argv0]
+
+# Setup environment
+set HEAD "---"
+set LEAD "***"
+set dir [pwd]/TESTDIR
+if [file exists $dir] {
+    file delete -force $dir
+}
+file mkdir $dir
+set debug 0
+set passwd {}
+set tests {}
+set verbose 0
+set delay 0
+for {set ai 0} {$ai < [llength $argv]} {incr ai} {
+    switch [lindex $argv $ai] {
+	debug { set debug 1 }
+	verbose { set verbose 1 }
+	passwd { set passwd [lindex $argv [incr ai]] }
+	run { set tests ../[lindex $argv [incr ai]] }
+	delay { set delay 1}
+	default {
+	    puts {Usage: run [verbose] [debug] [delay] [passwd PASSWD] [run TESTFILE]}
+	    exit 0
+	}
+    }
+}
+source setup.tcl
+
+# Allow user to break
+if $delay {
+    puts "Libraries loaded..."
+    after 1000
+}
+
+# Run tests
+cd $dir
+set errors 0
+if {0 == [llength $tests]} {
+    set tests [glob -nocomplain ../test_*.tcl]
+}
+foreach st $tests {
+    source $st
+}
+puts "Total number of errors: $errors"
+
+file delete -force $dir
+exit

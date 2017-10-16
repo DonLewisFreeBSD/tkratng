@@ -1,0 +1,147 @@
+#
+# This file contains examples of a couple of userprocs. These are ways you
+# can extend the functionality of TkRat in a couple of areas. You usersprocs
+# should be placed in ~/.ratatosk/userproc
+#
+
+# RatUP_IsMe --
+#
+#	Checks if a mail address really points at myself.
+#
+# Arguments
+#	mailbox		Mailbox name
+#	domain		The domain part of the mail address
+#	personal	The personal name phrase (if any)
+#	adl		At-domain-list source route (probably empty)
+# Results
+#	Should return true or false (1 or 0) depending on if the indicated
+#	address points at the user or not.
+
+proc RatUP_IsMe {mailbox domain personal adl} {
+    # Here we do it easy for ourselves. Since regexp already returns a
+    # boolean value we can use that as the return value directly.
+
+    return [regexp {(maf|ratatosk.+)@.+.chalmers.se} $mailbox@$domain]
+
+    # This expression matches everything that is sent to maf or
+    # ratatosk(plus something) at a domain under chalmers.se.
+    # That means that it will match maf@dtek.chalmers.se,
+    # maf@math.chalmers.se, raratosk-request@dtek.chalmers.se
+    # and even maf@no_such_domain.chalmers.se. The latter is an
+    # unfortunate side effect of the expression but I do not care.
+    # Note that the expression will not match ratatosk@dtek.chalmers.se
+    # since there must be something between ratatosk and the '@'.
+}
+
+
+
+# RatUP_Translate --
+#
+#	Translate outgoing addresses
+#
+# Arguments
+#	mailbox		Mailbox name
+#	domain		The domain part of the mail address
+#	personal	The personal name phrase (if any)
+#	adl		At-domain-list source route (probably empty)
+# Results
+#	Should return a list with four elemnts {mailbox domain personal adl}
+
+proc RatUP_Translate {mailbox domain personal adl} {
+    # Set up a list of addresses we consider local
+    set isLocal {root foo driftavd}
+
+    # Here we do the test, check if the mailbox is one of the local ones
+    # and if the domain is under chalmers.se. If so is the case then we
+    # skip the domain part. This is really just another way of doing a
+    # similar test as we did in RatUP_IsMe above.
+    if {-1 != [lsearch $isLocal $mailbox] &&
+            [regexp {[^.]+.chalmers.se} $domain]} {
+        return [list $mailbox {} $personal $adl]
+    }
+
+    # If the above cause did not match we should return the address
+    # unharmed.
+    return [list $mailbox $domain $personal $adl]
+}
+
+
+# RatUP_Citation --
+#
+#	Figures out a good citation
+#
+# Arguments
+#	message		Handler to message we should figure out citation for
+#			reply to
+# Results
+#	Should return the desired citation
+
+proc RatUP_Citation {message} {
+   # Ignore any addresses but the first in from
+   set from [lindex [$message get from] 0]
+
+   # Check that we really have an address
+   if [string length $from] {
+       # See if we have a full name
+       set fn [$from get name]
+       if [string length $fn] {
+	   # Use the initals as citation
+           set initials ""
+           foreach n $fn {
+               set initials $initials[string $n 0]
+           }
+           return "$initals> "
+       }
+       # No initials were available so use the first part of the mail address
+       return "[lindex [split [$from get mail] {._@}] 0]> "
+   }
+   # Default value which is used if no from address was found
+   return "> "
+}
+
+# RatUP_NetsyncFolder --
+#
+#	Determines if a folder should be synchronized at this moment or not
+#
+# Arguments
+#	spec	A folde specification {host:port}mailbox
+#	user	User to connect as
+#	prot	Protocol to use
+#
+# Results
+#	Should return a boolean value
+
+proc RatUP_NetsyncFolder {spec} {
+    # This example checks if the host is reachable first
+
+    # Extract host and port from folder specification
+    regexp {\{([^:/\}]+)(:([0-9]+))?\}} $spec unused host unused port
+
+    # Try to open a socket (do it asynchronously so we do not have
+    # to wait a long time for failure
+    if [catch {socket -async $host $port} s] {
+	return 0
+    }
+    fconfigure $s -blocking no
+
+    # Wait half a second, we assume that the host always replies within this
+    # time when it is up
+    after 500
+
+    # Try to read one character. If this fails the connection failed
+    if [catch {gets $s 1}] {
+	return 0
+    }
+
+    # If we are blocked here we assume that the host is unreachanble (it
+    # has not replied within the allowed time) and the connection attempt
+    # still hangs.
+    if [fblocked $s] {
+	catch {close $s}
+	return 0
+    } else {
+	catch {close $s}
+	return 1
+    }
+}
+

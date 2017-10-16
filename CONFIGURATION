@@ -1,0 +1,142 @@
+							Onsala 2002-04-17
+			How to configure TkRat
+
+   TkRat software and its included text is Copyright 1996-2002 by
+   Martin Forssén.
+
+   The full text of the legal notices is contained in the file called
+   COPYRIGHT, included with this distribution.
+
+
+	WHAT GOES INTO THE FILES
+
+You can set a lot of options for TkRat via a couple of configuration
+files, but you don't have to. All options should have reasonable default
+values.
+It is however recommended that the site administrator changes the site
+defaults in the configuration file in the SITE directory (see below). The
+user can then later do their own customizations from inside the program.
+These user changes are saved in the users '~/.ratatosk/ratatoskrc' file.
+
+
+	LOCATION OF CONFIGURATION FILES
+
+The configuration files are first read from the SITE directory and then from
+the users ~/.ratatosk directory. The configuration file is called 'ratatoskrc'.
+The default SITE directory is /usr/local/etc. This will change if you give a
+--prefix (or --sysconfdir) argument to configure.
+
+
+	SYNTAX OF CONFIGURATION FILES
+
+The configuration files are read via the tcl source command which means that
+they can have any valid tcl syntax. TkRat defines a 'RatLock' command which
+locks a given variable so that it may not be changed anymore. An example of
+an configuration file may look like this:
+
+    # This is a comment line.
+    set option(create_sender) 1
+    RatLock option(create_sender)
+
+    # Set the default editor
+    set option(editor) "xterm -e vi %s"
+
+
+	OPTIONS
+
+Below follows a list of the options a site administrator normally might want
+to set in the site-specific configuration file. To set option NAME in the
+file you should use 'set option(NAME) VALUE'.
+
+This is just a subset of the options. For a full list check the options.tcl
+file in the tkrat subdirectory. Beware that many of the options have special
+syntax and meanings. It is strongly recommended that you use the preferences
+window in TkRat to change the options.
+
+    NAME		DESCRIPTION
+    language		The default language of the user interface. Currently
+			the only possible values are 'en', 'sv', 'it', 'fr'
+			and 'sr' (English, Swedish, Italian, French and
+			Serbian). The default is English.
+
+    default_folder	The definition of the folder that gets opened when
+			the program is started for the first time. It will
+			then be written into the users vfolderlist and this
+			variable does not modify it any more. See FOLDER
+			DEFINITIONS below for more details.
+
+    editor		The default external editor. The editor will NOT be
+			run in a terminal window. A '%s' must be included
+			and will be expanded to the name of the file to edit.
+			This defaults to 'emacs %s'.
+
+    lookup_name		If this is set to '1' then TkRat will look in
+			the local passwd-file for the full names of users
+			when addressing messages. This might be time-consuming
+			so some sites might want to disable it by default. The
+			default is '1'.
+
+    mail_steal		If this is true then we should check for mail
+			that netscape has stolen from the inbox every time
+			we start the application. The default is '1'.
+
+    icon		This defines which icon bitmap the program should
+			install. The possible values are: "normal" (a 64x64
+			bitmap), "small" (50x50) and none. Default is normal.
+
+    system_aliases	The identification of a system-wide address book.
+			This should be a list with three elements:
+				{NAME tkrat PATH}
+			NAME is the name of the address book the user should
+			see, tkrat is a keyword which says this file is in
+			the tkrat-format (other possible values are pine,
+			mail and elm). The last value is the path to the
+			address book
+
+
+	FOLDER DEFINITIONS
+
+Each folder is defined by a tcl list. For example the default value of default_
+folder is "INBOX file {} /usr/spool/mail/$env(USER)". This is a list of four
+elements, the first is the symbolic name of the folder, the second is the
+type of folder, the third is a flag-field and the fourth is the actual file.
+To set a value like this in a configuration file you write:
+
+    set option(default_folder) "INBOX file {} INBOX"
+
+There are four different types of folders one might have as inboxes. The
+syntax for them are (values written in capital letters should be customized,
+other characters must be exactly as written):
+
+File folders:	"NAME file {} FILENAME"
+POP3 folders:	"NAME pop3 {} HOST"
+IMAP folders:	"NAME imap {} HOST MAILBOX"
+Disconnected:	"NAME dis {} HOST MAILBOX"
+
+For network based folders (pop3, imap and disconnected) there is an entry HOST
+which should refer to a host definition. A host is defined by the following
+command:
+
+    set mailServer(HOST) {SERVER PORT FLAGS USER}
+
+Where HOST should match the corresponding entry in the folder definition.
+The PORT part may be left emtpy. Valid flags are: 'pop3', 'ssl' and
+'validate-cert'. Pop3-folders must have the 'pop3' flag set.
+
+
+	CHARACTER SET ALIASES
+
+You can instruct TkRat that one character set name really means another
+character set. This is useful when dealing with software that is improperly
+configured and therefore emits strange character set names. TkRat contains
+a number of such aliases when shipped but each site may want to extend the
+list to cover more names. 
+
+To add more aliases you must create a charsetAliases file in any of the
+configuration directories. This file should have lines in the following format:
+
+set charsetAlias(ALIAS) NAME
+
+This line says that ALIAS is an alias and the real name is NAME. I would also
+appreciate if you notified me (maf@dtek.chalmers.se) of any aliases you think
+should be built in into the release.

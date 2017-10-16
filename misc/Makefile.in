@@ -1,0 +1,37 @@
+#############################################################################
+# TkRat software and its included text is Copyright 1996-2002 by            #
+# Martin Forssen.                                                           #
+#                                                                           #
+# The full text of the legal notices is contained in the file called        #
+# COPYRIGHT, included with this distribution.                               #
+#############################################################################
+
+# Installation directories
+        prefix = @prefix@
+   exec_prefix = @exec_prefix@
+       MAN_DIR = @mandir@
+       BIN_DIR = @bindir@
+      DATA_DIR = @datadir@/`echo tkrat${VERSION} | sed '${TRANSFORM}'`
+       LIB_DIR = @libdir@/`echo tkrat${VERSION} | sed '${TRANSFORM}'`
+
+         SHELL = /bin/sh
+       VERSION = @VERSION@
+       INSTALL = @INSTALL@
+     TRANSFORM = @program_transform_name@
+INSTALL_PREFIX = @INSTALL_PREFIX@
+
+#-------- No changes should be done below --------
+    BITMAPS = *.xbm *.xpm
+
+all: 
+
+install.shared:
+	if test ! -d ${INSTALL_PREFIX}${DATA_DIR} ; then\
+	    ${INSTALL} -m 0755 -d ${INSTALL_PREFIX}${DATA_DIR} ;\
+	fi
+	for i in ${BITMAPS} ; \
+	do \
+	    ${INSTALL} -m 0644 $$i ${INSTALL_PREFIX}${DATA_DIR} ;\
+	done
+
+install: install.data

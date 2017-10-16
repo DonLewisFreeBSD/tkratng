@@ -1,0 +1,116 @@
+.TH TkRat 1 "June 5 2002" "TkRat 2.1 distribution"
+.SH NAME
+tkrat \- a window-based Mail User Agent
+.SH SYNOPSIS
+.B tkrat
+.RB [ "\-confdir \fIdirectory\fP" ]
+.RB [ "\-appname \fIname\fP" ]
+.RB [ \-open " [" \fIspec\fP  ]]
+.RB [ \-opennew " [" \fIspec\fP  ]]
+.RB [ \-compose " [" \fIpredef\fP  ]]
+.RB [ \-netsync " [" \fIset\fP  ]]
+.RB [ \-blank ]
+.SH DESCRIPTION
+TkRat is a graphical Mail User Agent (MUA) which is based on the c-client and
+tcl/tk toolkits. Its primary purpose is to allow the user to read and send
+internet mail as defined in the relevant rfcs. The current goals with the
+TkRat project is to create a MUA which is easy to use but still powerful
+and fast.
+.PP
+The only documentation of how TkRat should be used is contained in the
+program. Both as a number of help-pages and as balloon help over almost
+every feature in the program.
+.PP
+Some of the actions of TkRat can be controlled by the command line options.
+The program also checks for an already running instances of itself and if
+it finds one it reuses that one to carry out the command line arguments.
+That means that you can remote control an already running instance via
+the command line.
+.SH OPTIONS
+If no arguments are given on the command line TkRat defaults to open
+your incoming mailbox. TkRat accepts the following command line options:
+.TP 0.5i
+.BI \-confdir " directory"
+Use this to specify a different default configuration directory than
+\fI~/.ratatosk\fR.
+.TP 0.5i
+.BI \-appname " name"
+Use the given \fIname\fP as name of the application. This name is used
+to locate already running instances of TkRat. That means that if you want
+to run two different instances you must change the name of one of them
+via this option. The default value is \fBtkrat\fP.
+.TP
+.B \-open \fR[\fIspec\fR]
+Opens a folder in an existing folder window (the currently open folder
+is closed). If no window exists the a new one is created. Which folder
+to open is specified in the optional \fIspec\fP argument. If it is not
+present then the incoming mailbox is assumed. Otherwise \fIspec\fP may
+be the name of one of the users defined folders (case is significant)
+or a full folder specification (see the file CONFIGURATION in the source
+release for details).
+.TP
+.B \-opennew \fR[\fIspec\fR]
+Works as \fB\-open\fP but always opens the folder in a new window.
+.TP
+.B \-compose \fR[\fIpredef\fR]
+Opens the compose window so that the user may compose a new message.
+Default for some header-fields can be given in the \fIpredef\fP argument.
+This should be a list with and even number of elements separated by space
+(remember to put quotes around the entire list). The first element is the
+name of a header-field (case does not matter) and the second is the value
+of that field. The third value is the name of another header field and the
+fourth is that value etc. The following header-fields can be given values:
+.BR to ", " cc ", " bcc ", "
+.BR from ", " subject ", " date ", " 
+.BR reply_to ", " in_reply_to " and " message_id
+.TP
+.B \-netsync \fR[\fIset\fR]
+Performs network synchronization. This may mean that deferred messages
+are sent, disconnected mailboxes updated or arbitrary commands are run.
+Exactly which action will be performed is controlled by the optional
+\fIset\fP argument. If it is not present then the actions which the
+user has defined in the "Setup Network sync" window are performed. If
+it is specified it should be on the form of a list with the elements
+separated by spaces. Those actions mentioned in the list will be
+performed. The possible actions are:
+.RS
+.TP
+.B send
+Sends any deferred messages.
+.TP
+.B fetch
+Updates all disconnected folders
+.TP
+.B cmd
+Runs the command specified by the user
+.RE
+.TP
+.B \-blank
+Opens a blank folder window. This is useful if you want to start without
+opening any folders.
+.SH EXAMPLES
+Three different ways of opening the users incoming mailbox:
+.RS
+.B tkrat
+.PP
+.B tkrat -open
+.PP
+.B tkrat -open INBOX
+.I This assumes that the inbox is named \fBINBOX\fP in the users list
+.I of folders
+.RE
+.PP
+To start composing a message to \fBfoo@bar.com\fP with the subject
+\fBGurka i lungan\fP use:
+.RS
+\fBtkrat -compose "to foo@bar.com subject 'Gurka i lungan'"\fP
+.RE
+.SH FILES
+.I $HOME/.ratatosk
+.SH WWW
+Information on the latest version as well as known bugs and some more
+is available on the homepage of TkRat on the WWW. This page can be found
+at:
+.B http://www.tkrat.org/
+.SH AUTHOR
+TkRat is written Martin Forssen <maf@math.chalmers.se>

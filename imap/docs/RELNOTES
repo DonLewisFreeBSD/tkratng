@@ -1,0 +1,205 @@
+Updated: 2 November 2001
+
+imap-2001a is a maintenance release, consisting primarily of bugfixes
+including some critical bugfixes to crash and denial of service problems.
+Programs written for imap-2001 will build with this version without
+modification.
+
+The following new facilities have also been added:
+
+The new /norsh switch in mailbox names provides a more intuitive way of
+disabling rsh-IMAP than the existing :143 or setting the rsh-timeout to 0.
+
+Passwords are no longer returned in mm_dlog() callbacks unless the
+application sets the SET_DEBUGSENSITIVE parameter.
+
+The SET_NETFSSTATBUG parameter allows an application to force the
+traditional UNIX mailbox driver to close and reopen the mailbox at ping
+time.  This is EXTREMELY inefficient, and should only be used to access
+files stored on AFS and old NFS systems.
+
+The ISO 8859 and Windows conversion tables have been updated to comply
+with Unicode 3.1, and the KOI8-R table has been verified as compliant with
+Unicode 3.1.
+
+The SPECIALS mechanism for passing parameters to the lowest level Makefile
+has been updated to be more general.  See the next item for why you might
+care.
+
+New lrh port to build on Red Hat Linux 7.2, with pre-set definitions for
+the places where Red Hat has placed Kerberos and SSL.  It's actually just
+the lnp port with SPECIALS defined accordingly.  You may want to use it as
+a model if your system needs such definitions.  Note that SPECIALS is
+primarily for IMAP toolkit (and Pine) purposes, and that user settings
+should use EXTRASPECIALS instead.
+
+
+Updated: 22 June 2001
+
+imap-2001 is a major release.  Programs written for imap-2000 will probably
+build with this version without modification.
+
+The FAQ document has been significantly expanded.  Be sure to read it for
+more information.
+
+In addition to the usual bugfixes, the following features are new in
+imap-2001:
+
+SSL is now fully integrated into the IMAP toolkit; the old "alt" kludges to
+be able to produce a "sanitized" version of the IMAP toolkit to comply with
+late unlamented US export regulations are now completely gone.
+
+Full client and server TLS support is also in this release.
+
+The server certificate must be signed by a trusted certificate authority and
+the name in the certificate match the user's entry for the server host name;
+this means that the user must enter a fully-qualified host name.
+
+To build with SSL/TLS on UNIX, you now use "SSLTYPE=unix" instead of the
+former "SPECIALAUTHENTICATORS=ssl".  To build with SSL/TLS on UNIX and disable
+the use of plaintext passwords except when under SSL/TLS, use "SSLTYPE=nopwd"
+instead of "SSLTYPE=unix".
+
+RFC 1730 (IMAP4 as opposed to IMAP4rev1) support is turned off by default in
+imapd.  No clients should still be using RFC 1730 protocol.  Look at the imapd
+Makefile for how to re-enable RFC 1730 support.  Note that this code may be
+removed in the future, so if you think you need it you had better let me know.
+
+There are some new options (turned off by default) which attempt to work around
+problems in certain clients.  See the FAQ file for more details.
+
+
+Updated: 24 January 2001
+
+imap-2000c is a maintenance release, consisting primarily of bugfixes.
+
+
+Updated: 9 January 2001
+
+imap-2000b is a maintenance release, consisting primarily of bugfixes.
+
+
+Updated: 9 November 2000
+
+imap-2000a is a maintenance release, consisting primarily of bugfixes.
+
+
+Updated: 19 September 2000
+
+imap-2000 is a major release.  There are major internal and external changes
+from earlier versions (imap-4.x and imap-3.x series).  Programs written for
+imap-4.x will probably build with this version without modification.  It is
+extremely unlikely that a program written for imap-3.x or earlier series will
+build with this version without modifications.  Drivers written for earlier
+versions will definitely need to be rewritten.
+
+In addition to the usual bugfixes, the following features are new in
+imap-2000:
+
+SSL support is now available.  For UNIX, it is necessary to install some
+version of OpenSSL; see imap-2000/docs/SSLBUILD for more information.  SSL
+support is now automatic for the NT, NTK, and W2K ports.  SSL use is indicated
+by the /ssl switch in the mailbox name.
+
+With SSL connections, the server certificate is validated by the client code
+on UNIX, and Windows 2000 unless /novalidate-cert is specified.  Server
+certificates are currently is not validated on Windows 9x, Windows Millenium,
+or Windows NT 4; this is an artifact of the operating system and not the port
+(e.g. client code using the NT port will validate certificates if running on
+Windows 2000).  On UNIX, the server certificate must be signed by a trusted
+certificate authority.  On Windows 2000, the certificate must be signed by a
+trusted certificate authority and match the user's entry for the server host
+name; this means that the user must enter a fully-qualified host name.
+
+Calendar reclama for the benefit of old broken non-Y2K compliant software.
+Two digit years from 00 to 69 will be interpreted as 2000 through 2069.  In
+addition, three digit years from 100 to 105 will be interpreted as 2000
+through 2005.
+
+Support for REFERENCES threading (in addition to the previously-existing
+ORDEREDSUBJECT threading).
+
+Support for the IMAP MULTIAPPEND extension.  This allows much faster uploading
+of multiple messages to an IMAP server.
+
+Support for the LOGINDISABLED IMAP capability.  If the IMAP server sends
+LOGINDISABLED as a capability, the client code will never attempt to send an
+IMAP LOGIN command.
+
+Support for SASL authentication identity vs. authorization identity.  If the
+authentication method does not support this concept (e.g. AUTH=CRAM-MD5,
+AUTH=LOGIN, LOGIN command), the "*" character in the user name may be used to
+indicate a separate authentication identity; for example, "fred*joe" indicates
+authorization identity "fred", authentication identity "joe".
+
+
+UNIX-specific Changes:
+
+Support for SASL authentication identity vs. authorization identity in the
+IMAP and POP3 servers.  If the user indicated by the authentication identity
+is in the "mailadm" group, he may specify any authorization identity and get
+logged in as the authorization identity user.
+
+If the IMAP and POP3 servers are build with PASSWDTYPE=nul, it will send
+LOGINDISABLED as a capability and also disable the AUTH=LOGIN and AUTH=PLAIN
+SASL authenticators.
+
+New MAILSUBDIR build option to change the default mailbox directory from the
+user's home directory to a subdirectory of the user's home directory.  See
+imap-2000/Makefile for more information.
+
+New CHROOT_SERVER build option for closed server systems only.  If defined, a
+chroot() call to the user's home directory is done as part of the login
+process.  See imap-2000/Makefile for more information.
+
+New ADVERTISE_THE_WORLD build option which will add an IMAP namespace that
+points to the root.  Not for the faint of heart.
+
+UNIX format mailboxes no longer require the pseudo-message, nor will a
+pseudo-message be added to a mailbox that does not have one.  A new
+X-IMAPbase: header will be written in the first message.  This is rather less
+efficient and robust than the pseudo-message (which remains the encouraged
+mechanism; UNIX format mailboxes will always be created with it), but perhaps
+will pacify some people who get upset by the pseudo-message.
+
+When building with MIT Kerberos it will try to detect and use libk5crypto.a
+instead of libcrypto.a.
+
+The mbx driver is more aggressive about cleaning up expunged messages that
+couldn't be purged because of shared access to the mailbox at the time of
+expunge.  Now, every checkpoint will try to purge such messages; and a
+checkpoint is attempted at close time.
+
+
+Windows-specific Changes:
+
+New W2K port for Windows 2000.  In addition to supporting SSL using the
+official SSPI interface (the NT and NTK ports invoke SChannel.DLL directly),
+the W2K port also supports Microsoft Kerberos.  Note that the NT and NTK ports
+will work on Windows 2000, but the W2K port will not work on NT4, Windows
+9x, or Windows Millenium.
+
+There is now a #user namespace, equivalent to the "~" namespace on UNIX.
+
+
+
+Changes for Developers:
+
+New c-client.h file which acts as a master include.  c-client based
+applications should now include c-client.h instead of the individual c-client
+files (mail.h, misc.h, etc.).  It is believed that c-client.h will work in C++
+applications.
+
+New GET_FREEENVELOPESPAREP/SET_FREEENVELOPESPAREP and
+GET_FREEELTSPAREP/SET_FREEELTSPAREP function callbacks to free the "sparep"
+member of the envelope and cache elements, respectively.
+
+New OP_MULNEWSRC flag to mail_open() to use multiple newsrc files, and new
+GET_NEWSRCQUERY/SET_NEWSRCQUERY function callbacks to get the name of the
+newsrc file for news access.
+
+New "secret" nntp_article() function to do the NNTP ARTICLE command; this is
+generally useful only when chasing news URLs.
+
+New GET_HIDEDOTFILES/SET_HIDEDOTFILES feature to suppress file names that
+start with "." in mail_list() results.

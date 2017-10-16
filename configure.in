@@ -1,0 +1,932 @@
+dnl     This file should be processed by autoconf to generate a configuration
+dnl	script. It has leant heavily from other similar scripts, most from
+dnl	tcl/tk.
+dnl
+dnl   TkRat software and its included text is Copyright 1996-2002 by
+dnl   Martin Forssén.
+dnl
+dnl   The full text of the legal notices is contained in the file called
+dnl   COPYRIGHT, included with this distribution.
+
+# This varaible tests if we need to warn the user that he/she might have
+# to modify the generated files
+error=0
+
+AC_INIT(/lib/rat.h)
+AC_CONFIG_HEADER(config.h)
+
+# Version numbers of tkrat
+VERSION=2.1
+BUSYLIB_VERSION=1.0
+AC_SUBST(VERSION)
+AC_SUBST(BUSYLIB_VERSION)
+
+AC_CONFIG_AUX_DIR(misc)
+
+AC_ARG_PROGRAM
+
+dnl Checks for programs
+AC_PROG_CC
+AC_PROG_MAKE_SET
+AC_PROG_INSTALL
+AC_PROG_LN_S
+AC_PROG_AWK
+AC_PATH_PROG(compress, gzip)
+if test "x$compress" = "x"; then
+    AC_PATH_PROG(compress, compress)
+    csuffix=.Z
+else
+    csuffix=.gz
+fi
+AC_PATH_PROG(ssh, ssh)
+AC_SUBST(ssh)
+AC_SUBST(compress)
+AC_SUBST(cp)
+AC_SUBST(csuffix)
+AC_SUBST(CFLAGS)
+
+# Etags is needed for build environment only
+AC_PATH_PROG(etags, etags)
+AC_SUBST(etags)
+
+dnl check for special libraries
+# NetBSD have crypt in a special library
+AC_CHECK_LIB(c, crypt, [true],
+	[have_libcrypt=yes
+	 AC_CHECK_LIB(crypt, crypt)])
+# AIX needs the s library
+AC_CHECK_LIB(s, getuserattr)
+
+dnl Check for header files
+AC_ISC_POSIX
+AC_HEADER_DIRENT
+AC_HEADER_SYS_WAIT
+AC_CHECK_HEADERS(fcntl.h unistd.h)
+
+dnl Checks for typedefs, structures, and compiler characteristics.
+AC_C_CONST
+
+dnl Checks for library functions.
+AC_FUNC_UTIME_NULL
+AC_CHECK_FUNCS(snprintf)
+AC_CHECK_FUNCS(strlcpy)
+AC_CHECK_FUNCS(strlcat)
+
+#
+# See if user has specified tcl/tk include directory. If he has then check
+# files there to see which versions of tclsh and wish are needed.
+#
+AC_ARG_WITH(tcl-include, 
+	[  --with-tcl-include=DIR  directory to look for tcl.h and tk.h],
+	tcl_with_include=$withval)
+if test "x$tcl_with_include" != "x"; then
+    for i in $tcl_with_include ; do
+	if test -r $i/tcl.h ; then
+	    MAJOR=`grep TCL_MAJOR_VERSION $i/tcl.h | awk '{print $3}'`
+	    MINOR=`grep TCL_MINOR_VERSION $i/tcl.h | awk '{print $3}'`
+	    if test $MAJOR$MINOR -lt 81 ; then
+		AC_MSG_ERROR('Specified --with-tcl-include directory contains version $MAJOR.$MINOR. 8.2 or later required')
+	    fi
+	    required_tcl_version=$MAJOR.$MINOR
+	fi
+    done
+fi
+
+AC_ARG_WITH(tcl-bin, 
+	[  --with-tcl-bin=DIR      directory to look for tclsh and wish in],
+	PATH=$withval:$PATH, )
+if test "x$required_tcl_version" != "x"; then
+    AC_PATH_PROG(tclsh, tclsh$required_tcl_version, , $PATH)
+    tv=$required_tcl_version
+    if test "x$tclsh" = "x"; then
+	AC_MSG_ERROR('Can not find tcl/tk $required_tcl_version in path')
+    fi
+else
+    tv=8.3
+    AC_PATH_PROG(tclsh, tclsh8.3, , $PATH)
+    if test "x$tclsh" = "x"; then
+	AC_PATH_PROG(tclsh, tclsh8.2, , $PATH)
+	tv=8.2
+    fi
+    if test "x$tclsh" = "x"; then
+	AC_PATH_PROG(tclsh, tclsh, , $PATH)
+	tv=`echo 'puts $tcl_version' | $tclsh`
+	changequote(<<, >>)dnl
+	case $tv in
+	    8.[23456789]*)
+		;;
+	    *)
+	        tclsh=
+		;;
+	esac
+	changequote([, ])dnl
+	cmd_without_version=ok
+    fi
+    if test "x$tclsh" = "x"; then
+	AC_PATH_PROG(tclsh, tclsh8.4, , $PATH)
+	tv=8.4
+    fi
+    if test "x$tclsh" = "x"; then
+	AC_MSG_ERROR('Can not find tcl/tk 8.2 or later in path')
+    fi
+fi
+AC_PATH_PROG(wish, wish$tv, , $PATH)
+if test "x$wish" = "x" -a "x$cmd_without_version" = "xok"; then
+   AC_PATH_PROG(wish, wish, , $PATH)
+fi
+if test "x$wish" = "x"; then
+    AC_MSG_ERROR('Can't find matching wish')
+fi
+
+#
+# Check if we are using memory debugging
+#
+AC_MSG_CHECKING(if tclsh is compiled with memory debugging)
+changequote(<<, >>)dnl
+out=`echo 'puts [info commands memory]' | $tclsh`
+changequote([, ])dnl
+if test "xmemory" = "x$out"; then
+    MEM_DEBUG_FLAGS=-DTCL_MEM_DEBUG
+    AC_MSG_RESULT(yes)
+else
+    MEM_DEBUG_FLAGS=
+    AC_MSG_RESULT(no)
+fi
+AC_SUBST(MEM_DEBUG_FLAGS)
+
+#
+# Locate the tcl/tk libraries and include files.
+#
+AC_MSG_CHECKING(tcl.h)
+tcl_bin_dir=`dirname $tclsh`
+tcl_bin_dir=`dirname $tcl_bin_dir`
+changequote(<<, >>)dnl
+tcl_lib_dir=`echo 'puts [file dirname [file dirname $tcl_library]]' | $tclsh`
+if test "x$DISPLAY" != "x"; then
+    tk_lib_dir=`echo 'puts [file dirname [file dirname $tk_library]];destroy .'|
+	    $wish`
+fi
+changequote([, ])dnl
+tk_bin_dir=`dirname $wish`
+tk_bin_dir=`dirname $tk_bin_dir`
+tcl_dirs="$tcl_lib_dir $tk_lib_dir $tcl_bin_dir $tk_bin_dir"
+tcl_dirs="$tcl_dirs /usr/local /usr/tcl /usr/pd/tcl /usr"
+for i in $tcl_dirs ; do
+    tcl_include_dirs="$tcl_include_dirs $i/include"
+done
+tcl_include_dirs="$tcl_with_include $tcl_include_dirs"
+tcl_include_dirs="$tcl_include_dirs /usr/include/tcl /usr/include"
+tcl_include_dirs="$tcl_include_dirs /usr/local/include/tcl"
+tcl_include_dirs="$tcl_include_dirs /usr/include/tcl$tv"
+tcl_include_dirs="$tcl_include_dirs /usr/include/tk$tv"
+tcl_include_dirs="$tcl_include_dirs /usr/local/include/tcl$tv"
+tcl_include_dirs="$tcl_include_dirs /usr/local/include/tk$tv"
+tcl_dir=0
+for i in $tcl_include_dirs ; do
+    if test -r $i/tcl.h ; then
+	MAJOR=`grep TCL_MAJOR_VERSION $i/tcl.h | awk '{print $3}'`
+	MINOR=`grep TCL_MINOR_VERSION $i/tcl.h | awk '{print $3}'`
+	if test $MAJOR.$MINOR = $tv ; then
+	    tcl_dir=$i
+	    break
+	fi
+    fi
+done
+if test $tcl_dir = 0 ; then
+    AC_MSG_RESULT(no)
+    AC_MSG_WARN([WARNING can't find tcl include files version $tv.])
+    tcl_dir=
+fi
+AC_MSG_RESULT($tcl_dir)
+tk_dir=0
+AC_MSG_CHECKING(tk.h)
+for i in $tcl_include_dirs ; do
+    if test -r $i/tk.h  ; then
+	MAJOR=`grep TK_MAJOR_VERSION $i/tk.h | awk '{print $3}'`
+	MINOR=`grep TK_MINOR_VERSION $i/tk.h | awk '{print $3}'`
+	if test $MAJOR.$MINOR = $tv; then
+	    tk_dir=$i
+	    break
+	fi
+    fi
+done
+if test $tk_dir = 0 ; then
+    AC_MSG_RESULT(no)
+    AC_MSG_WARN([WARNING can't find tk include files version $tv.])
+    tk_dir=
+fi
+AC_MSG_RESULT($tk_dir)
+
+if test "$tcl_dir" = "$tk_dir" ; then
+    TCL_INCLUDE=-I$tcl_dir
+else
+    TCL_INCLUDE="-I$tcl_dir -I$tk_dir"
+fi
+
+AC_SUBST(TCL_INCLUDE)
+
+#
+# Try to locate tkConfig.sh
+#
+AC_ARG_WITH(tkconfig, 
+	[  --with-tkconfig=DIR     directory to look for tkConfig.sh],
+	tkconfig_with=$withval)
+AC_MSG_CHECKING(tkConfig.sh)
+if test "x$tkconfig_with" != "x"; then
+    for i in $tkconfig_with ; do
+	if test -r $i/tkConfig.sh ; then
+		tk_config_test=$i/tkConfig.sh
+	else
+		AC_MSG_ERROR([No tkConfig.sh in $tkconfig_with])
+	fi
+    done
+else
+        for i in $tk_dir/../lib $prefix/lib/tk$tv $tk_dir/../../lib/tk$tv; do
+	if test -r $i/tkConfig.sh ; then
+		tk_config_test=$i/tkConfig.sh
+		break
+	fi
+	done
+fi
+if test "x$tk_config_test" = "x"; then
+	AC_MSG_ERROR([No tkConfig.sh found])
+fi
+TK_VERSION=`. $tk_config_test ; echo $TK_VERSION`
+if test $TK_VERSION != $tv; then
+AC_MSG_ERROR([Found tkConfig.sh (in $tk_config_test) is version $TK_VERSION while I expected $tv.])
+fi
+AC_MSG_RESULT($tk_config_test)
+AC_SUBST(TK_DEFS)
+
+#--------------------------------------------------------------------
+#       Locate the X11 header files and the X11 library archive.  Try
+#       the ac_path_x macro first, but if it doesn't find the X stuff
+#       (e.g. because there's no xmkmf program) then check through
+#       a list of possible directories.  Under some conditions the
+#       autoconf macro will return an include directory that contains
+#       no include files, so double-check its result just to be safe.
+#--------------------------------------------------------------------
+
+AC_PATH_X
+not_really_there=""
+if test "$no_x" = ""; then
+    if test "$x_includes" = ""; then
+        AC_TRY_CPP([#include <X11/XIntrinsic.h>], , not_really_there="yes")
+    else
+        if test ! -r $x_includes/X11/Intrinsic.h; then
+            not_really_there="yes"
+        fi
+    fi
+fi
+if test "$no_x" = "yes" -o "$not_really_there" = "yes"; then
+    AC_MSG_CHECKING(for X11 header files)
+    XINCLUDES="# no special path needed" 
+    xinc="no special path needed"
+    AC_TRY_CPP([#include <X11/Intrinsic.h>], , XINCLUDES="nope")  
+    if test "$XINCLUDES" = nope; then
+        dirs="/usr/unsupported/include /usr/local/include /usr/X386/include /usr
+/X11R6/include /usr/X11R5/include /usr/include/X11R5 /usr/include/X11R4 /usr/ope
+nwin/include /usr/X11/include /usr/sww/include"
+        for i in $dirs ; do
+            if test -r $i/X11/Intrinsic.h; then
+		AC_MSG_RESULT($i)
+                XINCLUDES=" -I$i"
+                break
+            fi
+        done
+    else
+	AC_MSG_RESULT(ok)
+    fi  
+    if test "$XINCLUDES" = nope; then
+	AC_MSG_RESULT(couldn't find any!)
+	XINCLUDES="# no include files found"
+    fi
+else
+    if test "$x_includes" != ""; then
+        XINCLUDES=-I$x_includes
+    else
+        XINCLUDES="# no special path needed"
+    fi
+fi      
+AC_SUBST(XINCLUDES)
+
+#
+# Check for openssl installation
+# If found the build the imap toolkit with ssl-support
+# This code is based on code found in the portable distribution of OpenSSH
+#
+AC_ARG_WITH(ssl,
+    [  --with-ssl              Enable/disable SSL support (default eanbled) ],
+    [
+	if test "x$withval" != "xno" ; then
+	    tryssl=yes
+	else
+	    tryssl=no
+	fi ],
+    [ tryssl=yes ]
+)
+
+if test "x$tryssl" = "xyes"; then
+    AC_ARG_WITH(ssl-dir,
+	[  --with-ssl-dir=PATH     Specify path to OpenSSL installation ],
+	[
+	    if test "x$withval" != "xno" ; then
+		tryssldir=$withval
+	    fi
+	]
+    )
+
+    saved_LIBS="$LIBS"
+    saved_LDFLAGS="$LDFLAGS"
+    saved_CFLAGS="$CFLAGS"
+    if test "x$prefix" != "xNONE" ; then
+	tryssldir="$tryssldir $prefix"
+    fi
+    AC_CACHE_CHECK([for OpenSSL], ac_cv_openssldir, [
+
+	for ssldir in $tryssldir "" /usr/local/openssl /usr/lib/openssl /usr/local/ssl /usr/lib/ssl /usr/local /usr/pkg /opt /opt/openssl ; do
+	    if test ! -z "$ssldir" ; then
+		if test ! -f "$ssldir/include/openssl/rand.h" ; then
+		    continue
+		fi
+		LDFLAGS="$saved_LDFLAGS -L$ssldir/lib"
+		CFLAGS="$saved_CFLAGS -I$ssldir/include"
+	    else
+		LDFLAGS="$saved_LDFLAGS"
+	    fi
+
+	    LIBS="$saved_LIBS -lcrypto"
+
+	    # Basic test to check for compatible version and correct linking
+	    AC_TRY_RUN(
+		[
+#include <string.h>
+#include <openssl/rand.h>
+int main(void) 
+{
+	char a[2048];
+	memset(a, 0, sizeof(a));
+	RAND_add(a, sizeof(a), sizeof(a));
+	return(RAND_status() <= 0);
+}
+		],
+		[
+		    found_crypto=1
+		    break;
+		], [
+		    placeholder=0
+		], [
+		    placeholder=0
+		]
+	    )
+
+	    if test ! -z "$found_crypto" ; then
+		break;
+	    fi
+	done
+
+	if test -z "$ssldir" ; then
+	    ssldir="(system)"
+	fi
+
+	if test -z "$found_crypto" ; then
+	     ac_cv_openssldir=no
+	else
+	     ac_cv_openssldir=$ssldir
+	fi
+    ])
+
+    if test "x$ac_cv_openssldir" != "xno"; then
+	AC_DEFINE(HAVE_OPENSSL)
+	dnl Need to recover ssldir - test above runs in subshell
+	SSLDIR=$ac_cv_openssldir
+	if (test "x$ac_cv_openssldir" = "x(system)") ; then
+	    SSLDIR=/usr
+	fi
+	EXTRA_LIBS="$EXTRA_LIBS -L$SSLDIR/lib -lssl -lcrypto"
+	IMAPFLAGS="SSLTYPE=unix SSLDIR=$SSLDIR"
+	AC_SUBST(SSLDIR)
+	AC_SUBST(IMAPFLAGS)
+    else
+    	LDFLAGS="$saved_LDFLAGS"
+	CFLAGS="$saved_CFLAGS"
+	LIBS="$saved_LIBS"     
+    fi
+fi
+
+#
+# Find installation prefix (if any)
+#
+AC_ARG_WITH(install-prefix,
+	[  --with-install-prefix=DIR
+                          prefix to use when installing files],
+	INSTALL_PREFIX=$withval)
+AC_SUBST(INSTALL_PREFIX)
+
+
+#########################################################################
+# The following code checks the system type and defines variables for   #
+# building of shared libraries and imap.                                #
+# It is mostly taken from tcl8.0p2                                      #
+#########################################################################
+# Step 1: set the variable "system" to hold the name and version number
+# for the system.  This can usually be done via the "uname" command, but
+# there are a few systems, like Next, where this doesn't work.
+
+AC_MSG_CHECKING([system version (for imap & dynamic loading)])
+if test -f /usr/lib/NextStep/software_version; then
+    system=NEXTSTEP-`awk '/3/,/3/' /usr/lib/NextStep/software_version`
+else
+    system=`uname -s`-`uname -r`
+    if test "$?" -ne 0 ; then
+	AC_MSG_RESULT([unknown (can't find uname command)])
+	system=unknown
+    else
+	# Special check for weird MP-RAS system (uname returns weird
+	# results, and the version is kept in special file).
+    
+	if test -r /etc/.relid -a "X`uname -n`" = "X`uname -s`" ; then
+	    system=MP-RAS-`awk '{print $3}' /etc/.relid'`
+	fi
+	if test "`uname -s`" = "AIX" ; then
+	    system=AIX-`uname -v`.`uname -r`
+	fi
+	AC_MSG_RESULT($system)
+    fi
+fi
+
+# Step 2: check for existence of -ldl library.  This is needed because
+# Linux can use either -ldl or -ldld for dynamic loading.
+
+AC_CHECK_LIB(dl, dlopen, have_dl=yes, have_dl=no)
+
+# Step 3: set configuration options based on system name and version.
+fullSrcDir=`cd $srcdir; pwd`
+RATLIB_SUFFIX=""
+BUSYLIB_SUFFIX=""
+TCL_UNSHARED_LIB_SUFFIX=""
+TCL_LIB_VERSIONS_OK=ok
+case $system in
+changequote(<<, >>)dnl
+    AIX-4.[[2-9]])
+changequote([, ])dnl
+	SHLIB_CFLAGS=""
+	SHLIB_LD="$fullSrcDir/ldAix /bin/ld -bhalt:4 -bM:SRE -bE:lib.exp -H512 -T512 -bnoentry"
+	SHLIB_LD_LIBS='${LIBS}'
+	SHLIB_SUFFIX=".so"
+	AIX=yes
+	RATLIB_SUFFIX='${VERSION}.a'
+	BUSYLIB_SUFFIX='${BUSYLIB_VERSION}.a'
+	OSTYPE=Unkown
+	;;
+    AIX-*)
+	SHLIB_CFLAGS=""
+	SHLIB_LD="$fullSrcDir/ldAix /bin/ld -bhalt:4 -bM:SRE -bE:lib.exp -H512 -T512 -bnoentry"
+	SHLIB_LD_LIBS='${LIBS}'
+	SHLIB_SUFFIX=".so"
+	RATLIB_SUFFIX='${VERSION}.a'
+	BUSYLIB_SUFFIX='${BUSYLIB_VERSION}.a'
+	case "`uname -v`.`uname -r`" in
+	4.1)
+	    OSTYPE=a41
+	    ;;
+	3.2)
+	    OSTYPE=a32
+	    ;;
+	*)
+	    OSTYPE=aix
+	    ;;
+	esac
+	;;
+    BSD/OS-2.1*)
+	SHLIB_CFLAGS=""
+	SHLIB_LD="shlicc -r"
+	SHLIB_LD_LIBS='${LIBS}'
+	SHLIB_SUFFIX=".so"
+	OSTYPE=bsd
+	;;
+    BSD/OS-3*|BSD/OS-4*)
+	SHLIB_CFLAGS=""
+	SHLIB_LD="shlicc -r"
+	SHLIB_LD_LIBS='${LIBS}'
+	SHLIB_SUFFIX=".so"
+	OSTYPE=bs3
+	;;
+    dgux*)
+	SHLIB_CFLAGS="-K PIC"
+	SHLIB_LD="cc -G"
+	SHLIB_LD_LIBS=""
+	RATLIB_SUFFIX=".so"
+	BUSYLIB_SUFFIX=".so"
+	OSTYPE=d-g
+	;;
+    HP-UX-*.08.*|HP-UX-*.09.*)
+	AC_CHECK_LIB(dld, shl_load, have_dld=yes, have_dld=no)
+	if test "$have_dld" = yes ; then
+	    SHLIB_CFLAGS="+z"
+	    SHLIB_LD="ld -b"
+	    SHLIB_LD_LIBS=""
+	    SHLIB_SUFFIX=".sl"
+	fi
+	OSTYPE=hpp
+	;;
+    HP-UX-*.10.*|HP-UX-*.11.*)
+	AC_CHECK_LIB(dld, shl_load, have_dld=yes, have_dld=no)
+	if test "$have_dld" = yes ; then
+	    SHLIB_CFLAGS="+z"
+	    SHLIB_LD="ld -b"
+	    SHLIB_LD_LIBS=""
+	    SHLIB_SUFFIX=".sl"
+	fi
+	OSTYPE=hpx
+	;;
+    IRIX-4.*)
+	SHLIB_CFLAGS="-G 0"
+	SHLIB_SUFFIX=".a"
+	SHLIB_LD="echo tclLdAout $CC \{$SHLIB_CFLAGS\} | `pwd`/tclsh -r -G 0"
+	SHLIB_LD_LIBS='${LIBS}'
+	RATLIB_SUFFIX='${VERSION}.a'
+	BUSYLIB_SUFFIX='${BUSYLIB_VERSION}.a'
+	OSTYPE=sgi
+	;;
+    IRIX-5.*)
+	SHLIB_CFLAGS=""
+	SHLIB_LD="ld -shared -rdata_shared"
+	SHLIB_LD_LIBS=""
+	SHLIB_SUFFIX=".so"
+	OSTYPE=sgi
+	;;
+    IRIX-6.*)
+	SHLIB_CFLAGS=""
+	SHLIB_LD="ld -shared -rdata_shared"
+	SHLIB_LD_LIBS=""
+	SHLIB_SUFFIX=".so"
+	if test "$CC" = "gcc" -o `$CC -v 2>&1 | grep -c gcc` != "0" ; then
+            OSTYPE=gsg
+        else
+            OSTYPE=sg6
+        fi
+	;;
+    IRIX64-6.*)
+	SHLIB_CFLAGS=""
+	SHLIB_LD="ld -32 -shared -rdata_shared -rpath /usr/local/lib"
+	SHLIB_LD_LIBS=""
+	SHLIB_SUFFIX=".so"
+	OSTYPE=sg6
+	;;
+    Linux*)
+	SHLIB_CFLAGS="-fPIC"
+	SHLIB_LD_LIBS=""
+	SHLIB_SUFFIX=".so"
+	if test "$have_dl" = yes ; then
+	    SHLIB_LD="${CC} -shared"
+	else
+	    SHLIB_LD="ld -shared"
+	fi
+	AC_CHECK_LIB(pam, pam_start, have_pam=yes, have_pam=no, -lpam_misc)
+	if test "$have_pam" = yes ; then
+	    	OSTYPE=lnp
+		EXTRA_LIBS="$EXTRA_LIBS -L$SSLDIR/lib -lpam -lpam_misc"
+	else
+		if test "$have_libcrypt" = yes ; then
+		    OSTYPE=slx
+		else
+		    OSTYPE=lnx
+		fi
+	fi
+	;;
+    MP-RAS-02*)
+	SHLIB_CFLAGS="-K PIC"
+	SHLIB_LD="cc -G"
+	SHLIB_LD_LIBS=""
+	SHLIB_SUFFIX=".so"
+	OSTYPE=Unkown
+	;;
+    MP-RAS-*)
+	SHLIB_CFLAGS="-K PIC"
+	SHLIB_LD="cc -G"
+	SHLIB_LD_LIBS=""
+	SHLIB_SUFFIX=".so"
+	OSTYPE=Unkown
+	;;
+    NetBSD-*|FreeBSD-[[12]].*)
+	# Not available on all versions:  check for include file.
+	AC_CHECK_HEADER(dlfcn.h, [
+	    SHLIB_CFLAGS="-fpic"
+	    SHLIB_LD="ld -Bshareable -x"
+	    SHLIB_LD_LIBS=""
+	    SHLIB_SUFFIX=".so"
+	    RATLIB_SUFFIX='`echo ${VERSION} | tr -d .`.so.1.0'
+	    BUSYLIB_SUFFIX='`echo ${BUSYLIB_VERSION} | tr -d .`.so.1.0'
+	], [
+	    SHLIB_CFLAGS=""
+	    SHLIB_LD="echo tclLdAout $CC \{$SHLIB_CFLAGS\} | `pwd`/tclsh -r"
+	    SHLIB_LD_LIBS='${LIBS}'
+	    SHLIB_SUFFIX=".a"
+	    RATLIB_SUFFIX='`echo ${VERSION} | tr -d .`.a'
+	    BUSYLIB_SUFFIX='`echo ${BUSYLIB_VERSION} | tr -d .`.a'
+	])
+
+	# FreeBSD doesn't handle version numbers with dots.
+
+	TCL_UNSHARED_LIB_SUFFIX='`echo ${VERSION} | tr -d .`.a'
+	TCL_LIB_VERSIONS_OK=nodots
+	OSTYPE=neb
+	;;
+    FreeBSD-*)
+	# FreeBSD 3.* and greater have ELF.
+	SHLIB_CFLAGS="-fpic"
+	SHLIB_LD="ld -Bshareable -x"
+	SHLIB_LD_LIBS=""
+	SHLIB_SUFFIX=".so"
+	OSTYPE=bsf
+	;;
+    OpenBSD-*)
+	# OpenBSD/SPARC needs -fPIC, -fpic should be fine for all others.
+	case `machine` in
+	    sparc*)
+		SHLIB_CFLAGS="-fPIC"
+		;;
+	    *)
+		SHLIB_CFLAGS="-fpic"
+		;;
+	esac
+	SHLIB_LD="${CC} -shared"
+	SHLIB_LD_LIBS=""
+	SHLIB_SUFFIX=".so"
+	RATLIB_SUFFIX='`echo ${VERSION} | tr -d .`.so'
+	BUSYLIB_SUFFIX='`echo ${BUSYLIB_VERSION} | tr -d .`.so'
+	TCL_UNSHARED_LIB_SUFFIX=`echo ${VERSION} | tr -d .`.a
+	TCL_LIB_VERSIONS_OK=nodots
+	OSTYPE=bso
+	;;
+    NEXTSTEP-*)
+	SHLIB_CFLAGS=""
+	SHLIB_LD="cc -nostdlib -r"
+	SHLIB_LD_LIBS=""
+	SHLIB_SUFFIX=".so"
+	OSTYPE=nxt
+	;;
+    OSF1-1.0|OSF1-1.1|OSF1-1.2)
+	# OSF/1 1.[012] from OSF, and derivatives, including Paragon OSF/1
+	SHLIB_CFLAGS=""
+	# Hack: make package name same as library name
+	SHLIB_LD='ld -R -export $@:'
+	SHLIB_LD_LIBS=""
+	SHLIB_SUFFIX=".so"
+	OSTYPE=osf
+	;;
+    OSF1-1.*)
+	# OSF/1 1.3 from OSF using ELF, and derivatives, including AD2
+	SHLIB_CFLAGS="-fpic"
+	SHLIB_LD="ld -shared"
+	SHLIB_LD_LIBS=""
+	SHLIB_SUFFIX=".so"
+	OSTYPE=osf
+	;;
+changequote(<<, >>)dnl
+    OSF1-[VXT][45]*)
+changequote([, ])dnl
+        # Digital OSF/4 and later
+	SHLIB_CFLAGS=""
+	SHLIB_LD='ld -shared'
+	SHLIB_LD_LIBS="-lc -lsecurity"
+	SHLIB_SUFFIX=".so"
+	OSTYPE=os4
+	;;
+changequote(<<, >>)dnl
+    OSF1-[VXT]*)
+changequote([, ])dnl
+        # Digital OSF/1
+	SHLIB_CFLAGS=""
+	SHLIB_LD='ld -shared -expect_unresolved "*"'
+	SHLIB_LD_LIBS=""
+	SHLIB_SUFFIX=".so"
+	OSTYPE=osf
+	;;
+    RISCos-*)
+	SHLIB_CFLAGS="-G 0"
+	SHLIB_LD="echo tclLdAout $CC \{$SHLIB_CFLAGS\} | `pwd`/tclsh -r -G 0"
+	SHLIB_LD_LIBS='${LIBS}'
+	SHLIB_SUFFIX=".a"
+	OSTYPE=Unkown
+	;;
+    SCO_SV-3.2*)
+        # Note, dlopen is available only on SCO 3.2.5 and greater.  However,
+        # this test works, since "uname -s" was non-standard in 3.2.4 and
+        # below.
+	SHLIB_CFLAGS="-Kpic -belf"
+	SHLIB_LD="ld -G"
+	SHLIB_LD_LIBS=""
+	SHLIB_SUFFIX=".so"
+	if uname -X | fgrep 3.2v5 > /dev/null
+	then
+	    OSTYPE=sc5
+	else
+	    OSTYPE=sco
+	fi
+	;;
+     SINIX*5.4*)
+	SHLIB_CFLAGS="-K PIC"
+	SHLIB_LD="cc -G"
+	SHLIB_LD_LIBS=""
+	SHLIB_SUFFIX=".so"
+	OSTYPE=snx
+	;;
+    SunOS-4*)
+	SHLIB_CFLAGS="-PIC"
+	SHLIB_LD="ld"
+	SHLIB_LD_LIBS=""
+	SHLIB_SUFFIX=".so"
+
+	# SunOS can't handle version numbers with dots in them in library
+	# specs, like -ltcl7.5, so use -ltcl75 instead.  Also, it
+	# requires an extra version number at the end of .so file names.
+	# So, the library has to have a name like libtcl75.so.1.0
+
+	RATLIB_SUFFIX='`echo ${VERSION} | tr -d .`.so.1.0'
+	BUSYLIB_SUFFIX='`echo ${BUSYLIB_VERSION} | tr -d .`.so.1.0'
+	TCL_UNSHARED_LIB_SUFFIX='`echo ${VERSION} | tr -d .`.a'
+	TCL_LIB_VERSIONS_OK=nodots
+	if test "$CC" = "gcc" -o `$CC -v 2>&1 | grep -c gcc` != "0" ; then
+            OSTYPE=gsu
+        else
+            OSTYPE=sun
+        fi
+	;;
+    SunOS-5*)
+	SHLIB_LD="/usr/ccs/bin/ld -G -z text"
+	SHLIB_LD_LIBS='${LIBS}'
+	SHLIB_SUFFIX=".so"
+	if test "$CC" = "gcc" -o `$CC -v 2>&1 | grep -c gcc` != "0" ; then
+	    SHLIB_CFLAGS="-fPIC"
+            OSTYPE=gso
+        else
+	    SHLIB_CFLAGS="-KPIC"
+            OSTYPE=sol
+        fi
+	;;
+    ULTRIX-4.*)
+	SHLIB_CFLAGS="-G 0"
+	SHLIB_SUFFIX=".a"
+	SHLIB_LD="echo tclLdAout $CC \{$SHLIB_CFLAGS\} | `pwd`/tclsh -r -G 0"
+	SHLIB_LD_LIBS='${LIBS}'
+	OSTYPE=ult
+	;;
+    UNIX_SV*)
+	SHLIB_CFLAGS="-KPIC"
+	SHLIB_LD="cc -G"
+	SHLIB_LD_LIBS=""
+	SHLIB_SUFFIX=".so"
+	OSTYPE=ult
+	;;
+esac
+
+# If we're running gcc, then change the C flags for compiling shared
+# libraries to the right flags for gcc, instead of those for the
+# standard manufacturer compiler.
+
+if test "$CC" = "gcc" -o `$CC -v 2>&1 | grep -c gcc` != "0" ; then
+    case $system in
+	AIX-*)
+	    ;;
+	BSD/OS*)
+	    ;;
+	IRIX*)
+	    ;;
+	NetBSD-*|FreeBSD-*|OpenBSD-*)
+	    ;;
+	RISCos-*)
+	    ;;
+	ULTRIX-4.*)
+	    ;;
+	*)
+	    NATIVE_SHLIB_CFLAGS=$SHLIB_CFLAGS
+	    SHLIB_CFLAGS="-fPIC"
+	    ;;
+    esac
+fi
+
+if test "X$NATIVE_SHLIB_CFLAGS" = "X" ; then
+    NATIVE_SHLIB_CFLAGS=$SHLIB_CFLAGS
+fi      
+if test "X$RATLIB_SUFFIX" = "X" ; then
+    RATLIB_SUFFIX='${VERSION}${SHLIB_SUFFIX}'
+fi      
+if test "X$BUSYLIB_SUFFIX" = "X" ; then
+    BUSYLIB_SUFFIX='${BUSYLIB_VERSION}${SHLIB_SUFFIX}'
+fi      
+
+AC_SUBST(SHLIB_CFLAGS)
+AC_SUBST(NATIVE_SHLIB_CFLAGS)
+AC_SUBST(SHLIB_LD)
+AC_SUBST(SHLIB_LD_LIBS)
+AC_SUBST(SHLIB_SUFFIX)
+AC_SUBST(RATLIB_SUFFIX)
+AC_SUBST(BUSYLIB_SUFFIX)
+AC_SUBST(OSTYPE)
+
+
+#------------------------------------------------------------------------------
+#       Find out all about time handling differences.
+#------------------------------------------------------------------------------
+    
+AC_CHECK_HEADERS(sys/time.h)
+AC_HEADER_TIME
+AC_STRUCT_TIMEZONE
+
+AC_MSG_CHECKING([tm_tzadj in struct tm])      
+AC_TRY_COMPILE([#include <time.h>], [struct tm tm; tm.tm_tzadj;],
+        [AC_DEFINE(HAVE_TM_TZADJ)
+         AC_MSG_RESULT(yes)],
+         AC_MSG_RESULT(no))
+    
+AC_MSG_CHECKING([tm_gmtoff in struct tm])
+AC_TRY_COMPILE([#include <time.h>], [struct tm tm; tm.tm_gmtoff;],
+        [AC_DEFINE(HAVE_TM_GMTOFF)
+         AC_MSG_RESULT(yes)],
+         AC_MSG_RESULT(no))
+
+#
+# Its important to include time.h in this check, as some systems (like convex)
+# have timezone functions, etc.
+# 
+have_timezone=no
+AC_MSG_CHECKING([long timezone variable])
+AC_TRY_COMPILE([#include <time.h>], 
+        [extern long timezone;
+         timezone += 1;
+         exit (0);],
+        [have_timezone=yes
+         AC_DEFINE(HAVE_TIMEZONE_VAR)
+         AC_MSG_RESULT(yes)],
+         AC_MSG_RESULT(no))
+
+#
+# On some systems (eg IRIX 6.2), timezone is a time_t and not a long.
+#
+if test "$have_timezone" = no; then
+   AC_MSG_CHECKING([time_t timezone variable])
+   AC_TRY_COMPILE([#include <time.h>],
+        [extern time_t timezone;
+         timezone += 1;
+         exit (0);],
+        [AC_DEFINE(HAVE_TIMEZONE_VAR)
+         AC_MSG_RESULT(yes)],
+         AC_MSG_RESULT(no))
+fi      
+
+#
+# AIX does not have a timezone field in struct tm. When the AIX bsd
+# library is used, the timezone global and the gettimeofday methods are
+# to be avoided for timezone deduction instead, we deduce the timezone
+# by comparing the localtime result on a known GMT value.
+#
+if test "`uname -s`" = "AIX" ; then
+    AC_CHECK_LIB(bsd, gettimeofday, libbsd=yes)
+    if test $libbsd = yes ; then
+	AC_DEFINE(USE_DELTA_FOR_TZ)
+    fi      
+fi
+
+#
+# Some systems require a -lcrypt
+#
+if test "$have_libcrypt" = yes ; then
+    EXTRA_LIBS="$EXTRA_LIBS -lcrypt"
+fi
+AC_SUBST(EXTRA_LIBS)
+
+############################################################################
+dnl Get names of text files
+AC_MSG_CHECKING([Names of generated text files])
+changequote(<<>>)dnl
+cat >conftest.tcl << EOF
+cd \$argv
+source defs.tcl
+proc variable {v} {
+    global languages
+    foreach l \$languages { puts -nonewline "text_\${v}_[lindex \$l 0].tcl " }
+}
+proc label {a} {}
+foreach l \$languages { proc [lindex \$l 0] m {} }
+foreach f [glob *.text] { source \$f }
+EOF
+changequote([, ])dnl
+TEXTFILES=`$tclsh conftest.tcl tkrat/Text`
+rm -fr conftest.tcl
+AC_MSG_RESULT(done)
+
+AC_SUBST(TEXTFILES)
+
+############################################################################
+dnl Generate output
+AC_OUTPUT(Makefile tkrat/Makefile tkrat/tkrat lib/Makefile misc/Makefile
+	util/Makefile doc/Makefile test/run)
+chmod +x tkrat/tkrat
+chmod +x test/run
+
+if test "$error" = 1 ; then
+    AC_MSG_WARN([    Encountered errors while configuring. You might])
+    AC_MSG_WARN([    have to modify lib/Makefile by hand.])
+fi

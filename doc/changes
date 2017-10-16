@@ -1,0 +1,3495 @@
+This file lists the changes made to TkRat between versions. It is much
+more detailed than the changes shown to the user when starting a new version.
+
+040126: ***** Released 2.1.4 *****
+
+040126: (bug fix) Fixed problem where some messages turned up empty.
+
+040102: ***** Released 2.1.3 *****
+
+040102: (bug fix) Fixed problem where signed messages caused 'Illegal
+	body part' errors.
+
+031116: (bug fix) Be more tolerant towards bad folder definitions.
+
+031105: (bug fix) Handle DSNs with newlines in the subject lines.
+
+031103: (bug fix) Incorporated OpenBSD changes from Stuart Cassoff.
+
+030924: ***** Released 2.1.2 *****
+
+030923: (feature) Work around bugs in tcl/tk which prevented build. Also
+	fixed some const-issues which also prevented building.
+
+030611: (bug fix) Handle localized characters as well as () in subject
+	when doing pretty-print.
+
+030528: (bug fix) Escape non us-ascii characters when pretty-printing.
+
+030408: (feature) Applied speedup patch by Don Lewis.
+
+030217: (bug fix) Avoid core-dump on bad Delivery Status Notifications.
+
+030214: (bug fix) Generated bad line-break when breaking long header lines.
+
+021028: ***** Released 2.1.1 *****
+
+021001: (bug fix) Fixed subtle problem in configure which hit systems
+	whith the openssl include-files installed but not the libraries.
+
+020812: (bug fix) Fixed so it should build with the latest tcl/tk 8.4.
+
+020812: (bug fix) If you had an alias with the same key as a local user name
+	then TkRat did show the local users full name in the address field.
+	The message was however sent to teh correct address.
+
+020825: (bug fix) URLs which contained '%u' could send tkrat into an
+	eternal loop when pressed. Thanks goes to Marc Herbert.
+
+020822: (bug fix) --with-ssl-dir argument to configure did not work correctly.
+
+020814: (bug fix) '"' should act as an URL terminator.
+
+020807: ***** Released 2.1 *****
+
+020805: (bug fix) Decode description of bodyparts.
+
+020803: (bug fix) Make it impossible to input space in alias names when
+	extracting addresses.
+
+020720: (bug fix) Fixed potential buffer overflow in RatDecodeHeader().
+	Spotted by Don Lewis.
+
+020628: (bug fix) Avoid adding extra blank line when using external
+	editor. Thanks goes to Stefan Richter.
+
+020628: (bug fix) Part of the text in the version window was editable.
+
+020623: ***** Released 2.1b3 *****
+
+020617: (bug fix) Incorporated lots of grammatical corrections to the
+	English messages. Provided by Chris Tubutis.
+	
+020613: (bug fix) If you had discarded changes in the preferences window then
+	the discard dialog came up every time you switched pane.
+
+020610: (bug fix) Saving a copy of an outgoing message to an open
+	folder caused this folder to stay open (and monitored) until
+	tkrat is closed.
+
+020603: (bug fix) Fixed possible coredump on importing file-folders.
+
+020530: ***** Released 2.1b2 *****
+
+020529: (bug fix) Fixed problem on Solaris which made the build
+	process fail the first time.
+
+020529: (bug fix) It was possible to abort halfway through the creation
+	of a new folder and leave things in a flux.
+
+020527: (bug fix) Fixed problem with deleting the first role.
+
+020526: (bug fix) Added extra newline to messages when holding (and
+	sending).
+
+020526: (bug fix) Could not drag&drop folders in the vfolderdef window.
+
+020521: (bug fix) Did not handle single-letter addresses to address fields.
+
+020521: (bug fix) Do not fix CRLF of attached files if they already are
+	correct. Fixed PGP signing of dos-encoded text attachments.
+
+020515: (bug fix) Changed Mailcap handling so temfiles are deleted
+	after 30 seconds instead of immediately. This should allow
+	applications to load them.
+
+020515: (bug fix) Fixed bug-report address to point to maf@tkrat.org.
+
+020515: (bug fix) Do not die on corrupt alias-files.
+
+020510: (bug fix) TkRat no longer works with tcl/tk 8.1 minimum
+	version is 8.2.0. Made it work with that version and updated
+	documentation.
+
+020510: (bug fix) Removed obsolete field Return-path. This was actually
+	not used in sent emails. It was used to control the 'MAIL
+	FROM' dialog in SMTP and to specify key to use when
+	signing. Both these cases now use the from address.
+
+020508: (feature) Added Portuguese translations by Rui Luís Pires.
+
+020506: (feature) Accept both ispell 3.1 and 3.2.
+
+020505: (bug fix) The check for pam on Linux was broken and the
+	c-client lib was never built for pam.
+	
+020503: (bug fix) Make Return in dialogs invoke the selected button
+	rather than always the default one.
+
+020503: (bug fix) Fixed cleanup after failed folder creation.
+
+020502: (enhancement) Changed configure to look in more places for
+	files. This makes it work on FreeBSD-4.3. Also added missing
+	result print for tkConfig.sh search.
+
+020429: (bug fix) Import of subscribed folders created directories for
+	all folders and could create duplicate menu entries.
+
+020429: (bug fix) Increased margins on printouts.
+
+020427: (bug fix) Improved ability of configure to find tkConfig.sh
+
+020424: (feature) Removed ability to automatically import all
+	mailboxes when creating a new IMAP-server. Feature was too dangerous.
+
+020423: (bug fix) Fixed bug which sometimes gave errors when using the
+	struct menu.
+
+020423: (reuse) Applied patch from Laurent Duperval which improves
+	code reuse in html.tcl
+
+020423: (bug fix) Fixed problem with creating new IMAP-servers.
+
+020423: (bug fix) Watch for ridiculous values of watcher_time.
+
+020422: (feature) Added new fields to role. One which specifies the
+	domain to add to unqualified addresses and one to control the
+	name we use when presenting ourselves to SMTP-servers. Both of
+	these can be left empty in which case they default to the
+	domain of your from address.
+
+020421: (bug fix) Added balloon-help to the online/offline icon
+
+020418: ***** Released 2.1b *****
+
+020418: (bug fix) Fixed so it works with the latest version of 8.4. It
+	will now break with earlier versions than 8.4a5.
+
+020417: (bug fix) Improved PGP address matching
+
+020414: (bug fix) Enabling monitor of a folder now takes effect directly.
+
+020414: (feature) Show number of messages in folder-menu for all open folders,
+	not just monitored.
+
+020414: (bug fix) Size was '???' for empty mailboxes.
+
+020414: (bug fix) Fixed various memory leaks
+
+020407: (bug fix) Avoid main window flashing when started in iconic mode.
+
+020407: (bug fix) Should try the selected charset as possible encoding
+	as the first one after us-ascii.
+
+020405: (bug fix) Could miss new messages when an empty folder was open.
+
+020404: (bug fix) Failed to launch browser when no browser instance was
+	running.
+
+020402: (bug fix) Consider digits as separator characters but "'"
+	which is embedded in words is not.
+
+020402: (bug fix) Fixed spurios "can't create mailbox, already exists"
+	message which appeared when moving messages to INBOX.
+
+020402: (bug fix) Source view was writable.
+
+020402: (bug fix) Fixed problem with attaching files with non us-ascii
+	characters in their names.
+
+020401: (bug fix) Handle message ID's with quotation and backslahses in them.
+
+020329: (bug fix) You could create an address book without a filename
+	to save it in. Also alias menus got confused when adding
+	address books.
+
+020327: (bug fix) The test for more than one open folder window when quitting
+	was broken.
+
+020327: (feature) Added keyboard shortcut ^W for closing a window (the old
+	^C still works).
+
+020326: (feature) Removed headers 'Comment' 'Keywords' and
+	'Content-Description' from the compose window since they were not
+	actually implemeneted.
+
+020324: (bug fix) Now compiles cleanly with the latests cvs-version of tcl/tk
+	(8.4).
+
+020319: (bug fix) Made more resistent against grab-errors.
+
+020319: (bug fix) Gave error if one closed the compose window while
+	spell-checking.
+
+020319: (bug fix) Should finally handle folders with non us-ascii charcters
+	correctly.
+
+020305: (bug fix) Misc fixes to folder importion code.
+
+020304: (bug fix) Added code which verifies and repairs the vfolderdef-
+	structure.
+
+020226: (bug fix) Significantly relaxed the requirements on URLs by
+	allowing any character except space inside them.
+
+020225: (bug fix) Check that alias-files exists before trying to read them.
+
+020224: (bug fix) Make sure changes to the vfolderlist are applied immediately.
+
+020220: (bug fix) Fixed problem where double commas in an address field
+	confused the alias expansion.
+
+020220: (feature) Made it possible to drag the dividing line in the 
+	new/edit folder window.
+
+020219: (bug fix) Only insert the hierarchy separator if needed when
+	importing mailboxes.
+
+020216: (bug fix) Change number mangling to assume 1024 bytes per kilobyte
+	rather than 1000.
+
+020216: (bug fix) Ignore the '<>' surrounding some URLs.
+
+020212: (bug fix) Misc small rearrangements of stuff in preferences window.
+
+020212: (bug fix) Number of new/unread messages was off when DSN
+	arrived.
+
+020211: (bug fix) Running the external editor did not pick up teh written
+	text if you deliberatly set the encoding to "system".
+
+020211: (bug fix) Fixed problem where images could end up being
+	shown in the wrong message when quickly moving throug messages.
+
+020210: (bug fix) Changed rules for which characters are considered word
+	separators for spell-checker. Now uses alnum.
+
+020209: (bug fix) The watcher often missed new messages.
+
+020207: (feature) Increased left margin on printouts.
+
+020207: (feature) Improved support for recognizing PDF-files. Patch
+	from Göran Larsson.
+
+020206: (bug fix) Did not remember size of folder window.
+
+020206: (feature) Addded missing German texts. Thanks goes to Thomas Fetcke.
+
+020204: ***** Made snapshot 20020204 *****
+
+020203: (feature) Added patch from Laurent Duperval which tries to
+	determine the real type of application/octet-stream
+	attachments by checking the filename.
+
+020201: (bug fix) Treat '-' as a separator character when spellchecking.
+
+020201: (bug fix) Changed behavior of mailbox-importion. Should now
+	avoid extra inclusion of INBOX folder every now and then.
+
+020127: (bug fix) Fixed problems with references extraction noted
+	by Christophe.Martin@sdt.univ-brest.fr.
+
+020127: (feature) Now reassembles split header-lines.
+
+020127: (bug fix) Completely rewrote the header-wrapping/encoding logic.
+	The old version did not correctly handle escaped character sets
+	like iso-2022-jp, nor did it break lines correctly.
+
+020122: (bug fix) Did wrap when inserting things in the beginning of a
+	pasted paragraph.
+
+020122: (bug fix) Fixed problems spell checking words like "journaling"
+	and "isn't"
+
+020120: (bug fix) Fixed serious problem in new DSN-parsing code.
+
+020115: (feature) Cleaned up quitting code. Now quit from the window-
+	manager works.
+
+020115: (bug fix) Complained about syntax-errors in address lists if
+	they contained newlines or tabs, even if they are legal.
+
+020115: (bug fix) Fixed DSN-handling which did not work at all.
+
+020113: (bug fix) Fixed core-generating bugs in the dsn-handling.
+
+020112: (bug fix) Tmpdir-cleaner should ignore signals so it triggers
+	even when teh main process is terminated by SIGINT etc.
+
+020110: (bug fix) Corrected names of iso-2022 charsets.
+
+020110: (bug fix) Initialize user language before showing upgrade message.
+
+020109: (bug fix) Show dialog to user when mailbox stream is lost during
+	an automatic update. Also avoid errors if the user clicks in the
+	cleareed message-list.
+
+020108: (feature) Now sends deferred messages on startup in online mode.
+
+020107: (bug fix) Fixed focus problem after compose window was closed.
+
+020105: (bug fix) The external web-browser did not always get the
+	right URL passed when the URL contained some magic
+	characters. Also improved the URL-finder. All this is thanks
+	to a patch from Marc.Herbert@ens-lyon.fr.
+
+020105: (feature) Now refuses to send while you have syntax errors in
+	any of the address fields.
+
+020101: (bug fix) Restored the address checking stuff which marks
+	invalid addresses in red when composing.
+
+020101: (behaviour) You can now press BackSpace when the cursor is at
+	the start of the buffer and it does the right things.
+
+020101: (behaviour) Made the text edited in an external editor not
+	wrap automatically.
+
+020101: (bug fix) Fixed problem where you got a charset error when
+	trying to launch an external editor.
+
+020101: (bug fix) Fixed "Wrap paragraph" feature so it now works. It
+	now wraps the entire paragraph in which the selection starts
+	and ends.
+
+011230: (bug fix) Fixed configure so that if it finds a tclsh without
+	a version number attached then accept a wish without version.
+
+011230: (feature) Added window which may show the details why ispell
+	fails.
+
+011221: (feature) Converted online/offline indicator to button which
+	toggles the state.
+
+011221: (feature) Now goes offline when all network connection fails.
+
+011219: ***** Made snapshot 20011219 *****
+
+011215: (feature) Keep the destination folder open during a group-
+	move so we do not need to reopen it for each message.
+
+011215: (bug fix) Fixed problem where tkrat internally missed that a
+	copy had faield and actually mareked the original for deletion.
+
+011212: (bug fix) Fixed wobbling cursor problem. Thanks to TEX who
+	pointed me in the right direction.
+
+011210: (bug fix) Always lock GUI when synchronizing.
+
+011209: (bug fix) Fixed misc focus problems where modal popup windows did
+	not get focus when they should.
+
+011209: (bug fix) Actually create disconnected folders locally when
+	importing disconnected.
+
+011209: (bug fix) Do not generate an empty Subject:-header if no subject
+	has been given.
+
+011207: (feature) TkRat will now include the fullname you have in your
+	aliases in the sent messages.
+
+011207: (bug fix) Sort the iso-character sets so lower numbers are
+	preferred (they are more standard).
+
+011207: (bug fix) Fixed annoying right-scrolling bug if the last message
+	was had a too long subject.
+
+011207: (feature) Obsoleted the masquerade_as option. This option
+	turned out to be in conflict with the domain specified in the
+	From:-option. It was very unclear which option controleld what.
+	Now everything is controlled by the From-option.
+
+011207: (feature) Enhanced "Show generated headers" window to also show
+	whoich host we are going to claim to be in EHLO.
+
+011205: (bug fix) Got error when changing roles if teh signature had been
+	deleted.
+
+011203: (bug fix) Include personal-name in headers.
+
+011203: ***** Made snapshot 20011203 *****
+
+011202: (feature) Added keyboard shortcut 'o' to toggle online/offline mode.
+
+011202: (feature) Added missing texts in German and French. Thanks goes to
+	Thomas Fetcke and Christophe Martin.
+
+011130: (bug fix) Fixed some potential address variable corruptions and
+	potential memory leaks.
+
+011130: (bug fix) Could lose lock on mailbox when fiddling with monitor
+	flag.
+
+011130: (bug fix) The apply button in the folder edit window
+	could give inconsistent results when flags were changed.
+
+011130: (bug fix) Retore in the folder edit window did not always
+	restore correctly after an Apply.
+
+011130: (bug fix) Fixed potential core-dump in check&fix dbase.
+
+011129: (bug fix) Fixed problem with "View source".
+
+011129: (bug fix) Fixed "Send bug report".
+
+011129: (feature) Removed configrmation-dialog when you closed the last
+	window. Instead made ^C just beep on the last window. Use ^Q
+	to quit instead.
+
+011129: (bug fix) Fixed core-dump in sending process. This only occurred
+	in abnormal situations.
+
+011127: ***** Made snapshot 20011127 *****
+
+011127: (feature) Now asks for confirmation before quitting (when closing
+	the last window).
+
+011125: (feature) Now understands all iso8859 charsets supported by
+	tcl (more appeared in 8.4).
+
+011125: (feature) Added a button, right of address field, to popup alias
+	selection list in the compose window.
+
+011125: (feature) Now seems to work with tcl/tk-8.4 (todays version in cvs).
+
+011124: (feature) Add host-name to the appname registered with the
+	X-server. This makes it possible to run two different
+	instances on different machines, but with the same X-server,
+	without having to modify the appname.
+
+011124: (feature) You can now specify which PGP key to use for signing
+	for each role.
+
+011124: (behaviour) Implemented a common function which generates the
+	headers for sending. This function is used both when sending
+	and showing generated headers. Also changed the default configuration
+	so that forcing the generation of Sender: is turned off.
+
+011121: (bug fix) Fixes to the font selection window. Now the buttons
+	gets disabled when illegal etc. It is now also more error resistant.
+
+011121: (bug fix) Finally did a complete fix of the drag&drop problems
+	in the New/Edit folder window.
+
+011117: (bug fix) Enabling monitoring of a folder did not update the
+	vfolderdef window. And it did not take effect until after
+	reboot.
+
+011117: (bug fix) Fix to mime.tcl so we have file-commands which are
+	stupid and prints stuff on stderr.
+
+011116: (bug fix) Instead of using the actual host and user-names use the
+	values specified in the role.
+
+011110: (bug fix) The new message counter counted delivery notifications
+	double.
+
+011026: (bug fix) Toggling the visibility of embedded text-parts could
+	affect the visibility of all following parts as well.
+
+011017: (feature) Now remembers text properties (wrapping etc.) when
+	holding messages.
+
+011013: (bug fix) Handle errors in external editor better.
+
+011013: (bug fix) Show old font name when editing fonts.
+
+011013: (bug fix) Return value to indicate compose error. Patch from
+        Mikhail Teterin <mi@aldan.algebra.com>.
+
+011012: (bug fix) Fixed some layout problems in preferences window.
+
+011012: (bug fix) Cleaned up browser start function and fixed opera start.
+
+011012: (bug fix) Always put the tkrat libraries first in auto_path so
+	we prefer the right versions.
+
+011010: (bug fix) Fixed numerous problems with dragging&dropping of folders:
+	* Moving did often not "take" (undone next time)
+	* The folder-list could get corrupted when items where moved
+  	  in and out of directories
+	* You could not move directories at all
+	* You can now place things directly after a subdirectory
+	  without placing it in the subdirectory
+
+011003: (bug fix) Fixed problems in Mailcap handling.
+
+011003: (bug fix) Mailcap path changes in the preferences window did not
+	always take.
+
+011003: (feature) Can now change roles in the compose window.
+
+011001: (bug fix) Now handles corrupt messages better.
+
+010928: (bug fix) Fixed misc problems with threaded sorting.
+
+010917: (bug fix) Fixed bug with charset of external editors.
+
+010912: (bug fix) Fixed walking watcher problem. For some people the watcher
+	window would move slightly every now and then to the right. This
+	has now been fixed.
+
+010910: (bug fix) Changed auto-scrolling algorithm in folder window so now
+	it shouldn't move the view unless acceptable.
+
+010906: (feature) Now handles buggy MTAs which encode PGP-messages.
+
+010906: (bug fix) The window to manually insert messages into the
+	database was broken. The keywords and expiration-type were
+	exchanged in the database.
+
+010905: (bug fix) One can now use non us-ascii characters in database keywords.
+
+010903: (feature) Removed the check for the micalg parameter when
+	reading signed messages, some other MUAs do not generate this.
+
+010830: (bug fix) Fixed bug where the message list would scroll whenever
+	the folder was synchronized or the window unmapped.
+
+010829: (bug fix) Spell checker would remove the space between two adjacent
+	corrected words.
+
+010827: (feature) Added polish texts by tri10o@poland.com.
+
+010825:	(bug fix) Fixed pgp signing & encrypting.
+
+010824: (bug fix) Fixed problem where the list of messages to choose from
+	(when replying to a message with embedded messages) did miss the
+	scrollbar.
+
+010822: (feature) Incorporated big patch from Laurent Duperval.
+	It adds the following features:
+	- Ability to modify font sizes for HTML.
+	- Inline display of HTML images (configurable, defaults to off).
+	- Better handling of MIME types for attachments. The "file"
+	  program to use is now configurable.
+	- Keybinding to do network sync (Ctrl-Y by default)
+	- Keybinging to open a new file (Ctrl-O)
+	- A few more types in the MIME table
+	- HTML and Image code has been moved to a separate file
+
+010822: (feature) Added support for --with-tkconfig to configure. Patch
+	by Laurent Duperval <lduperval@videotron.ca>
+
+010821: (bug fix) Replace all $ and , in urls for all browsers.
+
+010817: (bug fix) Fixed "Send bug report function"
+
+010817:	(bug fix) Restore all '=' at the end of enriched encoding.
+
+010817:	(feature) Now default save folders are defined per role.
+
+010814: (feature) Disconnected folders now handles network
+	connectivity losses gracefully.
+	
+010814:	(feature) Removed our directory in /tmp when being killed.
+
+010814: (feature) Removed the deferred sending option. This option was
+	obsoleted by the online/offline mode stuff and actually now
+	only served to confuse people.
+
+010812: (feature) Added support for roles. The role determines which address
+	to use, which signature-file to use and how to send
+	messages. One can switch roles manually and also have
+	different default-roles for different folders.
+
+010808: (feature) Radically changed layout of preferences window. This
+	was done to partly make it easier to use and partially to prepare
+	for the roles feature.
+
+010808: (feature) Improved layout of tree widget by making it denser. It
+	now also only adds the scrollbars when needed.
+
+010803: (feature) Cleaned up a lot of code. Converted all proces to
+	use the Tcl_Obj iterfaces and also converted lots of other
+	things to Tcl_Obj. This should make tkrat marginally faster
+	(probably not noticeable though).
+
+010731:	(feature) Now tries harder to show something sensible in
+	the attachment list of the compose window.
+
+010730:	(feature) Added icon indicating online/offline status.
+
+010729:	(feature) Now checks for errors when going online and aborts
+	if all disconnected folders fails to sync.
+
+010728:	(feature) Misc cleanups in folder definition window.
+
+010728:	(feature) Improved handling of folder with non ascii characters
+	in their name.
+
+010716:	(feature) Improved password caching key comparison.
+
+010711:	(bug fix) Now defaults to online-mode.
+
+010703:	(feature) Now allow all known encodings for the external editor.
+	Default to the system default encoding.
+
+010703:	(feature) Added minimal support for reading text/enriched messages
+
+010628:	(bug fix) Build on linux systems without pam.
+
+010628;	(bug fix) Dumped core when debugging connections.
+
+010628:	(bug fix) Could not create pop3 folders in folder window.
+
+010626: ***** make snapshot 20010626 *****
+
+010619:	(feature) Now create a directory to store all the temporary files in.
+
+010617:	(bug fix) Now better handles if current directory becomes
+	unreadable.
+
+010617:	(bug fix) Fixed misc stupid problems with pgp integration where
+	it did hang when working with big files.
+
+010606: (feature) Updated french texts from Christophe Martin and
+	Marc Herbert.
+
+010606:	(feature) Search path for editor command before complaining.
+
+010601:	(feature) Can now handle ~ in all filenames.
+
+010531:	(feature) Added Opera to builtin list of browsers.
+
+010528:	(bug fix) Made tests work against cyrus imap-server.
+
+010509:	(bug fix) Fixed several problems with wrapping of replies.
+
+010502: (feature) Double-clicking in the suggestion list of the spell-
+	checker now does a replace as well.
+
+010502:	(feature) Spell-checking: Changed learn feature to use ispell
+	itself instead of directly mucking around with the file. This
+	also means we can remove the ispell_dictionary option.
+
+010430:	(bug fix) Removed text listing which languages are implemented
+	since it was outdated.
+
+010423:	(bug fix) Fixed problem where tkrat could hand while spell-
+	checking a message.
+
+010413:	(bug fix) Cleaned up code so everything now runs through frink -J
+	(syntax checker) whithout generating any real warnings.
+
+010410:	(feature) Improved the show generated headers function to show
+	both SMTP FROM and RCPT TO entries. Also fix the addresses
+	shown to match reality.
+
+010405:	(feature) One can now leave the to:-field empty and just use cc
+	and/or bcc.
+
+010404:	(bug fix) Fixed problem with scrolling message list on update.
+
+010324:	(bug fix) Fixed potential core-dump in pgp code.
+
+010324:	(bug fix) Rewrote word finding algorithm in rat_ispell.tcl to
+	match the one in ispell. This avoids the bug with multiple-words.
+
+010317:	(feature) Can now modify the colors of the Balloon help as well.
+
+010302:	(bug fix) Fixed references to option(simple_data) which were
+	misspelled.
+
+001227:	(feature) Added framework for automated testing. Also implemented
+	tests for online/offline mode.
+
+001227:	(feature) Implemented online/offline mode. This only affects
+	 disconnected folders and message sending.
+
+001225:	(feature) Added code to control the ssh-preferences in c-client.
+	This means that one can now set it up to use SSH to contact imap
+	and pop severs.
+
+001223:	(feature) Be more forgiving when using strange charsets while
+	composing.
+
+010220: ***** released version 2.0.1 *****
+
+010212:	(bug fix) Did not include all heades when forwarding a message
+	as attachment.
+
+010212:	(bug fix) Fixed ballon help in compose window. Thanks goes to
+	Thomas Fetcke.
+
+010212:	(feature) Added german language texts. Thanks goes to Daniel
+	Egger <egger@suse.de>, Jochen Bern <bern@TI.Uni-Trier.DE>, and
+	Thomas Fetcke <Thomas.Fetcke@t-online.de>.
+
+010126:	(bug fix) The watcher did not always trig on new messages. Thanks
+	goes to rgm@cadence.com who spotted the exact problem.
+
+010112:	(bug fix) The local copies of imported disconnected folders did
+	not get created automatically and therefore never filled up.
+
+010112:	(bug fix) Importing disconnected folder did not give usable folders.
+
+010112:	(bug fix) Importing folders did not work at all under some
+	circumstances.
+
+001228:	(feature) Added code which checks the vfolderdef file version
+	and aborts if it is too high.
+
+001226:	(bug fix) Fixed potential header corruption internally.
+
+001222:	(bug fix) It has turned out that the definition of the GB charsets
+	in tcl is not the same as used in MIME-email. A quick workaround
+	is to treat them as us-ascii instead. This is not a solution which
+	is statisfactory in the long run.
+
+001216:	(bug fix) Could generate lines ened with bare newlines when sending
+	attached messages.
+
+001216:	(bug fix) Fixed handling of embedded '&' in urls when using other
+	browsers than netscape.
+
+001204: ***** released version 2.0 *****
+
+001204:	(bug fix) One could get an error if one closed a window while
+	tkrat was "busy".
+
+001202:	(bug fix) Could not close the keydef window using the window manager.
+
+001201:	(bug fix) Corrected encoding of attachment file names.
+
+001201:	(bug fix) Did not handle non us-ascii characters in filenames
+	when attaching files.
+
+001129:	(bug fix) Alias chooser did not work.
+
+001122: ***** released version 2.0rc8 *****
+
+001122:	(bug fix) Expressions could get saved twice.
+
+001120:	(bug fix) Misc bugfixes to the Define Editors window.
+
+001115:	(bug fix) The newline between header and body could dissappear
+	under some circumstances when saving outgoing messages.
+
+001112:	(bug fix) Do not give error message when printing via keyboard
+	when no message is selected.
+
+001112:	(bug fix) React for list selections from the keyboard in some
+	dialogs.
+
+001112:	(bug fix) wm transient should be called before the window is
+	mapped.
+
+001112:	(bug fix) The alias window: the "Move to" button did not get
+	enabled if one selected only one alias.
+
+001111:	(bug fix) Fixed handling of long directory names and of those
+	containing LWSP in the file selector.
+
+001110:	(bug fix) Could dump on certain database searches.
+
+001107:	(feature) Added tags target to Makefiles
+
+001103:	(bug fix) The configure script now looks a little harder for
+	tkConfig.sh. Thanks goes to Alexander Leidinger.
+
+001101:	(bug fix) Small fixes to make it work better on 64-bit systems.
+	Thanks goes to larry.gensch@compaq.com.
+
+001030: ***** released version 2.0rc7 *****
+
+001029:	(bug fix) Fixed problem with focus which got lost after a popup
+	window was closed.
+
+001029:	(feature) Removed integration of tcl-minimizers in Makefiles since
+	they do not really have any effect when running tcl/tk 8.*
+
+001025:	(bug fix) The spell-check window now immediately closes when one
+	presses the dismiss-button.
+
+001017:	(feature) Added charset aliases for a number of windows-fonts
+	so tkrat should now understand most windows codepages. Also made
+	tkrat try the encoding-name directly to see if tcl supports it.
+
+001013:	(bug fix) The modifiers 'R' and 'r' in the folder list did the
+	same "To:" transposing as 'n' and 'm', which it should not do.
+
+001013:	(bug fix) The structure of folders could become corrupted after
+	an import was done.
+
+001010:	(feature) Removed browse button from mh-dialogs. MH-folders
+	are always specified relative the users mh-path and not from
+	the root as the file-browser did.
+
+001009:	(bug fix) Do not generate invalid vfolderlist-file when the
+	user deletes all folders.
+
+001006:	(bug fix) Selection in address fields of the compose windod did
+	dissapear when focus was move out of the text field.
+
+001004:	(bug fix) Misc fixes to message backup algorithm (when expiring).
+
+000926:	(bug fix) Database could forget to delete messages.
+
+000921:	(bug fix) Check database could wrongly accuse the index.info to
+	contain the wrong number of messages.
+
+000920:	(bug fix) Encrypting and signing with pgp 5 did not work.
+
+000917:	(bug fix) Saving outgoing messages did not always reuse the 
+	open connection to an mailbox and thus resulted in delays before
+	the new messge was seen in the folder.
+
+000915:	(bug fix) Fixed handling of line-endings when saving messages.
+	This bug could lead to errors (message contains bare newlines)
+	when saving mail to picky imap-servers.
+
+000911:	(feature) Include version of lib in bug-reports.
+
+000908:	(bug fix) Added focus command into ModalGrab so it is run before
+	the grab. This should help with some window managers.
+
+000908:	(bug fix) Could hang when trying to wrap a cited message.
+
+000908:	(bug fix) Allow exlamation marks inside URLs.
+
+000906:	(bug fix) Certain edit-operations in the header fields of the
+	compose window could be mirrored in the body part.
+
+000906:	(bug fix) A <<Paste>> into aheader field of the compose window
+	also pasted into the body.
+
+000905:	(feature) Should now build on IRIX-6.5 with gcc as well.
+
+000905:	(bug fix) Fixed minor bug in doc/Makefile.in which could cause an,
+	harmless, error message during installation.
+	
+000904:	(bug fix) Expression saving did not work.
+
+000904:	(bug fix) Could fail to resend a deferred message which had already
+	failed to send once.
+
+000902:	(bug fix) Removed -u flag to gpg when signing.
+
+000829: ***** released version 2.0rc6 *****
+
+000828:	(bug fix) Got a stray character on position 129 in folder-list
+	when making any flag changes.
+
+000828:	(bug fix) Message-attachements does not have to be binary.
+
+000828:	(bug fix) Added -u argument to gpg when signing.
+
+000826:	(bug fix) Fixed problems in parsing and generating modified utf7.
+	This led to poblems with localized imap folder names.
+
+000824:	(bug fix) Did crash on IMAP import if no mailbox path was given.
+
+000823:	(bug fix) Changed configure-script to work with IRIX-6.5. Also
+	fixed bad output when locating X11 header-files.
+
+000822:	(bug fix) Finally fixed the extract addresses function for messages
+	with lots fo addresses.
+
+000822:	(feature) Also set the name parameter on the content-type for
+	attachments. Thanks goes to "Stefan Richter
+	<richtest@bauwesen.tu-cottbus.de>"
+
+000822:	(clarified) Rearranged the order of the entries in the
+	"Setup Network Sync" window so they reflect the actual order the
+	items are performed. Thanks goes to "Stefan Richter
+
+000822:	(bug fix) Passed to short buffer lengths to snprintf in ratDbase.c
+	when checking dbase. Big thanks to "Peter TEX Weigand
+	<aweigp@autelca.ascom.ch>" for finding this.
+
+000819:	(bug fix) A number of minor tweaks in the reply-to line-wrapping
+	algorithm.
+	- if it should only wrap a single character then an extra newlin
+	  was inserted.
+	- Now does not join lines which starts with a non-alnum charcter
+	  (ignoring LWSP).
+	- Now does not break a line if there are no characters in the
+	  part  about to be wrapped.
+	
+000817:	(bug fix) The Extract Addresses dialog did generate an error
+	when you already had aliases for all addresses in the message.
+
+000812:	(bug fix) Handle single quotes in mailcap files.
+
+000812:	(bug fix) Handle delete requests from wm for list windows. This
+	could lead to errors in the Saved Expressions list.
+
+000807: ***** released version 2.0rc5 *****
+
+000806:	(feature) Restored handling of pgp minimizers.
+
+000806:	(bug fix) Removed wrapping of unencoded header-lines.
+
+000805:	(bug fix) The listing of pgp-keys on the keyring was riddled
+	with bugs (this is used when attaching pgp-keys).
+
+000805:	(bug fix) Changing some pgp-prefrences might not "take" until the
+	next restart.
+
+000805:	(bug fix) Changed behavious of file-selector. Now you can not write
+	patterns on the filename line and have the ok/save button resolve
+	them. The problem with this feature was that if the suggested filename
+	contained any glob characters (* and ?) then the save button appeared
+	not to work.
+
+000805:	(bug fix) Editing the inbox could clear the "Save outgoing" marking
+	of another folder.
+
+000804:	(bug fix) It turned out that pgp-6.5.1i does not return a usable
+	exit-code when checking signatures. Therefore I changed the code
+	to always show the questionmark for that one so as to force the
+	user to press the pgp-button and read the output.
+
+000729:	(bug fix) Fixed watcher to not beep when a message arrives in
+	a monitored but not watched folder.
+
+000728:	(bug fix) Fixed alias extract window to add a scrollbar when it
+	needs to fit on the screen.
+
+000728:	(bug fix) Moving messages between open folders now work much
+	better.
+
+000728:	(bug fix) Removed extraneous newline inserted when moving messages.
+	This newline also caused problems with some picky IMAP-servers.
+
+000728:	(bug fix) Better arguments to gpg when checking signatures.
+	Also change action when verifying old type signatures, there
+	seems to be no way of checking the return-values of the different
+	pgp-versions and get reliable results. So I changed the sig button
+	to always read "?" in those cases and you have to check the message
+	yourself. Thanks goes to R Horn <rjh@world.std.com>.
+
+000728:	(bug fix) Fixed bug where pgp signing generated a bad signature
+	on all messages except the first message signed in a session. Also
+	added support for the sha1 algorithm. Big thanks goes to Walter
+	Truitt <wtruitt@usa.alcatel.com> for this patch.
+
+000728:	(bug fix) One could not save outgoing messages to an open IMAP-
+	folder without losing the connection. While fixing this bug I
+	uncovered a number of other problems relating to the watcher
+	and other things which also were fixed.
+
+000714:	(bug fix) Fixed serious bug in insert function which could
+	cause core-dumps. Big thanks to "Derek B. Noonburg"
+	<derekn@foolabs.com> who submitted a patch.
+
+000713:	(bug fix) Fixed a couple of typos in alias.tcl. Thanks goes to
+	Nic Bernstein <nic@postilion.org>.
+
+000711:	(change) Changed the default folder location from being $MAIL to
+	being the default compiled into c-client. This only applies to
+	people who start tkrat for the first time at sites which haven't
+	overridden the default start folder in some global ratatoskrc folder.
+
+000710:	(bug fix) Allow people to upgrade attachments encoding from 8bit
+	to binary.
+
+000710:	(bug fix) Always treat non-text attachments as binary to avoid
+	problems with lineending conversions.
+
+000708:	(bug fix) Group expression could appear twice in the list.
+
+000708:	(feature) Added check of tcl-version to avoid bug reports from
+	people who run it with tcl/tk < 8.1.
+
+000708:	(bug fix) Garbage got added to the end of the message when sending.
+
+000703: (bug fix) BackSpace delete characters to the right of the cursor
+	when positioned at the top left corner.
+
+000703:	(bug fix) Fixed small problem with line wrapping which struck
+	people who are replying above the quoted text.
+
+000702: ***** released version 2.0rc4 *****
+
+000629:	(bug fix) Folder list could get out of sync on folders which
+	were not monitored when new messages arrived.
+
+000628:	(bug fix) Replaced unportable snprintf define with my own
+	function (only used if snprintf is not already available.
+	Thanks goes to Lloyd.Parkes@vuw.ac.nz for the tip.
+
+000628:	(bug fix) The delete button did not ligth up if only one alias
+	was selected in the alias-list.
+
+000627: (bug fix) Changed order show and group menus were created to fix
+	keyboard navigation.
+
+000626:	(bug fix) Removed +batchmode=1 flag from pgp5 when signing.
+	Patch from Mike Marion <mmarion@qualcomm.com>.
+
+000619:	(bug fix) More fixes to make --with-tcl-include be more tolerant
+	in what it accepts.
+
+000618: ***** released version 2.0rc3 *****
+
+000617: (bug fix) Fixed --with-tcl-include option to configure. Thanks
+	goes to Laurent Duperval for the patch.
+
+000617:	(bug fix) Fixed linking flags on SunOS systems.
+
+000615: ***** released version 2.0rc2 *****
+
+000613:	(bug fix) Fixed potential deadlock when a pgp error appeared
+	at the same time as an imap login window.
+
+000610:	(feature) Can now change keyboard shortcut for compose_key_copy.
+
+000610:	(bug fix) Could get tcl error when closing a window for some
+	window managers. Added sanity checks.
+
+000607:	(feature) Changed the order things are done when synchronizing
+	with the network. The new order is to start by running an external
+	program, then send deferred and finally send deferred.
+
+000607:	(bug fix) Fixed problems with triggered when one turned off
+	monitoring of an open folder.
+
+000531:	(bug fix) Fixed problem with quitting when tk was compiled with
+	threads.
+
+000530:	(bug fix) Check that fopen really succeeds when holding a message.
+	Also replace the ':' in the filename with '_'. Patch submitted
+	by "Peter 'Luna' Runestig" <peter@runestig.com>.
+
+000527:	(bug fix) Fixed so that the disconnected folders no longer fails
+	if a message lacks Message-Id.
+
+000525:	(bug fix) Now places more limits on the end character of urls.
+
+000524:	(bug fix) Did not always exit when started in client mode (when
+	sending messages to existing tkrat instance).
+
+000524:	(bug fix) Fixed handling of encrypted messages when we fail to
+	decrypt them.
+
+000523:	(bug fix) Fixed configure-script to take version from --with-tcl-include
+	if specified. Also made it do more sanity checks for versions.
+
+000522:	(bug fix) Got error when pressing ^y without a selection.
+
+000522:	(bug fix) Fixed an error where some database folders always claimed
+	that the database was corrupt.
+
+000522:	(feature) Added support for APOP.
+
+000519:	(bug fix) Fixed potential core-dump problem in pgp code.
+
+000517:	(bug fix) Fixed problems with initial dots in body when using
+	sendmail to send messages.
+
+000517:	(bug fix) Fixed coredump when synchronizing.
+
+000517:	(bug fix) Import of disconnected folders should now work better.
+
+000516:	(bug fix) Small fixes to line-wrapping code.
+
+000516:	(bug fix) Should also escape \ when generating postscript.
+
+000512:	(bug fix) Fixed so that disconnected folders works with cyrus
+	IMAP-server as well.
+
+000509:	(bug fix) Added checks to avoid tcl-error when closing window.
+
+000508:	(bug fix) Removed debugging output from PGP-code.
+
+000508:	(bug fix) Return did indent even if wrapping was disabled.
+
+000507:	(bug fix) Fixed doubleclick on read-only aliases in the alias window.
+
+000505:	(bug fix) Disable more menu entries when no messages are shown.
+
+000505:	(feature) Added tcl/tk versions to version dialog.
+
+000504:	(bug fix) Made alias command accept even older formats of aliases.
+
+000503:	(bug fix) Fixed configure script for HP-UX.
+
+000502:	(enhancement) Automatically generate list of generated textfiles
+	for Makefile.
+
+000502:	(bug fix) Fixed bug so that changes to "Use input method" takes
+	effect on apply.
+
+000501:	(bug fix) Make sure libraries are installed 0755 instead of 0644.
+
+000420: ***** released version 2.0rc1 *****
+
+000420:	(bug fix) Fixed problem in print command generation which did
+	not work if there was no %s substitution (patch from
+	cmartin@ipnl.in2p3.fr).
+
+000419:	(cleanup) Removed minimizer support.
+
+000417:	(bug fix) More fixes for grabbing of Modal dialogs.
+
+000416:	(bug fix) Fixed insidious bug in move to database code.
+
+000414:	(bug fix) Wrap of cited message could result in a mess.
+
+000413:	(bug fix) More sanity checks when inserting into database.
+
+000412:	(bug fix) Now handles foldernames with localized characters
+	correctly.
+
+000406:	(bug fix) Now uses plain newlines when sending to program.
+
+000323:	(bug fix) Rewrote parts of the makefiles. They are now more
+	consistent and have separate install targets for binary and
+	shared files. Also moved the blt_busy-library to the arch-
+	dependent lib directory instead.
+
+000320:	(bug fix) Fixed error in generic list-window scrollbar.
+
+000320:	(bug fix) Could leave flagged and deleted flags set on message
+	even when moving it.
+
+000315:	(bug fix) Could leave lots of defunct processes lying around.
+
+000314:	(bug fix) The threaded folder sort could sometimes hide messages.
+
+000310:	(feature) Added ispell integration. Feature provided by
+	Bryan Schofield <bschofie@ge-harris.com>.
+
+000306:	(bug fix) Fixed misc grammatical errors in balloon help.
+	(patch from Jan Martin <jmm@herakles.jpl.nasa.gov>)
+
+000305:	(bug fix) Fixed problem with message indexes (as shown in the
+	message list).
+
+000302:	(bug fix) Now processes malformed DSNs better. Patch from
+	Lou Ruppert <lruppert@syr.edu>.
+
+000301:	(bug fix) Restored old behaviour where dynamic import did not
+	happen until the actual submenu was opened.
+
+000229:	(feature) Now prefers tcl/tk8.3 when configuring.
+
+000229:	(feature) Added support for input methods. I.e. they can be enabled
+	from the preferences. This option defaults to off and requires
+	tk 8.3.
+
+000226:	(bug fix) Could crash when one tried to send a really big
+	message.
+
+000226:	(bug fix) Watcher failed to show message when one new message
+	arrived in an empty folder.
+
+000226:	(bug fix) Crashed when the first message arrived to a file
+	folder which did not previously exist.
+
+000226:	(bug fix) Fixed gpg signing (thanks to Erik Stenvall).
+
+000225:	(bug fix) IMAP import should now better with servers without the
+	NAMESPACE extenstion.
+
+000225:	(feature) Added a new keybinding for a quit key.
+
+000224:	(bug fix) More url matching problems (did not match @ in host part).
+
+000223:	(bug fix) Explicitly set protection on installed files.
+
+000223:	(bug fix) Fixes for the command list of the compose window from
+	Peter TEX Weigand <aweigp@autelca.ascom.ch>.
+
+000222:	(bug fix) One could not define keys with modifiers (like shift).
+
+000222:	(bug fix) Fixed problems with displaying of big images. Thanks
+	goes to Peter TEX Weigand <aweigp@autelca.ascom.ch> for the patch.
+
+000221:	(bug fix) Make install did not install the manpage.
+
+000221:	(bug fix) If your inbox was a disconnected folder, the dbase expire
+	would cause another local copy of it.
+
+000217:	(feature) Added sort by size patch from Laurent Duperval
+	laurent.duperval@cgi.ca.
+
+000217:	(bug fix) Fixed url matching problem (did not match ~).
+
+000216: ***** released version 2.0b9 *****
+
+000216:	(bug fix) Fixed potential problem ine SMTP error reporting.
+
+000216:	(bug fix) Import of mh-folders did not work.
+
+000215:	(bug fix) Fixed tcl error when opening a new folder window with
+	a file folder.
+
+000215:	(bug fix) Spelled out dependencies in Makefile instead of relying
+	on file glob expressions.
+
+000215:	(bug fix) Fixed blt stuff to work with tk8.3.0.
+
+000214:	(bug fix) The font display in the preferences window did not
+	show the correct fonts. Also made the font name be printed in
+	the actual font.
+
+000214:	(bug fix) Split Modal into two parts to handle focus better.
+
+000214:	(bug fix) New URL-searching expression from Peter TEX Weigand
+	<aweigp@autelca.ascom.ch>
+
+000213:	(bug fix) Moved package requirements to later to avoid problems	
+	with loading the rat_textlist package.
+
+000213:	(bug fix) Fixed expression problem (fix from Per Johansson
+	<dw@lixom.nu>).
+
+000210:	(bug fix) Fixed crash when moving a message to another folder.
+	
+000210:	(bug fix) Improved autowrap routine, it should now not treat
+	numbers in the middle of a paragraph as starts of enumerated lists.
+
+000209:	(bug fix) The watcher window had no handler for WM_DELETE_WINDOW,
+	patch provided by dcurtiss@ge-harris.com.
+
+000209:	(bug fix) Fixed handling of fonts with spaces in their names.
+
+000209:	(bug fix) Fixed submenu creation and deletion in new/edit folder.
+
+000208:	(bug fix) Fixed interoperability with pgp 6.5
+
+000207: ***** released version 2.0b8 *****
+
+000207:	(bug fix) Moving messages to an already open folder confused that
+	folder window.
+
+000207:	(change) Changed ^C to close current folder window instead of
+	quitting the entire application.
+
+000206:	(bug fix) The url-parser now disallows ']' and ')' in urls.
+
+000206:	(bug fix) Should now compile better on OpenBSD.
+
+000206:	(bug fix) Do not include from address if a reply-to address is
+	present when replying to all.
+
+000206:	(bug fix) Rewrote folder importion code (and changed algorithm).
+
+000131:	(bug fix) Now asks only once if it should delete the actual imap
+	folders during a folder struct deletion.
+
+000131:	(feature) Ask for confirmation before quitting when there are more
+	than one folder window.
+
+000130:	(feature) Added feature to file selector to hide dotfiles, enabled
+	by default.
+
+000130:	(bug fix) Fixed bug where a new message could get marked as read
+	when synchronizing a folder manually.
+
+000130:	(bug fix) Changing sort order from threaded gave unpredicatble
+	results (in that session).
+
+000128:	(bug fix) Now handles symbolic links when attaching files.
+
+000127:	(feature) Added %x substitution to external editing command.
+
+000127:	(bug fix) Fixed save outgoing to disconnected.
+
+000125:	(bug fix) The show header now shows all instances of the selected
+	headers if any of them appears multiple times in the message.
+
+000124:	(bug fix) Fixed misc problems with expression window.
+
+000124:	(bug fix) Could get 'm window name already exists in parent' when
+	working with folder menus which were to big to fit.
+
+000117:	(feature) Changed default wrap-mode to word. Now also remembers the
+	wrapping mode.
+
+000114:	(bug fix) Prettyprint (almost) always inserted a linebreak before
+	non us-ascii characters. Also fixed message which appeared when an
+	unprintable bodypart was encountered.
+
+000112:	(feature) Add %f subsstitution in icon name as well (patch
+	from Richard Meitzler).
+
+000111:	(bug fix) Fixed problem where all parts of an multipart-alternative
+	were shown the second time a message was selected.
+
+000110:	(bug fix) Rever to Shift-Tab if the keysym ISO_Left_Tab does
+	not exist.
+
+000109:	(feature) Changes to modal windows. They now try to always stay on
+	top.
+
+000108:	(feature) Now also reads ~/.ratataosk/ratatoskrc.tcl where one can
+	make final overrides.
+
+000108:	(feature) Added option for placement file
+
+000104:	(kludge) Fixed so we can read messages saved by y2k-buggy
+	tkrat-1.2.
+
+000104:	(feature) Added builtin imap-debugging. Can be enable from the
+	preferences window.
+
+000104:	(bug fix) The previous director button in the fileselector did
+	not work.
+
+000102:	(bug fix) Fixed a potential core-dump in threaded folder sort.
+
+000101: ***** released version 2.0b7 *****
+
+000101:	(bug fix) Crashed if it had to expire the database and the
+	inbox was a disconnected folder.
+
+000101:	(bug fix) Did not start if the configuration directory did not
+	exist.
+
+000101:	(bug fix) Fixed "Saved Expressions" dialog.
+
+000101:	(bug fix) Reintroduced texts to get the PrintSetup window to
+	work again.
+
+991229:	(bug fix) Make sure the font family menu is split if it is to big
+	to fit on screen.
+
+991228: ***** released version 2.0b6 *****
+
+991228:	(bug fix) Fixed bug in line-wrapping code which would insert spaces
+	into words and join parts of different words.
+
+991228:	(feature) Added limited support for content-disposition headers.
+
+991227:	(bug fix) Expire expected the inbox to have internal index '0'
+	but should have used $vFolderInbox instead.
+
+991227:	(bug fix) Remove threading information when sort order is changed
+	from threaded to something different.
+
+991227: (bug fix) Improved logic for when to convert an old
+	expressions-file to the new format.
+
+991227:	(bug fix) Now works with tk8.3b1.
+
+991226:	(feature) Changed font handlig to by default override all X-resources,
+	also made font changing dialog to modify font selection.
+
+991219:	(bug fix) Now all toplevel windows have class TkRat.
+
+991218:	(bug fix) Override any potential X-resources specifying background
+	and foreground colors.
+
+991217:	(bug fix) The 'Run through command' entry in the edit menu of
+	the compose window did only sjow up the first time the menu
+	was shown.
+
+991217:	(bug fix) Did not find the correct contents for deeply nested
+	bodyparts under embedded rfc822-messages.
+
+991214:	(bug fix) Fixed problem with file selector.
+
+991212:	(bug fix) Changed text "Mailbox name" in IMAP mailbox definition
+	dialog to "Mailbox path".
+
+991208:	(bug fix) Signing with gpg caused the message body to be included
+	twice.
+
+991207:	(bug fix) Could dump on some systems if one had non us-ascii
+	characters in the username.
+
+991206:	(bug fix) Saving outgoing to an IMAP mailbox caused a crash.
+
+991206:	(bug fix) Fixed option defaults to use the definition of 
+	ratatosk_dir instead of ~/.ratatosk (makes -confdir option
+	work much better).
+
+991206:	(bug fix) Fixed problem with fileselector where it complained
+	that it could not chdir to "".
+
+991206:	(bug fix) Fixed scrolling problem with embedded images, also
+	some enhancements to html display code (from laurent.duperval@cgi.ca)
+
+991205:	(bug fix) Was (under some circumstances) incompatible with the
+	plus and dash-patches.
+
+991202:	(bug fix) More fixes to the threaded sort algorithm. But finally
+	I am statisfied with the algorithm.
+
+991130: (bug fix) Shift tab did seldom work.
+
+991130:	(bug fix) Misc fixes and addendums to ballon help texts. Big
+	thanks to Martin@ipnl.in2p3.fr.
+
+991124:	(bug fix) Always use external editor did not work
+
+991123:	(bug fix) Added missing balloon texts
+
+991123:	(bug fix) Changed test-tkrat to use builtin pwd function.
+
+991121: ***** released version 2.0b5 *****
+
+991121:	(bug fix) Fixed a buffer overflow error in the sender handling
+	routine.
+
+991119:	(feature) Added functionality change wrapping of shown messages.
+	This functionality and the show header set are placed in a new
+	"Show" menu in the folder window"
+
+991119:	(feature) Added options to control cursor placement and signature
+	inclusion when composing replies. Patch from Richard Meitzler.
+
+991119:	(bug fix) Added "do not edit"-warning at the end of the generated
+	text-files as well.
+
+991118:	(bug fix) Fixed error when pasting into a header-field when
+	there was nothing t paste.
+
+991116: (bug fix) Fixed problem with PGP-keys. It was not possible to
+	attach gpg-keys to messages.
+
+991115:	(bug fix) Fixed problem where monitored folders sometimes were
+	closed even tough the should not be.
+
+991112:	(bug fix) Encrypted and/or signed bodyparts did get sent with
+	the wrong end of line marking.
+
+991111:	(bug fix) The PGP-code did crash on empty keyrings.
+
+991111:	(bug fix) More checks on input values in alias window.
+
+991110:	(bug fix) Changed order of items in TkRat menu to make keyboard
+	traversal easier.
+
+991110:	(bug fix) Could coredump if one when sending messages where
+	one had attached a multipart attachment.
+
+991109:	(bug fix) Fixed sorting problem which generated core under some
+	circumstances.
+
+991108:	(bug fix) Fixed problems when running multiple IMAP-servers on
+	the same host (different ports though).
+
+991104:	(bug fix) Fixed bugs where tkrat did not always close folders
+	when leaving them.
+
+991103:	(bug fix) Did not close folders correctly. This made it fail
+	to expunge on close and eventually to run out of file-descriptors.
+
+991103:	(bug fix) Fixed problems in compose command editing window.
+
+991103:	(bug fix) Fixed buffer overflows which mainly occurred when
+	sending messages via SMTP.
+
+991101:	(bug fix) Really abort an IMAP login when user presses cancel.
+
+991101: (bug fix) Window close of send bug report window did not work.
+
+991101:	(bug fix) It is now possible to turn off pgp-support.
+
+991101:	(bug fix) Enabling pgp-support gave bugs in that session.
+
+991101:	(feature) Added -blank flag for startups without opening any
+	folders in the folder window.
+
+991029:	(bug fix) Fixed ballon help for folder sort order option in admin
+	menu.
+
+991029:	(bug fix) Recall button did not always get enabled in the
+	fileselector.
+
+991029:	(bug fix) Do sanity checking of folder handlers when syncing
+	network.
+
+991029:	(bug fix) The Makefile now actually prints the error encountered
+	when building pkgIndex.tcl files.
+
+991028:	(bug fix) Rely on tk.h to define TK_USE_INPUT_METHODS in blt_window.c
+
+991028:	(feature) Added option for default bcc.
+
+991027:	(bug fix) Added --batch flag for gnupg.
+
+991027:	(bug fix) Make clean in lib did not remove the dummy library.
+
+991026: ***** released version 2.0b4 *****
+
+991025:	(bug fix) Added missing objects to clean target in util/Makefile.in
+
+991025:	(bug fix) Fixed problem with unread message count when opening
+	an IMAP folder.
+
+991025:	(bug fix) Under some circumstances did tkrat not show all bodyparts
+
+991023:	(bug fix) Fixed problem with pasting text into the compose window.
+
+991022:	(bug fix) Support for messages in charsets incompatible with
+	iso8859-1 was broken.
+
+991022:	(feature) Added Serbian texts from spok@beotel.yu
+
+991022:	(feature) Added a text file merge program to make inclusion
+	of new texts easier.
+
+991022:	(bug fix) Behave sanely even if the expire interval is less than
+	one day (by internally setting the interval to one day after
+	running the first expire).
+
+991022:	(bug fix) Import of unix directories now works a bit better.
+
+991021:	(bug fix) The preferences window now warns if there is no '%p'
+	in the print command.
+
+991021:	(bug fix) Could crash when wrapping cited message if the given
+	regexp was invalid.
+
+991020:	(bug fix) Is now much better at returning the focus after
+	a dialog window has taken it.
+
+991019:	(bug fix) TkRat does not now try to reopen the inbox immediately
+	if it failed the first time it opened. Also Be more smart when
+	reopening a monitored folder.
+
+991019:	(bug fix) Misc fixes to wrapping code:
+	* Make sure the insertion cursor always is visible after a wrap. 
+	* Text read from file is marked as non wrappable
+	* Enable the user to see which parts of text are non wrappable
+	* Remove non wrappable markings from selection when wrapping
+	  paragraph (if insert cursor is within selection).
+
+991018:	(bug fix) Tkrat could crash while synchronizing disconnected
+	folders.
+
+991018:	(bug fix) Do not mark pasted text as not wrappable if it does
+	not contain any line breaks.
+
+991018:	(bug fix) Fixed bug in threaded sorting where messages with the
+	same subject was not correctly sorted according to date.
+
+991013:	(bug fix) You could not change the print mode to plain text.
+
+991012:	(feature) Now supresses the errors about messages missing in
+	certain languages during build (see tkrat/Text/README for how
+	to turn them on again).
+
+991012:	(bug fix) Fixed problem with bouncing or forwarding multipart
+	messages which contained no valid parts.
+
+991011:	(feature) Added option to always use the external editor
+	(provided by Todd J Martin <todd.martin@acm.org>).
+
+991011:	(feature) Added support for BSD/OS-4 in configure.
+
+991011:	(bug fix) If one supplies a pth to tclsh then use that before
+	checking the ordinary path (was after).
+
+991011:	(feature) Improved file selector by adding recall button (recalls
+	suggested filename) and popup menu for old directories.
+
+991009:	(bug fix) Should show busy icon when opening monitored folders as well
+
+991009:	(bug fix) Do not show error messages when the user presses cancel
+	in a login dialog
+
+991009:	(bug fix) Could still dump core when it lost the lock on a mailbox
+
+991008:	(feature) Now deletes all occurrences of mailto: when pasting into
+	an address field while composing.
+
+991008:	(bug fix) Added %f escape for folder window name which gets
+	replaced by the current folder name.
+
+991007:	(bug fix) Modified Makefile to fail if the index did not build
+	correctly.
+
+990928:	(bug fix) Fixed problems with reset button in preferences window.
+
+990928:	(bug fix) Fixed problem where under some circumstances the number
+	of held messages indicator did show 9 messages when there were no
+	held messages.
+
+990928:	(feature) Improved startup time by directly sourcing the needed
+	pkgIndex.tcl-files.
+
+990928:	(bug fix) Fixed problems with changing folders from database
+
+990928:	(bug fix) The images got installed into the wrong directory.
+
+990926:	(bug fix) Fixed tons of pontential internal buffer overflows.
+
+990924:	(bug fix) Fixed misc problems which happened when folders
+	died.
+
+990924:	(bug fix) Sending did never work after it had encountered one
+	hard error.
+
+990922:	(bug fix) Often failed to identify postscript files when
+	attaching types.
+
+990921:	(bug fix) Clarified the ballon help texts over the different
+	sort order choices.
+
+990921:	(bug fix) Now uses dynamically allocated buffers for all addresses
+	so we should get no more buffer overflows from big addresses.
+
+990919:	(bug fix) Correct the undef's in rat.h to statisfy picky compilers.
+
+990919:	(bug fix) It was impossible to quit once a quit had been aborted
+	(due to active compose windows).
+
+990919:	(feature) Added -confdir argument
+
+990919:	(bug fix) The From:-field should act as an address field when
+	composing messages.
+
+990919:	(bug fix) Now more robust against badly formed message/rfc822
+	bodyparts.
+
+990919:	(feature) Added support for Gnu Privacy Guard (patch by Bart Hartgers
+	<bart@etpmod.phys.tue.nl>).
+
+990919:	(bug fix) Password caching did not work if one entered an alias
+	for the hostname of the server.
+
+990919:	(bug fix) rat.h contained a #inclide which got called on some
+	systems.
+	
+990917:	(bug fix) Fixes resizing of img and/or html container when
+	the tkrat window is resized (patch from laurent.duperval@cgi.ca)
+
+990917:	(bug fix) Did not recognize https:-urls
+
+990916:	(bug fix) Import of IMAP folders now works again. Also made tkrat
+	prune empty directories when importing (option which defaults
+	to prune). This keeps the crud down when connecting to a cyrus
+	IMAP-server.
+
+990913: ***** released version 2.0b3 *****
+
+990913:	(bug fix) More resistance to failed imap connections when creating
+	folders.
+
+990913:	(bug fix) Fixed problems with embedded '$' in uls.
+
+990913:	(bug fix) Fixed problems where the watcher sometimes did not pop up
+	for new messages.
+
+990912:	(bug fix) Imap import should now work also with servers using
+	another hierarchy delimiter than '/'.
+
+990912:	(bug fix) Printing of messages from the dbase locked the database.
+
+990912:	(bug fix) Really close all folders when we get the kiss of death.
+
+990912:	(bug fix) "Expunge on closes" did not have any effect on monitored
+	folders since they are never actually closed (except when one quits
+	tkrat). This is now fixed.
+
+990911:	(bug fix) Added arrow cursor patch from Laurent Duperval.
+
+990911:	(bug fix) Could crash when checking and/or fixing the database.
+
+990911:	(bug fix) Made tkrat/tkrat (development running script) use the wish
+	configure found.
+
+990911:	(bug fix) Removed warnings about redefinition of ckrealloc when
+	compiling with tcl/tk < 8.2.
+
+990910:	(bug fix) Disconnected folders do not rely on the message-id to
+	uniquely identify a message (use UID's instead).
+
+990908:	(bug fix) Got an error when clearing the display after a folder
+	open failed.
+
+990907:	(bug fix) Added further checking that the folder really is open to
+	the sync proc.
+
+990906:	(cleanup) Do not try to build the bundled c-client utils like
+	mtest, imapd and ipopd.
+
+990906:	(bug fix) External editonames with embedded spaces caused problems.
+
+990906:	(bug fix) Fixed documentation on RatUP_Signature it gets an array
+	name as argument.
+
+990906:	(bug fix) Fixed problem with reply_to in expressions.
+
+990906:	(bug fix) Added ballon help text for vd_watch.
+
+990906:	(feature) Changed default folder specification to use environment
+	variable MAIL as pathname for default mailbox.
+
+990905:	(bug fix) Made nearly all toplevel windows belong to the TkRat class.
+
+990905:	(bug fix) Got error when destroying a torn-off folder menu.
+
+990904:	(feature) Added support for FreeBSD-3 in the configure-file.
+
+990903:	(bug fix) TkRat failed when the folder menu got too big.
+
+990903:	(bug fix) Import of imap or disconnected folders did not work.
+
+990903:	(bug fix) Adding or importing address books did not work wery well.
+
+990903:	(bug fix) Got an error when trying to edit an imported folder.
+
+990830:	(bug fix) Replaced some tabs in util/Makefile.in with spaces to
+	keep picky makes happy.
+
+990829:	(bug fix) In the new/edit folder window: if one dragged a submenu
+	and dropped it on its original position, then it dissapeared.
+
+990829:	(feature) Added build support for Tru64 Unix V5.0
+
+990829:	(bug fix) Do not open folders to monitor until the first folder
+	window is created.
+
+990829:	(bug fix) Is now able to save outgoing messages to disconnected folders
+
+990828:	(bug fix) Too big imported directories gave an error when any
+	folder menu was opened.
+
+990828:	(bug fix) Added catch around the last unprotected grabs.
+
+990828:	(bug fix) Did crash when one copied messages to a local monitored
+	folder.
+
+990828: ***** released version 2.0b2 *****
+
+990827:	(bug fix) Fixed compilation warnings about types to Tcl_Free et al.
+
+990827:	(bug fix) Crashed when moving some messages from disconnected
+	folder to dbase.
+
+990827:	(bug fix) Message sequence numbers did not change when messages
+	were deleted from a folder.
+
+990826:	(bug fix) Opening the folder menu gave an error after the
+	connection to a monitored folder had died.
+
+990826:	(bug fix) One could get crashes while closing a folder. Also
+	removed extraneous messages while closing folder.
+
+990826:	(bug fix) TkRat beeped when you got to the first unread message
+	in a folder.
+
+990825:	(bug fix) Fixed evil bug in threaded sorting code which hid some
+	messages.
+
+990824:	(bug fix) Password caching did not work.
+
+990824:	(bug fix) Could not save the vfolder structures if you had imported
+	folders in a subfolder.
+
+990823:	(bug fix) Fixed bug in rat_edit module which could give errors
+	in initUndo.
+
+990823:	(bug fix) Handle messages missing charset parameter better.
+
+990822:	(bug fix) Could not open pop-folders.
+
+990822:	(feature) All folder menus in the vfolderdef window are now
+	closed by default.
+
+990821:	(feature) Now able to show HTML-text if the TkHtml extension
+	is installed. (Feature provided by laurent.duperval@cgi.ca).
+
+990821:	(bug fix) Added print-key to keydef window.
+
+990821:	(bug fix) Fixed problem with deleting the compose window.
+
+990821:	(bug fix) Fixed ballon help over "Checkpoint on unmap" item.
+
+990821:	(bug fix) Made the configuration script really check the tcl/tk
+	version and refuse to run if no recent-enough version is found.
+
+990821:	(feature) Changed the title of folder windows to be the folder
+	name.
+
+990821:	(bug fix) The balloon help did not know of the num_deferred and
+	num_held displays in the folder window.
+
+990821:	(bug fix) The options initialization expect there to be an env(USER)
+	before the c-code had made sure there was one.
+
+990821:	(bug fix) Got errors when showing a message containing embedded
+	images.
+
+990820:	(bug fix) Fixed problems with importing folders
+
+990819: ***** released version 2.0b1 *****
+
+990818:	(feature) Parametrized the dispatching of various mime-types when
+	showing them. This makes it easier to add local code to show
+	certain types.
+
+990817:	(feature) Can now monitor an arbitrary numbe rof folders. This means
+	that the folder menu shows the number of unseen and total number
+	of messages in each monitored folder. One can also enable/disable
+	the watcher individually for each monitored folder.
+
+990802:	(feature) Now more intelligent when sending fails on a hard error.
+	The message is no longer returned to the compose window and you
+	only get one error message, regardless of how many messages you have
+	queued.
+
+990802:	(feature) Added keyboard shortcut for printing.
+
+990722:	(feature) The configure script now checks if tclsh is compiled
+	with memory debugging and sets the appropriate flags.
+
+990722:	(feature) Added display of number of deferred and held messages.
+
+990720:	(feature) Replaced badly-working busy outine with routines
+	copied from BLT2.4i.
+
+990718:	(feature) Added patch for scrolling images by lduperval@sprint.ca.
+
+990718:	(feature) Added a simple prettyprinting routine
+
+990710:	(feature) Added "Wrap cited text" entry to edit menu in compose
+	window.
+
+990708:	(feature) Now accepts some command line arguments (folder to
+	open, start composing and netsync). Also checks for already
+	running instance and resuses that so one can control an already
+	runnign tkrat from the command line
+
+990707: (feature) Now uses regular expression to find Re: in subjects
+
+990707:	(big fix) Now saves aliases before quitting (if needed).
+
+990706:	(feature) Now shows hourglass during some (probably lengthy)
+	operations. Does not work perfectly though (shows default
+	cursor in some parts).
+
+990706:	(feature) Rewrote the line wrapping algorithm. Should now handle
+	list etc.
+
+990614:	(bug fix) Expressions where one searched for an exact match
+	might cause a core-dump.
+
+990609:	(bug fix) The database code now handles '/' in the to address
+	of messages inserted.
+
+990607:	(bug fix) One could not switch back to the original color once
+	one had changed it.
+
+990530:	(feature) Replaced the internal file selector with a specially
+	modified copy of the tk selector.
+
+990522:	(bug fix) Do not recreate the child bodypart commands each
+	time they are asked for. This makes tkrat faster when handling
+	multipart messages.
+
+990518:	(bug fix) The code which divided a menu which would otherwise be
+	to big to fit on screen did now work correctly. It ignored
+	submenus in the broken off part, thus making for example
+	the message structure menu pretty unusable if one had to many
+	attachments.
+
+990518:	(feature) Now uses the img package (if available) thanks to
+	a patch sent by laurent.duperval@cgi.ca.
+
+990517:	(feature) Added disconnected IMAP-folders.
+
+990517:	(feature) Changed behaviour of log messages so those with
+	an explicit time have precedence.
+
+990424:	(bug fix) Blush mode on: Fixed bugs where dates will get written
+	incorrectly after 1999.
+
+990423:	(bug fix) The database code crashed when one inserted a message
+	with a to-line longer than 1024 bytes.
+
+990421:	(feature) The balloon help now only triggers once while the
+	cursor is within each trigging area. That means that if it
+	pops up once and the user moves the mouse to amke it dissapear
+	it will not reappear until the cursor has left the area.
+
+990408:	(feature) Now clears the 'deleted' and 'flagged' flags on
+	messages when moving them between folders.
+
+990330:	(feature) Added default values for remote host and remote
+	user (used when defiing new remote folders)
+
+990330:	(feature) You can now mark messages as unread
+
+990329:	(feature) Print all control-key shortcuts in menus with
+	capital letter.
+
+990329:	(feature) Changed wrap-selection to wrap paragraph and added
+	keyboard-shortcut (^J)
+
+990325:	(feature) If select "Send bug report" you now get to a dialog
+	which asks for subject and description. This wil hopefully
+	cut down on the number of bug reports with no explaining text
+	whatsoever I get.
+
+990323:	(bug fix) Now only greys out the "attach pgp keys" entry in
+	the "attach special" menu (in the compose window. Earlier
+	it disabled the entire menu.
+
+990323:	(feature) Added --with-tcl-bin and --with-tcl-include options
+	to configure.
+
+990317:	(bug fix) Make sure the balloon help text always is black.
+
+990305:	(bug fix) Could get error when sending deferred
+
+990301:	(bug fix) Aliases weren't properly saved after an extract. Thanks
+	to baccala@freesoft.org for the patch.
+
+990206:	(bug fix) Added -verbose flag to lib/Makefile when building the
+	package index file to see any errors.
+
+990115:	(bug fix) Now replaces commas in URLs with %2c before handing
+	the off to netscape since NS can not handle commas in URLs
+	passed on the command line. Also handle URLs with multiple
+	'%' in them.
+
+990115:	(bug fix) Now imports aliases from mailrc-files better.
+
+990113:	(feature) Added --with-install-prefix option to configure.
+
+990112:	(bug fix) Now handles most possible boolean values
+
+990104: (feature) Now only sorts the folder if really needed.
+
+990104: (bug fix) Fixed cases where files got created with bad modes.
+
+990104:	(feature) Added double-click handling to alias window.
+
+990104:	(feature) Added some internal caching to spped up sorting.
+
+990104:	(feature) Added threaded message sorting.
+
+990104:	(feature) Added support for pgp5.
+
+981206:	(bug fix) Alias expansion depended on the lookup_name option.
+
+981206:	(bug fix) Added guarding tkwait visibility before all grabs
+
+981202:	(bug fix) Added the delete_group text which was missing
+
+981128:	(feature) Improved the speed by which folders are read.
+
+980929:	(bug fix) Now checks that the structure menu doesn't get too big.
+
+980910:	(bug fix) You could move the selection past the end of the list
+	in the alias chooser window.
+
+980905:	(feature) Now wraps lines in the included part of original messages
+	when composing replies. Also introduced new userproc which may
+	give the citation to use. Added options to contorl line length
+	and if we should include the signature separator.
+
+980826:	(feature) Changed handling of address header lines in the show
+	window. If it conatins multiple addresses they are now shown
+	one on each line.
+
+980823:	(bug fix) Code in alias expansion which detected loop used bad
+	logic. Now silently ignores the looped entries instead of
+	generating bad errors.
+
+980823:	(feature) Changed behaviour of address entry fields. They now
+	try to fit all addresses into one line. If that is not possible
+	it tries to have two addresses per line. If any address is longer
+	than half a line it uses only one address per line.
+
+980823:	(feature) Moved balloon help to separate package. Also changed
+	balloon help behaviour somewhat. Now it only pops up once in a
+	widget until you reenter it again.
+
+980822: (tcl bug workaround) Added extra space in argv argument to
+        Tcl_OpenCommandChannel() to work around tcl bug. Thanks to
+	baccala@freesoft.org for the patch.
+
+980706:	(bug fix) Now handles multiline alias when importing .mailrc
+	aliases.
+
+980706:	(bug fix) Should now handle imap login ids containing whitespace
+
+980706:	(bug fix) If there was one bodypart in amessage in an unkown
+	charset. Then no bodyparts after this was displayed.
+
+980705:	(feature) Can now cache passwords on disk.
+
+980628:	(bug fix) One could get missing text errors if one had added
+	nonstandard headers to the selected headers list.
+
+980628:	(bug fix) Added missing texts
+
+980628:	(feature) Added french texts. Thanks gos to Christope Martin
+	(Christophe.Martin@ipnl.in2p3.fr), Stéphane Gourmelen,
+	Noël Giraud, and Éric Simon
+
+980625:	(bug fix) Fixed problem with grab when redefining keys.
+
+980621:	(feature) Fixed so that the charset handling in text source files
+	works as expected.
+
+980621:	(bug fix) Removed extra pair of braces around the folder specification
+	for all imap and pop folders.
+
+980620:	(bug fix) TkRat could get internal errors when syncing an empty
+	folder.
+
+980620:	(bug fix) It was possibel to get "index out of bounds" when right
+	clicking in an empty folder
+
+980620:	(feature) Added message bouncing
+
+980607:	(feature) Added handler for WM_DELETE_WINDOW for all windows.
+
+980601:	(bug fix) The compose window now check that all of To:, Cc: and Bcc:
+	are empty before complaining about no recipients.
+
+980601:	(bug fix) Could dump core when retreiving name of recipient.
+
+980531:	(feature) Made submenus default o not have a tearoff entry, added
+	option to control this feature.
+
+980531:	(feature) Added more url browsers and moved netscape startup to
+	background
+
+980530:	(feature) Rewrote the new/edit folder window completely. Many new
+	features in it.
+
+980406:	(feature) It is now possible to control the level of alias expansion
+	in the compose window.
+
+980403:	(feature) Rewrote RatDecodeHeader to use a custom function instead
+	of an regexp.
+
+980322:	(feature) Made the folder window paned.
+
+980318:	(bug fix) The compose window got out of sync when a send failed
+	due to lack of recipient.
+
+980316:	(feature) You can now define multiple external editors, which
+	may operate on different character sets.
+
+980314:	(feature) Changed the OkButtons routine to use the -default
+	argument instead of an extra frame.
+
+980309:	(bug fix) Dumped core when moving expired messages to inbox.
+
+980309:	(bug fix) The inbox folder was created with an empty name when
+	tkrat was started for the first time.
+
+980308:	(code change) Created a package rat_list which handles lists of things.
+
+980227:	(feature) Reorganized the sending part of the preferences window.
+	There are now options for setting the default return_path and
+	to control if the sender header should be generated. There is
+	also a new window available from the compose window which shows
+	which address headers will be generated for a message.
+
+980224:	(bug fix) You got the wrong balloon help texts for the attach buttons.
+
+980222:	(feature) Just withdraw the preferences window when the user
+	selects dismiss (instead of actually deleting it). This makes it
+	kind of faster the second time around.
+
+980222:	(feature) Now configure works better on all kinds of OSF-systems.
+
+980222:	(feature) Converted to tcl/tk8.1. All support for older versions
+	is dropped. The internal representation of characters is now utf-8
+	which made it possible to rip out a good portion of kludgy code.
+	This also led to a completely changed font handling.
+
+980130:	(code change) Broke out the tab code into a separate package.
+
+980125:	(feature) You can now toggle flagging on a range and by dragging.
+
+980125:	(bug fix) Now only prints a warning (to stderr) when trying
+	to modify a locked variable.
+
+980125:	(documentation) Added some documentation on rimap.
+
+980125:	(feature) Now sorts imported imap folders alphabetically
+
+980124:	(feature) Now grays out open folders in the open folder menus.
+
+980124:	(feature) It is now possible to have multiple folder windows.
+
+980123:	(feature) Added checkpoint function which checkpoints the flags
+	in the current folder periodically.
+
+980118:	(merge) merged changes from branch:
+      *	(bug fix) TkRat did not esacpe lines containing a single dot when
+	sending to a prgram (but did for SMTP). Now it does.
+      *	(bug fix) You got a tcl error when you closed the folder key
+	definition window.
+      *	***** released version 1.1 *****
+      *	(bug fix) Modified configuration so it works on RedHat 5.0 systems.
+      * (bug fix) The counter in the send deferred window could get out
+	of sync. We now also close this window when the sending process
+	dies.
+      *	(bug fix) The sender process dumped core when a send failed.
+      *	(bug fix) Made the BalloonShow code more robust.
+      *	(bug fix) The texts for the sending program input data width were
+	restored (in the preferences window).
+      *	(bug fix) Made RatAddressIsMe more robust against strange (but legal)
+	address fields.
+      *	(feature) Now allows the user to insert spaces in the address fields.
+      *	(bug fix) In the compsoe window backspace and delete only removes
+	the selection if the cursor is placed in it.
+
+980118:	(bug fix) Did not realise the SMTP serrver supported DSN if it
+	was the last capability reported after EHLO.
+
+980117:	(bug fix) The Probs DSN button did not show in the preferences window.
+
+980110:	(feature) Removed all references to tk.h from the library files.
+
+980110:	(feature) Now tkrat does not die when a mailbox stream dies. It
+	just closes the folder in question.
+
+980109: (feature) Changed from building a special wish to creating
+	a dynamically loadable package of all the c-parts.
+
+980106: Branched sources to start working on 2.0.
+
+980105: ***** released version 1.1a *****
+
+980104:	(feature) Now also checks the from address you have specified in the
+	options dialog when checking oif a message is from yourself.
+
+971227:	(bug fix) You could get an error message about variable mh(save_to)
+	from the compose window
+
+971226:	(feature) Now removes any prepended or appended whitespace from
+	vfolder names.
+
+971226:	(feature) You can now turn off the auto-expunge which happens when
+	folders are closed.
+
+971226:	(feature) Now check for tk version and warns about bug in tk8.0.
+
+971222:	(feature) Changed copyright statement.
+
+971221:	(bug fix) Redid the timezone references (the new version lent from
+	tcl 8.0p2). This should fix some compilation problems.
+
+971219:	(bug fix) It is now possible to insert a return character in the
+	content and comment fields in the alias window.
+
+971214:	(bug fix) The "Folder flagged" command could return invalid indexes.
+	Thus group operations could fail under some circumstances.
+
+971210:	(bug fix) Deleting aliases did not update the saved aliases.
+	Thanks goes to Bernard PERROT <perrot@lal.in2p3.fr> for the fix.
+
+971207:	(bug fix) Keep the 'N' flag when moving unread messages from
+	IMAP mailboxes.
+
+971207:	(bug fix) An extra newline got added when copying messages to
+	IMAP folders
+
+971207:	(bug fix) When you move a flagged message to another folder the
+	flagging is cleared instead of kept as it used to be.
+
+971207:	(bug fix) It is no longer possible to open multiple edit windows
+	for one alias.
+
+971202:	(bug fix) Address lists generated inside tkrat did not work
+	well at all.
+
+971130:	(bug fix) Save all aliases when new aliases has been extracted
+
+971127:	(feature) Changed the default tk binding for entries and text so that
+	the selection is not cleared as soon as you move the cursor.
+
+971127:	(feature) Added documentation in CONFIGURATION-file of how to
+	set the system address book.
+
+971127:	(bug fix) It was impossible to actually delete IMAP folders.
+
+971126:	(bug fix) Sometimes the wrong message was selected after an
+	expunge.
+
+971126:	(feature) Total rewrite of the help system. Theer are now balloon
+	help entries for most buttons and fields and the help window
+	is much more intuitive (as well as redone).
+
+971125:	(bug fix) Deferred sending did not work if you tried to send
+	to many messages in one batch.
+
+971125:	(bug fix) Now RatDaysSinceExpire can not return a negative value.
+
+971109:	(bug fix) The url matching sometimes matched to much.
+
+971109:	(bug fix) TkRat dumped on reading certain (invalid) messages.
+	Thanks goes to Andrew.Greer@vuw.ac.nz for the fix.
+
+971105:	(bug fix) Should not cache any connection or password if the
+	login failed.
+
+971022:	(bug fix) The dismiss button in the preferences window did not work.
+
+971022:	(bug fix) Code which interpreted host:port syntax for SMTP
+	host was broken.
+
+971022:	(bug fix) Removed all references to CFLAGS in the Makefile since
+	it did not work.
+
+971021:	(bug fix) Moved bad references to sigbut in folder window code.
+	This bug made tkrat crash on start if pgp support was not enabled.
+
+971021:	(bug fix) Generated error when opening the create group window.
+
+971021:	(bug fix) Fixed build problem on sun machines.
+
+971019: ***** released version 1.0.5 *****
+
+971019:	(bug fix) Both the advanced and the basic expression window are now
+	managed by the grid manager. This hopefully fixes the problems
+	some people have with it turning into no size.
+
+971019:	(bug fix) Can now read the bad vfolderdef files which one
+	version generated.
+
+971019:	(bug fix) You could initiate a drag from an empty subfolder
+	in the New/Edit vfolder window. This gave tcl errors.
+
+971019: (bug fix) Should now never record a position such that no part of
+	a window is visible. Also removed the annoying small window on
+	the first startup.
+	
+971019:	(bug fix) Could dump core under some circumstances when syncing
+	an IMAP folder.
+
+971011:	(bug fix) You got an tcl error if you entered text in the command text
+	widget while no command was selected.
+
+971011:	(bug fix) Could dump core when saving copies of outgoing messages
+	to IMAP folders.
+
+971009:	(bug fix) An error of type "Cut & Paste" has occurred. The code which
+	did PGP checking was checking the wrong option (lookup_name) to
+	see if pgp was enabled or not.
+
+971008:	(bug fix) Now detects if a save copy of outgoing message fails
+	and warns the user. It could also crash when this happened.
+
+971007:	(bug fix) You could get a core-dump when you saved a copy of an
+	outgoing message to a file.
+
+971005:	(feature) The Makefiles now honors the environment variable CFLAGS.
+	Another new feature is that the c-client libraries are not rebuilt
+	unless it is needed.
+	
+971004:	(bug fix) Removed definition of global variable timezone.
+
+971004:	(bug fix) Fixed bad username in imap login which occured when moving
+	to an IMAP folder.
+
+971004:	(bug fix) Fixed case for some coredumps which occured if you did
+	cache connections but not passwords. Thanks goes to Marc Mengel
+	<mengel@FNAL.GOV>.
+
+971004:	(feature) Can now import mh-folder structures. Thanks goes to
+	Marc Mengel <mengel@FNAL.GOV>.
+
+971004:	(bug fix) Newly created vfolderlist files got the wrong version
+	number.
+
+971004:	(bug fix) Fixed waitpid() includes.
+
+971004:	(bug fix) Removed a big memory leak.
+
+971001:	(bug fix) Now checks that the signature file not is a directory
+	before trying to read it.
+
+971001:	(bug fix) Saving the aliases found when scanning the old files
+	did not work.
+
+971001:	(bug fix) TkRat got into an incosistent internal state if one
+	deleted a compose window with the window manager.
+
+971001:	(bug fix) Copying aliases from one address book to another did not
+	make sense (the names must be unique anyway).
+
+971001:	(bug fix) The reverse natural sort order was not reversed.
+
+971001:	(bug fix) Misc code cleanups which should reduce number of warnings
+	and errors on 64bit systems.
+
+970921:	(bug fix) The apdding macro in ratAddress had a bug so it did not
+	work to read aliases on ultric machines.
+
+970921:	(bug fix) The new FormatDate function added an extra space to the date.
+
+970918:	(bug fix) Removed an old reference to option(aliases_file) in convert.
+
+970918:	(feature) Added doc/userproc.example
+
+970917:	(bug fix) TkRat dumped when you tried to save to a dynamic folder.
+
+970916:	(bug fix) Crashed when trying to save outgoing messages to an
+	IMAP folder.
+
+970916:	(bug fix) The conversion of aliases failed (to update the list
+	of aliases shown).
+
+970916:	(bug fix) You could get an error when closing the alias window.
+
+970912: ***** released version 1.0.4 *****
+
+970907:	(bug fix) The "move to inbox" expiration type did not work.
+
+970904:	(bug fix) Ignore set flag requests for read-only mailboxes.
+
+970902:	(bug fix) Made the calling for userprocs from C robus against
+	errors in the routines.
+
+970901:	(bug fix) Now doesn't set the answered flag when you forward a message.
+
+970901:	(bug fix) Messages from yourself got named To: <recipient> when
+	saved to a dynamic folder.
+
+970831:	(bug fix) Fixed coredump which occured when one entered an rfc822
+	group addresse.
+
+970831:	(enhancement) Did some speed optimizations.
+
+970827:	(enhancement) Redid the caching controls. All the different caching is
+	now controlled by identical set of preferences and you can also
+	set infinite caching (by setting the timeout to zero).
+
+970824:	(bug fix) At last! An old bug which made saving copies of outgoing
+	messages via imap to picky (well, not extremely forgiving) IMAP
+	servers fail is at last fixed. Big thanks goes to Greg Owen
+	<gowen@xis.xerox.com> for help with debuuging.
+
+970824:	(feature) Implemented a browse mode. In this mode the actual message
+	bodies are not shown by default. This mode is selecatble via a
+	menu and via a folder default.
+
+970824:	(bug fix) TkRat tried to decrypt old style encrypted PGP messages
+	even if you had pgp support turned off. This is now fixed.
+
+970824:	(feature) It is now impossible to change the color scheme
+	if your tk is older than 8.0. These versions had a bug which
+	made this not work anyway. You get a warning instead.
+
+970824:	(feature) Added a find window which can search the message body or
+	the list of messages. Had to convert the list of messages to a text
+	widget to be able to acomplish this.
+
+970823:	(feature) The URL parsding is now done on demand instead of all
+	at once. Also made a small modification to the search expression.
+
+970806:	(feature) Many internal changes in the preferences window. Partly
+	a new look as well.
+
+970805:	(bug fix) The state of the Watcher button in the TkRat menu
+	was not always saved correctly.
+
+970804:	(bug fix) The signature was wrongly calculated when you signed
+	a message which was constructed by forward as attachment.
+
+970804:	(bug fix) TkRat dumped when you tried to repy to an encrypted message.
+
+970804:	(bug fix) group move operations were not aborted when an error
+	occurred.
+
+970804:	(bug fix) The ChooseMessage dialog asked which message you wanted
+	to reply to when you were forwarding inline. Message fixed.
+
+970803:	(feature) Added private version of bgerror with "Send bug report"
+	button to make it easier to report tcl bugs.
+
+970803:	(feature) Rewrote the alis window from scratch. Many enhancements
+	to the alias system in general as well.
+
+970728:	(feature) Aliases can now nest any level (but not loop).
+
+970721:	(bug fix) Fixed problem with stealing mail from netscape.
+
+970719:	(bug fix) The menu shortcuts <Alt-?> should no longer also invoke
+	any other bindings.
+
+970706:	(feature) TkRat now send multiple messages through one SMTP-channel
+	when sending deferred. The send deferred window now behaves better
+	when you send more messages while already sending.
+
+970706:	(bug fix) TkRat now survies if $HOME ends with a /.
+
+970706:	(bug fix) TkRat is now more resistent to bad images in attachments.
+
+970704:	(bug fix) Improved appending to imap folders code.
+
+970701:	(bug fix) TkRat dumped core if the users gecos field contained
+	any non us-ascii characters.
+
+970701:	(feature) The show URL feature is now bound to the ButtonRelease
+	event (and you can cancel by moving the pointer before releasing.
+
+970629: ***** released version 1.0.3 *****
+
+970629:	(bug fix) TkRat should not show the pgp output window if there
+	was no output.
+
+970629:	(bug fix) Now shows application/pgp messages.
+
+970628:	(bug fix) TkRat included the wrong part of some multipart-
+	messages when you were replying to messages from the Database or
+	contained messages.
+
+970628:	(bug fix) Fixed dependecies in lib/Makefile.in.
+
+970627:	(bug fix) Fixed a stupid bug in the database code. Sometimes
+	the database did not see the last messages in the folder. The
+	index information for these messages could get lost (but the
+	messages are still in the database and willshow up as LostMessages
+	when you check the database).
+
+970627:	(bug fix) You got an error from the compose window if you had
+	deleted the default save folder.
+
+970627:	(bug fix) Garbage was attached to message when they were saved
+	to IMAP folders while sending.
+
+970625:	(bug fix) The SendBugReport menu entry did now work.
+
+970625:	(bug fix) TkRat could still crash when you got a new message and
+	deleted some other messages before you synchronized.
+
+970625: ***** released version 1.0.2 *****
+
+970625: (bug fix) The sync command did not work!
+
+970624: (bug fix) Some dates in the changes files were wrong.
+
+970624:	(bug fix) Under some circumstances could tkrat and the imap toolkit
+	get out of sync and you got the message "bad msgno".
+
+970623:	(bug fix) Recoded RatMangleNumber in C since tcl8 has new number
+	representations the breaks the tcl version.
+
+970623:	(bug fix) Importing IMAP folder could give strange results when
+	the first folder in a subtree was selectable.
+
+970622:	(bug fix) Attached PGP keys are now sent as multipart with only
+	one key per part.
+
+970620: (bug fix) Signatures did not match if the message contained any
+	non-text part.
+
+970620:	(bug fix) Some picky IMAP servers refused to save outgoing messages
+	with the message "Message contains bare newlines".
+
+970620:	(bug fix) The define keys window did not behave well when resized.
+
+970620:	(bug fix) Message list scrolling did not always work correctly under
+	tcl/tk 8.0.
+
+970620:	(feature) URL now flash when ypu press them.
+
+970620:	(feature) The color of URLs is now an option.
+
+970620:	(bug fix) TkRat got into an incosistent internal state if you did not
+	restart after enabling PGP.
+
+970619:	(bug fix) Fixed a couple of potential coredumps that could happen
+	when one aborted decoding of an old style PGP message.
+
+970617:	(feature) Now does not show output from PGP if it is less than two
+	characters.
+
+970617:	(bug fix) Replies to PGP/MIME messages got part of the headers
+	included.
+
+970617:	(bug fix) Improved the regexp used to scan for embedded URLs.
+
+970616:	(bug fix) RatInitCurrent got called before all options were set.
+	Fixed by changing it into an trace function and trace the relevant
+	options.
+
+970616:	(bug fix) Fixed a couple of beatuy errors in ratDbase.c (which
+	caused warnings (and errors) on some systems.
+
+970616: (feature) Now builds somewhat better on HPUX-10 systems.
+
+970616:	(cleanup) Improved calculation of default font width.
+
+970616:	(bug fix) Keyboard shortcuts in menus could be indicated wrongly
+	if they containd a Shift-.
+
+970612:	(bug fix) Pressing right mousebutton over an URL might give an
+	error message since we did not clean up after the previous run.
+
+970612:	(feature) The bug report now includes information about which
+	versions of tcl/tk you have used.
+
+970612:	(bug fix) Added wait call when signing and encrypting messages to
+	eliminate PGP zombies.
+
+970611:	(feature) Changed order of the changes file so that the most recent
+	changes are on top. Thanks goes to Matt Shibla <mshibla@mbhs.edu>
+	who did the reordering.
+
+970611:	(bug fix) Changed order of compilation flags so the c-client directory
+	is included before the system directories.
+
+970610:	(bug fix) Scan for PGP messages continued long after the current
+	message so this test returned to many trues (which gave strange
+	results). Also tried to display PGP output even if the user aborted
+	the operation and thus no output was generated.
+
+970607: ***** released version 1.0.1 *****
+
+970607:	(feature) Added support for the frink tcl minimizer.
+
+970605:	(bug fix) You could get errors when forwarding messages (inline) and
+	you had a header that tkrat doesn't know about in the selected headers
+	list.
+
+970604:	(bug fix) Fixed focus problem for people who uses click to focus mode.
+
+970604:	(bug fix) Fixed unaligned errors on alphas (I hope).
+
+970603:	(feature) You can now use space and BackSpace to scroll in the help
+	window.
+
+970603:	(feature) Recognises embedded URLs and highlights them. Also adds
+	bindings to the so the user can start an browser by just clicking.
+
+970602:	(feature) Now has keybindings for scrolling messages line by line and
+	also a keyboard shortcut for moving to the end of the message. Thanks
+	goes to Richard Meitzler <rgm@cadence.com>.
+
+970601:	(feature) Will now build with tcl/tk 8.0 if available
+
+970601:	(feature) Added units to some of the fileds in the preferences window.
+	Also changed the unit of log_timoeut to seconds.
+
+970601:	(bug fix) Now builds with tcl/tk 8.0b1
+
+970531:	(bug fix) Added a section about the permissions of /var/spool/mail
+	to the README file.
+
+970530:	(bug fix) Added mopre paranoid checks of addresses to prevent cores.
+
+970529:	(feature) Added PGP support.
+
+970529:	(bug fix) Made minor fixes to the helptexts.
+
+970529:	(bug fix) Moved the color initialization to after the font
+	initialization in order to make it usable on systems that do not have
+	the default tk fonts available.
+
+970529:	(feature) Changed default interactive command to 'xterm -e sh -c'
+
+970519:	(bug fix) The address entry windows assumed they were always 73
+	characters wide.
+
+970518:	(feature) The text widget in the compose window now removes the
+	indention from empty lines.
+
+970518:	(bug fix) You could get an error from the fileselector if you
+	entered a directory that did not exist
+
+970517:	(feature) Move the folder sort options to their own submenu.
+
+970503:	(feature) You can now set the default action of the copy attached
+	files entry in the compose window.
+
+970503:	(bug fix) The New/Edit aliases window does now resize properly.
+
+970502:	(bug fix) Fixed bugs in line wrapping code.
+
+970502: (feature) Added "Send bugreport..." menu entry.
+
+970502:	(bug fix) lib/Makefile.in should now care about the LIBS variable
+	from configure
+
+970430:	(bug fix) It is no longer possible to move a vfolder struct into
+	itself or any descendant of itself.
+
+970421:	(bug fix) Now doesn't include the sender field in replies to messages.
+
+970416:	(bug fix) Added vertical scrollbar on key definition window.
+
+970416:	(bug fix) TkRat can now import IMAP folder which are selectable and
+	have children.
+
+970416:	(bug fix) Ultrix fixes. Also changed all calls to strdup to cpystr.
+
+970414:	(bug fix) Now the child process clears the cache passwords at start.
+
+970408:	(bug fix) While sending messages via SMTP some lines of the messages
+	got delimited by \r\r\n.
+
+970404:	(bug fix) Fixed a bug where the sending process could crash (under
+	some very rare circumstances).
+
+970403:	(bug fix) TkRat was VERY picky about the names of the header lines
+	in the Headers entry in the compose preferences window.
+
+970326:	(bug fix) Fixed the general font selection so that entries and
+	texts have the correct default font.
+
+970326:	(feature) Added sorting on subject and on sender. Also speeded
+	up sorting on subject by date.
+
+970326:	(feature) Replaced call to strstr in RatTclPutsSMTP with a custom
+	loop. The strstr implementation on SunOS 4 was awfully slow.
+
+970325:	(bug fix) Fixed reading uniniztialized memory in RatType.
+
+970323:	(feature) There are now keyboard shortcuts for every menu.
+
+970323:	(feature) Added option to include or not include signature of
+	letters we are replying to in the reply.
+
+970323:	(feature) Added linking of the build-in imap routine which supports
+	autentification without sending passordws inb the clear.
+
+970322:	(feature) Now checks that we have a valid hostname before we try
+	to send any messages.
+
+970322:	(bug fix) Now uses local hostname instead of ".MISSING.HOST.NAME"
+	in addresses that are missing the domain part.
+
+970322:	(bug fix) Plugged memeory leaks.
+
+970321:	(feature) Redone the way the program is started. Now a /bin/sh-script
+	gets installed in the bin directory. This script sets some environment
+	variables before the actual program is started. This means that we
+	no longer compile any paths into the tkrat program.
+
+970321:	(feature) Added internal version of file command (gets used if we
+	link with tcl < 8) which contains limited copy and delete functionality.
+
+970320:	(feature) Added RatUP_Bell userproc.
+
+970320:	(bug fix) The check database function now starts by checking if
+	the database even exists.
+
+970320:	(bug fix) Fixed scrolling problem under tk8.0a2 (thanks to
+	phillf@fridu.com)
+
+970320:	(feature) Added preferences for the SMTP timeout.
+
+970320:	(bug fix) Added test for empty search expressions.
+
+970320:	(bug fix) The caching of passwords and conenctions didn't work
+	under some conditions.
+
+970320:	(bug fix) Now the buttons and menus change fontsize just as the rest
+	of the widgets.
+
+970316:	(bug fix) You could get the expression window to crash if you
+	selected advanced mode while you still were in advanced mode. You
+	could also cause tkrat to dump a core if you gave an empty expression.
+
+970316:	(bug fix) The elm alias importion routine did not work.
+
+970315:	(bug fix) Fixed bad trace deletion in compose.tcl
+
+970313:	(bug fix) Fixed stupid bug in compose.tcl which made it crash when
+	you tried to use the alias list (thanks to eubell@itwm.uni-kl.de).
+
+970312: ***** released version 1.0 *****
+
+970311:	(bug fix) Some of the dit operations in the compose window didn't
+	check that we were in the rigth state (like having selected text
+	before tanking it).
+
+970311:	(bug fix) Fixed stupid bug which made it fail while autoloading
+	AddImapPorts if you upgraded from version 0.74 to 1.0.
+
+970310:	(bug fix) Made sure that lines in the database index never may
+	contain an newline.
+
+970310:	(bug fix) Made several fixes to encoding and decoding of header-
+	lines.
+
+970309:	(bug fix) The view DSN window (where one sees a full DSN) failed
+	to show any extra information when the apropriate button was pressed.
+
+970309:	(bug fix) Garbage could be shown at the end of some messages.
+
+970308:	(bug fix) The blank line separating header and body could dissapear
+	when you moved from dbase to dbase.
+
+970306:	(bug fix) Improved configure script. Now looks for include files
+	in more places and also checks for the 's' library (used on AIX).
+
+970306:	(feature) Changed the texts of the buttons in the alias edit window.
+
+970306:	(bug fix) TkRat failed to send messages if you had a hostname
+	which included space.
+
+970305:	(bug fix) You couldn't save outgoing messages to IMAP folders.
+
+970305:	(bug fix) There was garbage added to the end of messages read
+	from the database.
+
+970305:	(bug fix) Remade the way unkown text messages and messages with
+	unknown encodings are shown. The old behaviour didn't mix well with
+	the text widget.
+
+970305:	(bug fix) Found yet a couple of bugs in the date parsing code which
+	made messages sort in the wrong order.
+
+970304:	(bug fix) The internal copy of the mailcap got corrupted when it
+	contained an test-clause which used parameters.
+
+970304: (bug fix) The configure files didn't relly care about the
+	--with-tk-config argument. Also added test for crypt library.
+
+970304:	(bug fix) The import IMAP folders code required that a port number
+	was specified.
+
+970302:	(bug fix) Fixed multiple bugs in ComposeForwardInline and related
+	functions. They didn't always find the rigth bodypart to inline.
+	They could fail when you aborted in some cases and the also failed
+	to clean up after themselves.
+
+970302:	(feature) There is now a key to group messages (default 'g').
+
+970302:	(bug fix) Improved code that read elm-aliases so that it now
+	understands multi-line aliases. Thanks goes to Jonathan Cook
+	<jcook@cs.nmsu.edu>.
+
+970302:	(bug fix) Since you can not move messages to POP-folders then it is
+	pretty meaningless to include thos folders in the Move menus.
+
+970301:	(feature) The "See old messages" window did not export the selection.
+
+970301:	(bug fix) "Subject by date" wasn't always correctly sorted.
+
+970301:	(bug fix) Fixed bug which made it crash sometimes when moving between
+	network folders and local folders.
+
+970227:	(bug fix) Removed text about "Save outgoing" in the help window. It
+	was an experimental feature that dissapeared many versions ago.
+
+970226: ***** released version 0.75 *****
+
+970225:	(bug fix) You can now have other characters than a-z in alias names.
+
+970225:	(bug fix) Extract addresses didn't work very well on addresses
+	that were MIME-encoded.
+
+970224:	(bug fix) Close the login-window directly when done so that we
+	do not accidentally lock the X-display if something bad happens.
+
+970223:	(bug fix) If you did a reply to an message which contained an
+	embedded message which contained further messages you didn't get
+	to choose among them.
+
+970223:	(upgrade) Upgraded to imap-4.1 toolkit (from 4.0).
+
+970221:	(bug fix) The "Select the message before the first unread on open"
+	mode should select the last message if there are no new messages.
+
+970220:	(bug fix) The imap code could crash if it tried to read an message
+	with an embedded message from an 4.1Rev1 server.
+
+970220:	(bug fix) The AliasExtract function should not extract the full
+	name into the alias content field.
+
+970220: (bug fix) The address entry field (in the compose window) failed
+	to calculate the correct with of an address when placing it in columns.
+	It also always deleted trailing commas when the focus left it.
+
+970220:	(bug fix) Increased SMTP timeout time to 120 seconds.
+
+970218:	(bug fix) There were a couple of problems with the insert alias window
+	(when composing messages). You couldn't scroll with the mouse and
+	you couldn't insert any addresses after the first one.
+
+970217:	(feature) You can now speficy the imap port number when importing
+	imap folders.
+
+970217:	(bug fix) A number of tests in ratDbase were too forgiving so the
+	program could crash.
+
+970214:	(bug fix) Probing for DSN support always reported yes if you
+	had verbose mode on.
+
+970213:	(bug fix) Disabled caching of pop-connections. They are not usable
+	and it turns out that at least some pop servers only expunge messages
+	when they receive a quit command (and this didn't always happen
+	because we kept the link open).
+
+970209:	(feature) Changed config-scripts to include tests for tcl(tk8.0.
+	But I commented the tests out since I have since found problems
+	with tcl/tk8.0a2.
+
+970209:	(bug fix) Made sure that saved positions are within the visible area
+	of the screen.
+
+970209:	(bug fix) Text parts in unkown charsets were alwas shown in a
+	12pt font.
+
+970209:	(feature) Now defaults to specify the imap port. If this is not done
+	then the imap toolkit tries to do an rsh to the remove host when
+	opening an imap folder, first when this has failed did it try over
+	the network.
+
+970209:	(bug fix) Tkrat could dump if you tried to move a message to an
+	imap folder.
+
+970209: (feature) You can now autosave outgoing messages by marking one of
+	your vfolders.
+
+970208:	(bug fix) Now expands ~ in print command.
+
+970208:	(bug fix) The alias extract window didn't care if you pressed ok or
+	cancel. It added the aliases anyway, and it failed if all suggested
+	aliases wree  deselected.
+
+970206:	(bug fix) Changes to the watcher time interval only took effect when
+	opening a new folder.
+
+970205:	(bug fix) Do not move slection (of message) when doing a group move.
+
+970205:	(bug fix) Stupid bug made the program crash if there were more than
+	64 entries in the mailcap files.
+
+970204:	(bug fix) The alias chooser window didn't change its view when the
+	selection moved outside the current view.
+
+970203:	(bug fix) You could get an error if you clicked on an empty subtopic
+	in the help window and the Detach button shouldn't be enabled if you
+	click in an empty attachment list in the compose window.
+
+970203:	(bug fix) Remember the scrollbar position in the alias list when
+	updating it.
+
+970203:	(bug fix) You could get an error if you selected cancel when you
+	were asked to choose message to forward/reply to.
+
+970202: (feature) The prefereces window is now scrollable.
+
+970202:	(bug fix) A stupid bug in the address splitting code sometimes
+	dropped the final character from addresses.
+
+970201:	(bug fix) TkRat only found a subset of the embedded messages when
+	replying to a message which contains embedded messages. It also had
+	problems if it found to many messages (the window grew to large).
+
+970130:	(bug fix) The configure file didn't really check the --with-tk-config
+	argument. Also now runs wish to get the lib directory that way (only
+	if $DISPLAY is defined).
+
+970129:	(bug fix) Importing aliases called the wrong function when it wanted
+	to update eventual alias windows.
+
+970128: ***** released version 0.74 *****
+
+970128:	(bug fix) Made the configure script more robust. Also replaced
+	the TCL_CONFIG_FILE and TK_CONFIG_FILE environment variables with
+	real arguments to configure.
+
+970127:	(bug fix) You could crash tkrat if you continued to try to define
+	a file folder of dynamic folder after the first attempt failed.
+
+970123:	(bug fix) The first entry in the Send&Save menu was never deleted.
+	Thanks goes to P.H.A.Venemans@research.kpn.com.
+
+970119:	(feature) The fileselector now sorts directories first.
+
+970119:	(bug fix) TkRat didn't care if mail_ping reported that the stream was
+	dead.
+
+970119:	(bug fix) Sometimes TkRat crashed when done sending deferred messages.
+	This was due to a bug in tcl.
+
+970116:	(bug fix) Do not add the fullname to alias expansions if the alias
+	in question doesn't have a fullname.
+
+970113:	(bug fix) The code (undocumented) which were supposed to split
+	the SMTP-hostname and an eventual portnumber didn't work.
+	Thanks goes to Pieter H.A. Venemans <P.H.A.Venemans@research.kpn.com>
+
+970112:	(feature) It is now possible to extract aliases from messages.
+
+970112:	(feature) Remodeled the alias window. Now it is much more compact.
+
+970112:	(feature) (happy birthday HAL) Added the version date to the version
+	window.
+
+970111:	(feature) Added a Print entry to the group menu.
+
+970111:	(bug fix) RatBgExec failed when you had more than one call outstanding.
+
+970110:	(feature) Added menu entries for folder sort order.
+
+970110:	(bug fix) Tearoffed move-menus moved the message that was current when
+	they were tearoffed. Now they take the current message at the time
+	of selection.
+
+970109:	(feature) Moved some of the menu entries.
+
+970108:	(bug fix) You could not import empty directories in the vfolderdef
+	window.
+
+970108:	(feature) Can now create/delete the actual IMAP folders.
+
+970106: (feature) Now shows the recipient instead of the sender in the message
+	list if the sender is oneself (and vice-versa for recipient).
+
+970105:	(feature) Added support for mailcap files. While I were at it I changed
+	they way unkown things are displayed in the show window (cosmetic
+	changes only).
+
+961228:	(bug fix) Increased the size of one internal buffer in the pop-code.
+
+961228:	(bug fix) Fixed some memory leaks.
+
+961228:	(bug fix) Sometimes one submenu in the vfolderlist could obtain an
+	inbox mark.
+
+961227:	(feature) Now asks for confirmation before it overwrites files
+	when saving bodyparts.
+
+961227:	(feature) Added ability to specify ports for IMAP and POP3 folders.
+
+961226:	(feature) Added command to check database (and fix it as well).
+
+961219:	(feature) Rewrote the address split function (used when entering
+	addresses) to handle commas correctly.
+
+961217:	(feature) You can now change the heigth of the list of messages.
+
+961217:	(bug fix) The dates shown were the time of arrival instead of	
+	the date header.
+
+961216:	(bug fix) The program crashed when it encountered a character set
+	name which contained whitespace.
+
+961215:	(bug fix) You couldn't delete aliases with spaces in the name. Also
+	did enhancements to the alias window(s), now updates show in all
+	of them.
+
+961215:	(bug fix) TkRat failed to monitor the inbox if this didn't exist
+	when the program was started.
+
+961214:	(bug fix) The folder menu didn't work if you had an dynamic folder
+	with no entries in it.
+
+961214:	(bug fix) You couldn't forward a message (inline) unless its top
+	level content-type was text/plain or multipart/mixed.
+
+961214:	(bug fix) Sometimes an extra "Status: RO" was added to the last
+	header row of messages.
+
+961214:	(bug fix) Tell the user that he must restart for a change to
+	masquerade_as to take effect.
+
+961103: ***** released version 0.73 *****
+
+961102:	(feature) The Makefiles now support the --program-prefix and
+	--program-suffix configure arguments.
+
+961102:	(bug fix) It was possible to get the fileselector to accept a directory
+	by selecting it and then to press OK.
+
+961102:	(bug fix) The watcher didn't show the message if the mailbox was
+	empty when a new message arrived.
+
+961102:	(bug fix) The compose window was destroyed even if the send failed.
+
+961102:	(bug fix) The ^S key combination did not work when the focus was in
+	the text part of the compose window.
+
+961031:	(bug fix) The local-part of an address may contain dots '.' without
+	beeing quoted.
+
+961030:	(bug fix) Addresses and their fullnames were converted to lowercase
+	when expanding them.
+
+961030:	(bug fix) FolderGetNextUnread failed if the folder only contained
+	one message (which was read) and the direction was reverse.
+
+961029:	(bug fix) it was not possible to bind Alt-key cominations since alt
+	also wanted to traverse menus.
+
+961029:	(feature) Now tries to use tcl7.6/tk4.2 first.
+
+961029:	(bug fix) Now global_config_path really does depend on the prefix
+	argument to configure.
+
+961029:	(bug fix) clarified the labels of option(from) and option(masquerade_as)
+	in the preferences window.
+
+961029:	(bug fix) unqualified addresses were wrongly expanded with the local
+	hostname even if masquerade_as was defined.
+
+961028:	(bug fix) there were some problems with header-names that contained
+	'-' and their names.
+
+961028:	(bug fix) Initialize the font list to null in RemoveFont.
+
+961028:	(bug fix) The cleanup of old DSN-files failed if there were no
+	old files.
+
+961028:	(bug fix) The quit key wasn't included in the folder window
+	keyboard definition dialog.
+
+961028:	(bug fix) A couple of labels in the edit alias window were wrong.
+
+961028:	(bug fix) Expression list failed if there were no saved expressions.
+
+961027: ***** released version 0.72 *****
+
+961027: (feature) Removed the patch for sendmail, use sendmail 8.8 instead.
+	Did misc cleanup in the documentation.
+
+961027:	(feature) Replaced imap-4.BETA with imap-4.
+
+961027:	(bug fix) Added configuration code which checks for WNOHANG.
+
+961027:	(feature) Added redo functionality.
+
+961024:	(bug fix) Fixed hostname given during EHLO in SMTP phase. Sometimes
+	the domain name appeared twice.
+
+961020:	(feature) Now checks for active compose sessions when quitting and
+	gives you a chance to abort the quit.
+
+961020:	(bug fix) Folder menus higher than the screen are now handled
+	gracefully.
+
+961020:	(feature) Added userproc for signature
+
+961020:	(bug fix) Improved the focus handling in the compose window.
+
+961020:	(bug fix) The DSN coded did not remove the files associated with each
+	DSN when it expired. This is now fixed and the directory is also
+	cleaned when starting this version the first time.
+
+961019:	(feature) Added keyboard shortcuts to the compose window.
+
+961019:	(feature) Now prints the capital letter when the Shift modifier is
+	prsent in the accelerator fields.
+
+961018:	(feature) can now build with tcl7.6 and tk4.2.
+
+961017:	(bug fix) Some parts of some windows could be obscured when the
+	window was shrunk.
+
+961016:	(feature) made alias names case insensitive.
+
+961016: (bug fix) The Reply-To and Content-Description fields did not work
+	in the compose window.
+
+961016:	(bug fix) TkRat refused to start if the inbox folder got deleted.
+	Fixed by first making sure there always is an inbox.
+
+961016:	(feature) added option to enable/disable the watcher window
+
+961015:	(bug fix) There was internal data corruption if an embedded message
+	contained more than one multipart.
+
+961010:	(feature) added keyboard shortcut to change number of shown headers.
+
+961010:	(feature) replaced bounce and forward with "Forward inline" and
+	"Forward attachment"
+
+961006:	(bug fix) the dbase is now more robust and can handle messages without
+	From: and Date: fields.
+
+961006:	(bug fix) changed the text strings in the "Create alias" window.
+
+961006:	(bug fix) messages were sometimes left on the status bar when the
+	sending of a mail failed.
+
+961006: (bug fix) Messages of type message/delivery-status were always marked
+	is read (before the user actually read them).
+
+961006:	(feature) Made the encoding button in the Attach window state more
+	clearly that it represents the current encoding. Also made if more
+	"fool-proof" by disabling the other entries if the encoding is 8bit
+	or binary.
+
+961005:	(bug fix) TkRat sometimes failed to note that you made changes to
+	an header entry in the compose window.
+
+961003:	(bug fix) TkRat failed to handle addresses like "foo:bar"@fubar.com
+	This was due to code which didn't handle rfc822 well. Fixed.
+
+960917: (bug fix) some realy weird addresses like "@lucent.lucent.com"
+	could get the information routines to dump.
+
+960915: (bug fix) modified RatDecodeHeader so that it can take a NULL pointer
+	or an empty string and not crash.
+
+960912:	(feature) may now suggest a name when saving a bodypart.
+
+960911:	(bug fix) the A flag was set even if you held or aborted the
+	composition of the reply.
+
+960911:	(feature) now ignore addresses matching "*-owner" or "owner-*" in
+	the sender field when doing a reply to all.
+
+960911:	(feature) added dynamic folders.
+
+960911:	(bug fix) improved the fileselector so it doesn't quits when you press
+	return if you should give a directory.
+
+960911:	(bug fix) sufficently advanced expressions got corrupted when saved.
+
+960910:	(feature) added option to start iconified.
+
+960909:	(bug fix) outgoing messages were labeled with the charset of the
+	default interface language instead of the charset they were written
+	in.
+
+960908:	(bug fix) Db_FetchFirstTextProc didn't find the start of the first
+	text part if it was a multipart message.
+
+960908:	(feature) can now convert to local newline conventions when saving
+	bodyparts.
+
+960908:	(feature) now handles text messages in unkown character sets much
+	better.
+
+960906:	(feature) added terse mode to smtp_verbose.
+
+960906:	(bug fix) didn't recognize DSN's.
+
+960906:	(bug fix) you couldn't find any messages in a database folder if the
+	folder was defined with no expiration time.
+
+960905:	(bug fix) better handling of multiparts inside multipart/alternatives.
+
+960902: ***** released version 0.71 *****
+
+960903:	(bug fix) check if there are any saved expressions before showing the
+	menu
+
+960903:	(bug fix) the Create in window window did not work correctly.
+
+960831:	(bug fix) Problems with the keydef window: you couldn't resue a 
+	deleted key without reopening the window. Fields didn't grow when
+	keys were added.
+
+960831:	(bug fix) Added a version-date so that tkrat needen't be confused when
+	the last_version isn't in the list of known versions.
+
+960831:	(bug fix) the welcome window should block the application.
+
+960831:	(bug fix) tkrat didn't implement the xtext part of rfc1891.
+
+960829:	(bug fix) added charcter set specification to the default fonts.
+
+960829:	(bug fix) somehow big chunks of code must have dissappeared from the
+	code that send via program. The sending program didn't get any
+	recipients as arguments at all. This is now fixed.
+
+960828:	(feature) there is now a default user name when creating imap folders.
+
+960828:	(bug fix) there were bugs in the calculation of the domain name.
+
+960827:	(feature) added attribution of messages
+
+960827:	(bug fix) the password caching was less than perfect. The passwd was
+	cached even if it was wrong.
+
+960826:	(bug fix) you could not move messages between IMAP folders on the
+	same host.
+
+960825:	(feature) added a group menu and code to support it (much code).
+
+960821:	(feature) added list command to message entities and modified the
+	folder list command.
+
+960820: (bug fix) there were multiple bugs in the dbase searching code that
+	showed up whenever you tried to search for something with more than
+	one keyword.
+
+960820: (bug fix) the "select message before the first new" did select the
+	message after instead.
+
+960820:	(bug fix) fixed a problem in imap which made c-client crash under some
+	instances while opening mh-folders.
+
+960820: (bug fix) the sending process would sometimes hang. This was solved by
+	using blocking mode on the SMTP channel all the time unless we are
+	waiting on a response (we need to timeout this).
+
+960818: (bug fix) fixed stupid bug in ReadElmAliases.
+
+960807:	(bug fix) the fileselector looped when you selected '../' while
+	standing in '~'.
+
+960807:	(bug fix) FolderSelectNextUnread could loop if the folder only had
+	one message in it.
+
+960806: (bug fix) the standard folder did become confused about how many
+	messages it had when expunging messages. This lead to sequence
+	number errors when accessing POP-folders.
+
+960806: (bug fix) increased height of preferences window.
+
+960806:	(bug fix) changed destoy to destroy in info.tcl
+
+960805:	(bug fix) the fileselector need to know if the selected file should
+	already exist or not. It did also hang if you tried to access ..
+	when standing in ~.
+
+960805:	(feature) added a handler for the delete protocol for '.'. This
+	handler just calls Quit.
+
+960805:	(bug fix) do not set any colors when running on a B&W display.
+
+960804: (bug fix) the size calculation was wrong (should obviously not
+	include the selectborder in the calculations).
+
+960804: (bug fix) fixed focus resetting in ComposeHold.
+
+960804: (bug fix) fixed problem in dsn.tcl where date would be called with
+	numers that had leading zeroes.
+
+960803: ***** released version 0.70 *****
+
+960802:	(feature) you can now mark any of your vfolders as the inbox.
+
+960802:	(feature) there are now two different icon bitmaps that the program
+	can use.
+
+960731:	(bug fix) you could not change the name of a vfolder once it was
+	defined.
+
+960731:	(feature) now the first message choice makes more sense when one
+	of the reveres folder sortings is selected.
+
+960731:	(bug fix) rewrote RatTclPutsSMTP to escape dots at the beginning of
+	lines.
+
+960731:	(bug fix) changed man uses of tkwait to callbacks instead. Also
+	modified OkButtons last argument.
+
+960730:	(bug fix) the alias edit/create windows now no longer blocks the
+	entire application.
+
+960730:	(bug fix) now handles empty gecos fields. Thanks to Lloyd Parkes.
+
+960729:	(bug fix) added env to the set of global variables when reading the
+	configuration file.
+
+960729:	(bug fix) changed deiconfiy to deiconify in preferences.tcl
+
+960720:	Feature added automatic indention to the text editor in the compose
+	window.
+
+960720:	(feature) now updates the folder window immediately if any of the
+	associated options are changed.
+
+960719:	(bug fix) now remembers the position of the sendDeferred window.
+
+960719:	(bug fix) now only sets the LC_CTYPE locale.
+
+960719: (bug fix) now ignores aliases with empty names.
+
+960719:	(bug fix) fixed problem were included images were cropped (it works
+	better if you set the canvas to the correct size).
+
+960718:	(bug fix) fixed bug where the vfolder entries could be overwritten.
+
+960718:	(feature) added cache for passwords supplied via mm_login.
+
+960716:	(bug fix) should now ignore multiple adjacent whitespace characters
+	in mail alias files.
+
+960715:	(bug fix) VFolderEdit didn't call FileSelectorDone before using
+	the value (when editing file folders).
+
+960715:	(feature) Fixed code which checked c-client folders when copying
+	messages to see if c-client really could copy between the folders.
+
+960714:	(bug fix) Fixed info, version and vfolderdef windows so that if you
+	try to create a second instance it just deiconfiys and raises the
+	existing one.
+
+960712:	(feature) now lets you specify wildcard expressions used to determine
+	which files/directories to import. Imported files/dirs are now also
+	sorted alphabetically.
+
+960712:	(feature) made so that Tkrat just beeps if you try to press space
+	in an address entry field. You should be able to use shift-space though.
+
+960712:	(bug fix) made RatAlias expand? also handle syntax errors gracefully.
+
+960712:	(bug fix) fixed so that saved copies of outgoing messages are marked
+	as old and read. Also fixed a small bug which appended garbage to the
+	letters if inserted into the database.
+
+960712:	(feature) added option to set color scheme.
+
+960711:	(feature) You can now remove whole trees of vfolders. You can now
+	also walk around in the directory tree when importing. There was also
+	a bug which made the convas not to change size when the vfolderdef
+	window was resized.
+
+960711:	(feature) The preferences window now remembers which screen you last
+	used (only within sessions).
+
+960711:	(bug fix) Fixed so that the insertion cursor is visible after wrapping
+	in the compose window.
+
+960711:	(feature) Attached files are now copied at attach time instead of at
+	sending time.
+
+960711:	(bug fix) fixed problems introduced by %i conversion in folder list.
+
+960710:	(feature) Added support for mh folders.
+
+960704: ***** released version 0.69 *****
+
+960702:	(feature) added code which tries to put the send cache on /tmp if
+	~/.ratatoskrc doesn't exist.
+
+960702:	(feature) keep connections for network folders open for a little
+	while ater the user has closed them. If possible we reuse them.
+
+960702:	(bug fix) you will now see the end of the notification list when
+	the notification window pops up.
+
+960701:	(feature) some minor changes in the menu structure.
+
+960701:	(bug fix) fixed error in folder example in CONFIGURATION. Also fixed
+	some minor spelling errors.
+
+960701:	(bug fix) fixed so that the watcher window is created on demand and
+	that TkRat notes if the wac=tcher window is destroyed.
+
+960701:	(bug fix) Send & Save menu does nothing if no valid folder is selected.
+
+960628:	(feature) Added possibility to disable the copying of attachmens.
+
+960628:	(bug fix) Added code to watcher which rebuilds the window if the
+	user destroys it.
+
+960627:	(feature) added request for bug reports etc to version window.
+
+960627:	(bug fix) there is no need to call FolderSelect when resyncing
+	the folder, unless the previously active message is gone.
+
+960627:	(feature) Added 'i' conversion character for folder list command
+	(the messages current index).
+
+960627:	(feature) Changes bindings of 'r' and 'R'.
+
+960627:	(bug fix) Don't write the last-used-version number if the current
+	version is earlier than one we have used before.
+
+960627:	(bug fix) removed the b-binding on previous page.
+
+960626:	(bug fix) Addded test on new file folders so that the file specified
+	really is good for this purpose.
+
+960626:	(bug fix) Changed method used to calculate the length of a line to
+	one that is not dependant on the actual window size.
+
+960626:	(feature) Sending is now done in a separate subprocess. There are now
+	two modes for sending "direct" and "deferred". This required massive
+	rewrites of the send and hold code.
+
+960622:	(bug fix) Fixed misc small oddities which gcc -Wall complained about.
+
+960621:	(feature) Made it possible to define languages which uses non iso-8859-1
+	compatible character sets as the user interface language.
+	character set associated with each language
+
+960621:	(bug fix) Changed default mailbox path to /var/spool/mail/$env(USER)
+
+960619:	(bug fix) Fixed faulty dependecies for the install target in
+	tkrat/Makefile. This fixes the bug where tkrat complains that it
+	can't find the InitLanguages procedure.
+
+960619:	(bug fix) Added checking of to argument the "to" in RatDbInsert, this
+	avoids a possible core-dump which occurred when you tried to insert
+	a message with no To: header-row.
+
+960618:	(bug fix) Changed the code so that fh(folder_handle) only exists
+	when there is a folder. It will never be the empty string.
+
+960618:	(bug fix) Added a missing break in Std_CloseProc() (Thanks goes to
+	Joel Crisp)
+
+960618:	(bug fix) Fixed a syntax error in the sequence number generated in
+	Std_ExpungeProc().
+
+960618:	Upgrade: Changed to newer version of imap-4 (dated Jun 6 1996)
+
+960618:	(bug fix) It was impossible to create POP3 folders.
+
+960618:	(bug fix) Added a SHELL definition to the Makefiles. This is for the
+	stupid SGI's which uses csh for Makefiles (Thanks goes to Joel Crisp).
+
+960618:	(feature) Added comment in ratSMTP.c which warns about using prereleases
+	of tcl and tk.
+
+960617: ***** released version 0.68 *****
+
+960617:	(feature) added support for RATLIBDIR environment variable and some
+	checking for correct installation.
+
+960617:	(feature) added menu entry to rescan aliases
+
+960610:	(feature) now reads alias lists by pine
+
+969609:	(feature) created a new widget for entry of addresses.
+
+960608:	(bug fix) Old files were left in the hold.
+
+960608:	(feature) You can now see what is happening while sending a message
+	via SMTP.
+
+960608:	(bug fix) fixed bug which caused the watcher to pop up even if there
+	where no messages to show (when a DSN had arrived and been snarfed).
+
+960608:	(bug fix) improved fileselector handling of nonexisting directories
+	and unreadable files.
+
+960607:	(feature) Completely rewrote the line-wrap code in the composition
+	window. Changed the justify text meny entry to a checkbutton which
+	controls the automatic wrapping.
+
+960607:	(feature) Now also deleting bindings in the keydef window gets applied
+	when you press "Ok".
+
+960607: (feature) Added validity checking when editing vfolders.
+
+960606:	(bug fix) Clear the display when we try to open a new folder but
+	fails (the old one is still closed).
+
+960606: (bug fix) Updated all commands operating on the current message to
+        check that there actually is a selection.
+
+960606:	(bug fix) Fixed the code that should have been able to open file-
+	folders which doesn't exist but should be in directories that
+	does exist.
+
+960606:	(feature) It is now possible to set a default value for the From:
+	header-line. It is also possible to prevent this via the use_from
+	option.
+
+960606: (bug fix) Shift wasn't considered a modifier when defining keys.
+
+960606: (bug fix) Corrected the helptext which said that database expiration
+	is not implemente yet. It is.
+
+960606:	(bug fix) The sending code did a check of the validity of the
+	sending program, but the result was never communicated to the user.
+	Also added a check in the preferences window which checks if the
+	first word of option(sendprog) is an executable.
+
+960606	(bug fix) Make sure that env(USER) and env(HOME) have values when
+	starting. If not then assign them good values.
+
+960606	(feature) Reply-To added to the default value of
+	option(show_header_selection)
+
+960606	(bug fix) Changed the size of the "-Adobe-Helvetica-Bold-R-Normal"
+	font in the version window from 20 to 24 (a more common size).
+
+960605	(bug fix) Added code to remove all newlines from the subject of DSN
+	messages when inserting them into the index.
+
+960604 *** v0.67 The first public beta
+

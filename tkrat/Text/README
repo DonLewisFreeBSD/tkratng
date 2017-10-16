@@ -1,0 +1,98 @@
+		README file for the text system
+
+  TkRat software and its included text is Copyright 1996-2002 by
+  Martin Forssén.
+
+  The full text of the legal notice is contained in the file called
+  COPYRIGHT, included with this distribution.
+
+
+The dotext.tcl program builds the text files used by TkRat from the
+source files (suffixes .text and .help) located in this directory.
+When run without arguments ('tclsh dotext.tcl') it will print warnings
+about missing messages. Thus one can for example do
+	tclsh dotext.tcl | grep Svenska
+to see if there are any messages in Swedish missing. During the normal
+build process, this output is suppressed.
+
+    TO ADD A NEW LANGUAGE
+
+The only thing that has to be done to add a new language is to modify
+the "languages" list in defs.tcl. This will work since all messages that
+are not provided in the new language will fall back to the English version. :-)
+It is, however, appreciated if the person adding a new language also produces
+texts for that language.
+
+The syntax of the source files should be obvious (but is documented below
+anyway). You can use dotext.tcl ('tclsh dotext.tcl') to check if you
+have provided all needed texts for a new language. dotext.tcl will warn
+about any missing definitions.
+
+
+    FORMAT OF THE SOURCE FILES
+
+The texts of TkRat are divided among four variables: t, changes, balloon and
+help. There is a one-to-one correlation between source files in this directory
+and variables. Messages for each language must be written in the character set
+specified in dotext.tcl for that language. That means that multiple character
+sets are used simultaneously in the source files.
+Each source file starts with a variable statement:
+
+	variable <var>
+
+Where <var> is the name of the variable that the content of this file should
+go into. After that, the .text files consist of a lot of labels and their
+definitions. Each looks like:
+
+	label <lab>
+	<l1> <Message in language 1 (and in charset 1)>
+	<l2> <Message in language 2 (and in charset 2)>
+
+Where <lab> is the label name (must be lower case and unique) and <l1> and
+<l2> are shorthand names for languages as defined in the "languages" list
+in dotext.tcl.
+
+
+The files are read via the tcl 'source' command. That means that they will
+follow the usual tcl quotation rules, etc. That is:
+
+    * A message that contains embedded spaces bust be enclosed in quotes ("")
+      or braces ({}). Example: "Tkrat 0.64"
+    * A message which contains newlines must be enclosed by braces ({}).
+
+It is always a good idea to look how the files are written before adding
+anything new.
+
+
+    FORMAT OF THE GENERATED FILES
+
+The output is generated in the directory specified by the outdir variable
+in dotext.tcl. First, a file 'languages.tcl' is created and in this file a
+procedure GetLanguages is defined. This procedure returns a list of the
+available languages. This file also defines the InitMessages proc, which
+should be called to initialize a set of messages (arguments are variable
+and language).
+
+The actual messages are stored in files named text_<var>_<language>.tcl
+where <var> is the variable and <language> is the language of the
+messages in the file. Each such file contains one proc which is named
+"init_VAR_LANGUAGE" (VAR and LANGUAGE are substituted with the appropriate
+values), this is used by the auto-loading mechanism.
+
+This command builds the text files from the data files found in this
+directory. As input, it uses all files in the directory which end in
+".text". These files should be in the following format:
+
+variable <var>
+
+label <lab>
+<l1> <Message in language 1>
+<l2> <Message in language 2>
+[etc...]
+
+label <lab2>
+[etc...]
+
+Where <var> is the name of the variable which is to hold these messages,
+<lab> is the label of a message, <l1> and <l2> are language shorthand
+names as specified below.

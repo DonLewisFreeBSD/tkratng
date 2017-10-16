@@ -1,0 +1,70 @@
+TkRat is a graphical Mail User Agent (MUA) which handles MIME. It is
+mainly written in C but the user interface is done in tcl/tk. The
+following is a non exhaustive list of the capabilities:
+    
+    * Supports disconnected IMAP folders
+	A disconnected mailbox is one where TkRat keeps a local copy of
+	each message in the mailbox. The user can then work against this
+	copy offline. Reply to messages, copy messages or delete them.
+	At some later time the user may synchronize the mailboxes and the
+	changes done to the local copy are applied to the master IMAP-folder.
+
+    * Keeps track of number of unread messages in multiple folders
+	One can instruct TkRat to monitor certain folders and always show
+	the number of new/total number of messages in them. TkRat can also
+	alert the user of new messages arriving.
+
+    * Multi-lingual interface
+	Currently English, Swedish, Italian, French and Serbian are
+	supported but it is not hard to add more languages.
+ 
+    * Message database
+	Messages can be stored in a database. When inserting you add
+	keywords, expiration time and what to do when the expiration time
+	is reached. Internally the messages are stored as flat text-files.
+
+    * Virtual folders
+	A virtual folder is a name that has been set on an ordinary folder
+	(mbox, mh, IMAP or POP) or a database search expression.
+	The user can define a menu structure which holds all the virtual
+	folders and can then move messages to a folder or open a folder via
+	the menu.
+
+    * Message hold
+	You can suspend the composing of a message by putting the message
+	in the hold. The composing can then be continued at a later time.
+	You can stop the program in the meantime. Multiple messages can
+	be in the hold at the same time.
+
+    * Watcher
+	TkRat can be configured to monitor a number of mailboxes and notify
+	the user when new messages arrives in them. If a new message arrives
+	a small window with a list of all messages (or only the new ones) in
+	the mailbox is opened.  The user can then either press the right
+	mouse button in this window to make it go away and continue
+	watching for new messages.  Or press the left button to make the
+	watcher window go away and the main window to deiconify.
+
+    * Interface to the rest of the mail world
+	The program currently understands unix mailboxes, POP, IMAP and mh
+	folders. Messages are sent via SMTP or any user configured program
+	(for example sendmail).
+
+    * Supports Delivery Status Notifications
+	TkRat supports the DSN standard. This lets you see if  your message
+	has arrived safely at the destination. This requires an MTA that
+	handles the DSN ESMTP extension.
+    
+    * Composing
+	Messages are composed with the built in editor (tk's text widget plus
+	many extensions) or an external editor of your choice.
+
+    * MIME support
+	Understands MIME both in bodies and headers.
+
+    * Supports PGP/MIME
+	Generates PGP/MIME messages. There is also support for receiving
+	old style PGP messages.
+
+/MaF
+

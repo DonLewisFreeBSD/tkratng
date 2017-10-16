@@ -1,0 +1,148 @@
+#############################################################################
+# TkRat software and its included text is Copyright 1996-2002 by            #
+# Martin Forssén.                                                           #
+#                                                                           #
+# The full text of the legal notice is contained in the file called         #
+# COPYRIGHT, included with this distribution.                               #
+#############################################################################
+
+
+# If autoconf failed to locate the the tcl/tk include files and the
+# compilation fails (the compilation may succeed even if autoconf was
+# unable to locate the files) you can edit the definitions below to
+# point at the includes. When you have edited the definition you must
+# rerun configure.
+# FIX_INCLUDE = -I/strangepath/include
+FIX_INCLUDE =
+
+# To change the compiler switches, for example to change from -O
+# to -g, change the following line:
+EXTRA_CFLAGS = @CFLAGS@ @MEM_DEBUG_FLAGS@
+
+# Installation directories
+        prefix = @prefix@
+   exec_prefix = @exec_prefix@
+       MAN_DIR = @mandir@
+       BIN_DIR = @bindir@
+      DATA_DIR = @datadir@/`echo tkrat${VERSION} | sed '${TRANSFORM}'`
+       LIB_DIR = @libdir@/`echo tkrat${VERSION} | sed '${TRANSFORM}'`
+
+# Pointer to the imap c-client directory
+      C_CLIENT = ${TOP_DIR}/imap/c-client
+
+# Used for development environment only
+         ETAGS = @etags@
+
+# Some versions of make, like SGI's, use the following variable to
+# determine which shell to use for executing commands:
+SHELL =         /bin/sh
+
+#----------------------------------------------------------------
+# The information below is modified by the configure script when
+# Makefile is generated from Makefile.in.  You shouldn't normally
+# modify any of this stuff by hand.
+#----------------------------------------------------------------
+
+                 CC = @CC@
+           INCLUDES = @TCL_INCLUDE@ @XINCLUDES@
+            TK_DEFS = @TK_DEFS@
+            TOP_DIR = @srcdir@/..
+       SHLIB_CFLAGS = @SHLIB_CFLAGS@
+           SHLIB_LD = @SHLIB_LD@
+      SHLIB_LD_LIBS = @SHLIB_LD_LIBS@
+       SHLIB_SUFFIX = @SHLIB_SUFFIX@
+      SHLIB_LD_LIBS = @SHLIB_LD_LIBS@
+            VERSION = @VERSION@
+      RATLIB_SUFFIX = @RATLIB_SUFFIX@
+            INSTALL = @INSTALL@
+              TCLSH = @tclsh@
+          TRANSFORM = @program_transform_name@
+         EXTRA_LIBS = @EXTRA_LIBS@
+     INSTALL_PREFIX = @INSTALL_PREFIX@
+
+###################################################
+# You shouldn't need to touch anything below here #
+###################################################
+
+CFLAGS = ${TK_DEFS} ${EXTRA_CFLAGS} -I${C_CLIENT} ${FIX_INCLUDE} ${INCLUDES} \
+	 ${SHLIB_CFLAGS} -DVERSION=\"${VERSION}\"
+C_CLIENT_LIB = ${C_CLIENT}/c-client.a
+RATLIB = ratatosk${RATLIB_SUFFIX}
+DUMMYLIB = ratDummy${SHLIB_SUFFIX}
+
+HEADERS = rat.h ratFolder.h ratPGP.h ratStdFolder.h
+SRC = ratAppInit.c ratFolder.c ratStdFolder.c ratMessage.c ratCode.c \
+      ratAddress.c ratDbase.c ratDbFolder.c ratStdMessage.c ratDbMessage.c \
+      ratFrMessage.c ratSMTP.c ratDSN.c ratHold.c ratSender.c ratExp.c \
+      ratMailcap.c ratCompat.c ratPGP.c ratPGPprog.c ratPwCache.c \
+      ratDisFolder.c ratPrint.c ratWatchdog.c ratBusy.c
+OBJ = ${SRC:.c=.o}
+
+all: ${RATLIB} pkgIndex.tcl
+
+clean:
+	rm -f ${OBJ} ${RATLIB} ratDummy.o ${DUMMYLIB} core pkgIndex.tcl
+
+${RATLIB}: ${OBJ} ${C_CLIENT_LIB}
+	${SHLIB_LD} -o ${RATLIB} ${OBJ} ${C_CLIENT_LIB} $(EXTRA_LIBS) ${SHLIB_LD_LIBS}
+
+${DUMMYLIB}: ratDummy.o
+	${SHLIB_LD} -o ${DUMMYLIB} ratDummy.o $(EXTRA_LIBS) ${SHLIB_LD_LIBS}
+
+pkgIndex.tcl: ${RATLIB} ${DUMMYLIB}
+	echo "if [catch {load ./${DUMMYLIB}; \
+			 load ./${RATLIB}; \
+			 pkg_mkIndex . ${RATLIB}} error] \
+		  {puts \$$error; exit 1}" | ${TCLSH}
+
+install.bin: ${RATLIB} ${DUMMYLIB}
+	if test ! -d ${INSTALL_PREFIX}${LIB_DIR} ; then\
+	    ${INSTALL} -m 0755 -d ${INSTALL_PREFIX}${LIB_DIR} ;\
+	fi
+	${INSTALL} -m 0755 ${RATLIB} ${INSTALL_PREFIX}${LIB_DIR}/${RATLIB}
+	INST=${INSTALL_PREFIX}${LIB_DIR}; \
+	    echo "if [catch {load ./${DUMMYLIB}; \
+		     cd $$INST; \
+		     pkg_mkIndex -load ./*${SHLIB_SUFFIX} . \
+				 *${SHLIB_SUFFIX}} error] \
+	  	  {puts \$$error; exit 1}" | ${TCLSH}
+
+install: install.bin
+
+tags-internal:
+	${ETAGS} --append --no-globals --output=../TAGS ${HEADERS} ${SRC}
+
+MD = ../imap/c-client/mail.h ../imap/c-client/linkage.h \
+	../imap/c-client/tcp.h ../imap/c-client/nl.h \
+	../imap/c-client/rfc822.h ../imap/c-client/env.h \
+	../imap/c-client/smtp.h ../imap/c-client/misc.h
+ratAddress.o:	ratAddress.c rat.h ../config.h ${MD}
+ratAppInit.o:	Makefile ratAppInit.c ratFolder.h ratStdFolder.h rat.h \
+                ../config.h ratPGP.h ${MD}
+ratBusy.o:	ratBusy.c rat.h ../config.h ${MD}
+ratCode.o:	ratCode.c rat.h ../config.h ${MD}
+ratCompat.o:	ratCompat.c rat.h ../config.h ${MD}
+ratDSN.o:	ratDSN.c ratFolder.h rat.h ../config.h ${MD}
+ratDbFolder.o:	ratDbFolder.c ratFolder.h rat.h ../config.h ${MD}
+ratDbMessage.o: ratDbMessage.c ratFolder.h rat.h ../config.h ${MD}
+ratDbase.o:	ratDbase.c ratFolder.h rat.h ../config.h ${MD}
+ratDisFolder.o: ratDisFolder.c ratStdFolder.h ratFolder.h rat.h ../config.h \
+                ${MD} ../imap/c-client/mbx.h
+ratExp.o:       ratExp.c ratFolder.h rat.h ../config.h ${MD}
+ratFolder.o:    ratFolder.c ratFolder.h rat.h ../config.h ${MD}
+ratFrMessage.o: ratFrMessage.c ratFolder.h rat.h ../config.h ${MD}
+ratHold.o: 	ratHold.c rat.h ../config.h ${MD}
+ratMailcap.o:	ratMailcap.c ratFolder.h rat.h ../config.h ${MD}
+ratMessage.o:	ratMessage.c ratFolder.h rat.h ../config.h ratPGP.h ${MD}
+ratPGP.o:	ratPGP.c ratFolder.h rat.h ../config.h ratPGP.h ${MD}
+ratPGPprog.o:	ratPGPprog.c ratFolder.h rat.h ../config.h ratPGP.h ${MD}
+ratPrint.o:	ratPrint.c ratFolder.h rat.h ../config.h ${MD}
+ratPwCache.o:	ratPwCache.c rat.h ../config.h ${MD} \
+                ../imap/c-client/env_unix.h
+ratSMTP.o:	ratSMTP.c rat.h ../config.h ${MD}
+ratSender.o:	ratSender.c ratFolder.h rat.h ../config.h ratPGP.h ${MD}
+ratStdFolder.o: ratStdFolder.c ratStdFolder.h ratFolder.h rat.h ../config.h \
+                ${MD} ../imap/c-client/linkage.c
+ratStdMessage.o: ratStdMessage.c ratStdFolder.h ratFolder.h rat.h ../config.h \
+                ${MD}
+ratWatchdog.o:	ratWatchdog.c rat.h ../config.h ${MD}

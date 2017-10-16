@@ -1,0 +1,168 @@
+							Onsala 2003-09-24
+
+   TkRat software and its included text is Copyright 1996-2002 by
+   Martin Forssén.
+
+   The full text of the legal notices is contained in the file called
+   COPYRIGHT, included with this distribution.
+
+
+
+	PORTABILITY
+
+This software should work on any Unix-system where you can build tcl/tk.
+
+
+	BUILDING THE SOFTWARE
+
+TkRat depends on tcl/tk 8.2 or later so these must be installed. Tcl/tk
+8.3.4 is recommended.
+
+	run './configure'
+
+This will configure the makefiles etc. See INSTALL for options to configure.
+Configure depends on you having tclsh8.2 and wish8.2 or later in your path.
+If configure fails to locate the tcl/tk include-files you might have to
+help it by providing a --with-tcl-include=DIR argument.
+
+	do a 'make'
+
+This should build the software.
+Ignore any errors you get about not being able to build mtest.
+
+You might want to test the software before installing it. Change directory
+to either the lib/ or tkrat/ directories ('cd tkrat') and run
+'../tkrat/tkrat'. If everything seems to work you can install it.
+
+	do a 'make install'
+
+This will install the program in /usr/local/bin. The destination can
+be overridden with the --prefix argument to configure in the first step.
+
+The makefiles will install one small tcl-program in /usr/local/bin, some
+dynamically loadable modules in /usr/local/lib/tkrat2.1 and a set of
+tcl files in /usr/local/share/tkrat2.1. The paths to those two later
+directories are written into the small tkrat program in /usr/local/bin.
+A small manpage is also installed into /usr/local/man/man1.
+
+You can change the name of the program and the directory for the library
+files by using the --program-prefix and --program-suffix arguments to
+configure.
+
+
+	SSL
+
+TkRat will now include ssl-support if the openssl library is found by
+configure. One can help configure on the way by using the
+--with-ssl-dir argument. To be able to verify server certificates you
+must have the relevant CA-certificates installed on your
+system. Exactly where those should be stored depends upon your ssl-
+configuration. But usually they should be found in
+$OPENSSLDIR/cert.pem
+
+
+	CONFIGURATION
+
+You can have site-wide configuration files. Configuration issues
+are covered in the CONFIGURATION file.
+
+
+	PERMISSIONS of /var/spool/mail
+
+TkRat expects /var/spool/mail to have permissions drwxrwxrwt. That is
+everybody has write access but the sticky bit is on. It is NOT safe
+to make TkRat setgid or setuid.
+
+
+	DELIVERY STATUS NOTIFICATIONS (DSN)
+
+TkRat supports DSN as defined in rfc1891-4. This requires that messages are
+sent via ESMTP and that the MTA (mail transfer agent) also supports DSN
+(otherwise you will not get DSN support, TkRat will still work though).
+Actually all MTA's the message will pass through must talk DSN for it to
+work fully (otherwise you will just get DSN's with the action field set to
+forwarded).
+
+
+	CURRENT INFORMATION
+
+This software has a webpage at http://www.tkrat.org/
+This page should always contain up to date information abut tkrat.
+There is also a mailing list on which announcements of new versions are
+posted. To subscribe send a mail to tkrat-announce-request@tkrat.org,
+or visit the list page at http://www.tkrat.org/mailman/listinfo/tkrat-announce
+There is also a discussion list which you can subscribe to at
+tkrat-request@tkrat.org or http://www.tkrat.org/mailman/listinfo/tkrat
+(announcements are posted to both lists). To send messages to this list
+send them to tkrat@tkrat.org
+
+
+	ACKNOWLEDGEMENTS
+
+I would like to thank all those people who has helped me test TkRat.
+I would also like to thank Tristan Tarrant who did the Italian version of
+all the texts, thanks also goes to Christope Martin, Stéphane Gourmelen,
+Noël Giraud, and Éric Simon for the french texts. As well as to Srdjan
+Pokorni for the Serbian translation.
+
+
+	POSTCARDS
+
+TkRat is free to use, I do not require anything from any of its users. But
+I do not mind getting postcards. In fact I think it is a great way to keep
+track of how far it has spread. So if you like TkRat (and if you want to) you
+can send me a postcard from where you live. I have the following address:
+
+Martin Forssen
+Fyrmästarevägen 48
+439 94 Onsala
+SWEDEN
+
+
+	BUGS (aka UNDOCUMENTED FEATURES)
+
+Please report any found bugs to maf@dtek.chalmers.se
+
+
+	AUTHOR's ADDRESS
+
+The author (thats me) can be reached at maf@tkrat.org
+I live in south of the city of Göteborg in Sweden.
+
+
+	MISC NOTES
+
+I have had reports that the tcl/tk included in Solaris 8 have some
+serious problems which leads to the usage of excessive amounts of
+CPU. I recommend upgrading to 8.3.4 or later.
+
+
+	INCLUDED SOFTWARE
+
+This package includes software from both University of Washington
+(the c-client library) and from Lucent Technologies (blt_busy command).
+
+The blt_busy package is covered by the following copyright.
+/*
+ * Copyright 1993-1998 Lucent Technologies, Inc.
+ *
+ * Permission to use, copy, modify, and distribute this software and
+ * its documentation for any purpose and without fee is hereby
+ * granted, provided that the above copyright notice appear in all
+ * copies and that both that the copyright notice and warranty
+ * disclaimer appear in supporting documentation, and that the names
+ * of Lucent Technologies any of their entities not be used in
+ * advertising or publicity pertaining to distribution of the software
+ * without specific, written prior permission.
+ *
+ * Lucent Technologies disclaims all warranties with regard to this
+ * software, including all implied warranties of merchantability and
+ * fitness.  In no event shall Lucent Technologies be liable for any
+ * special, indirect or consequential damages or any damages
+ * whatsoever resulting from loss of use, data or profits, whether in
+ * an action of contract, negligence or other tortuous action, arising
+ * out of or in connection with the use or performance of this
+ * software.
+ *
+ *      The "busy" command was created by George Howlett.
+ */

@@ -1,0 +1,62 @@
+#
+# This is the toplevel makefile for ratatosk
+#
+#############################################################################
+# TkRat software and its included text is Copyright 1996-2002 by
+# Martin Forssén.                                                        #
+#                                                                           #
+# The full text of the legal notice is contained in the file called         #
+# COPYRIGHT, included with this distribution.                               #
+#############################################################################
+
+@SET_MAKE@
+OSTYPE = @OSTYPE@
+SHELL = /bin/sh
+EXTRACFLAGS=@NATIVE_SHLIB_CFLAGS@ @MEM_DEBUG_FLAGS@ @TCL_INCLUDE@
+IMAPFLAGS = @IMAPFLAGS@
+ETAGS = @etags@
+
+all: build
+
+build:
+	cd imap; \
+	if test "`cat OSTYPE 2>/dev/null || true`" = "${OSTYPE}" ; then \
+	    ${MAKE} ${IMAPFLAGS} EXTRACFLAGS="${EXTRACFLAGS}"; \
+	else \
+	    ${MAKE} ${OSTYPE} ${IMAPFLAGS} EXTRACFLAGS="${EXTRACFLAGS}"; \
+	fi
+	cd lib; ${MAKE}
+	cd util; ${MAKE}
+	cd tkrat; ${MAKE}
+
+install.bin:
+	cd lib; ${MAKE} install.bin
+	cd util; ${MAKE} install.bin
+	cd tkrat; ${MAKE} install.bin
+
+install.shared:
+	cd util; ${MAKE} install.shared
+	cd tkrat; ${MAKE} install.shared
+	cd misc; ${MAKE} install.shared
+	cd doc; ${MAKE} install.shared
+
+install: install.bin install.shared
+
+clean:
+	cd imap; ${MAKE} clean
+	cd lib; ${MAKE} clean
+	cd util; ${MAKE} clean
+	cd tkrat; ${MAKE} clean
+
+tags:
+	-rm -f TAGS
+	cd lib; ${MAKE} tags-internal
+	cd util; ${MAKE} tags-internal
+	cd tkrat; ${MAKE} tags-internal
+	${ETAGS} --append --no-globals --output=TAGS imap/src/osdep/unix/*.[ch]
+	${ETAGS} --append --no-globals --output=TAGS imap/src/*/*.[ch]
+
+distclean: clean
+	rm -f config.status config.log config.cache config.h \
+	      Makefile lib/Makefile tkrat/Makefile script/Makefile \
+	      misc/Makefile util/Makefile

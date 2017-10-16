@@ -1,0 +1,17 @@
+Begin3
+Title:          TkRat - an X11 based Mail User Agent
+Version:        1.1
+Entered-date:   13JAN98
+Description:    TkRat is a Mail User Agent that speaks MIME. It has an
+		interface built in tcl/tk and a kernel written in C.
+Keywords:       MUA, mail, IMAP, POP, MIME, tcl/tk, X11, pgp
+Author:         maf@dtek.chalmers.se (Martin Forssen)
+Maintained-by:  
+Primary-site:   ftp.md.chalmers.se /pub/tkrat
+		1361k tkrat-1.1.tar.gz
+Alternate-site: ftp.sunet.se /pub/unix/mail/tkrat
+		1361k tkrat-1.1.tar.gz
+Original-site:  
+Platforms:      X11 Unix with tcl7.5/tk4.1 or later
+Copying-policy: Copyrighted but free.
+End

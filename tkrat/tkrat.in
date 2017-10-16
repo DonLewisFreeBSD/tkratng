@@ -1,0 +1,15 @@
+#!/bin/sh
+# the next line restarts using the correct version of wish \
+exec @wish@ "$0" "$@"
+
+set env(LIBDIR)		[pwd]/../tkrat
+set env(CONFIG_DIR)	.
+set env(COMPRESS)	@compress@
+set env(CSUFFIX)	@csuffix@
+set env(SSH)            "@ssh@"
+
+# This version of the tkrat file is only intended to be used in
+# the development tree.
+set auto_path [concat [pwd]/.. $env(LIBDIR) $auto_path]
+
+TkRatClientStart

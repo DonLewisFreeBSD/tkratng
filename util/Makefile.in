@@ -1,0 +1,137 @@
+#############################################################################
+# TkRat software and its included text is Copyright 1996-2002 by
+# Martin Forssen.                                                        #
+#                                                                           #
+# The full text of the legal notices is contained in the file called        #
+# COPYRIGHT, included with this distribution.                               #
+#############################################################################
+
+# If autoconf failed to locate the the tcl/tk include files and the
+# compilation fails (the compilation may succeed even if autoconf was
+# unable to locate the files) you can edit the definitions below to
+# point at the includes. When you have edited the definition you must
+# rerun configure.
+# FIX_INCLUDE = -I/strangepath/include
+FIX_INCLUDE =
+
+# To change the compiler switches, for example to change from -O
+# to -g, change the following line:
+EXTRA_CFLAGS = @CFLAGS@ @MEM_DEBUG_FLAGS@
+
+# Default top-level directories in which to install architecture-
+# specific files (exec_prefix) and machine-independent files such
+# as scripts (prefix).  The values specified here may be overridden
+# at configure-time with the --exec-prefix and --prefix options
+# to the "configure" script.
+
+     prefix = @prefix@
+     libdir = @libdir@
+
+
+# Some versions of make, like SGI's, use the following variable to
+# determine which shell to use for executing commands:
+SHELL =         /bin/sh
+
+# Installation directories
+        prefix = @prefix@
+   exec_prefix = @exec_prefix@
+       MAN_DIR = @mandir@
+       BIN_DIR = @bindir@
+      DATA_DIR = @datadir@/`echo tkrat${VERSION} | sed '${TRANSFORM}'`
+       LIB_DIR = @libdir@/`echo tkrat${VERSION} | sed '${TRANSFORM}'`
+
+             CC = @CC@
+       INCLUDES = @TCL_INCLUDE@ @XINCLUDES@
+        TOP_DIR = @srcdir@/..
+   SHLIB_CFLAGS = @SHLIB_CFLAGS@
+       SHLIB_LD = @SHLIB_LD@
+  SHLIB_LD_LIBS = @SHLIB_LD_LIBS@
+   SHLIB_SUFFIX = @SHLIB_SUFFIX@
+  SHLIB_LD_LIBS = @SHLIB_LD_LIBS@
+BUSYLIB_VERSION = @BUSYLIB_VERSION@
+ BUSYLIB_SUFFIX = @BUSYLIB_SUFFIX@
+        TK_DEFS = @TK_DEFS@
+          SHELL = /bin/sh
+        INSTALL = @INSTALL@
+          TCLSH = @tclsh@
+      TRANSFORM = @program_transform_name@
+        VERSION = @VERSION@
+       UTIL_DIR = ${DATA_DIR}/util
+ INSTALL_PREFIX = @INSTALL_PREFIX@
+
+# Used for development environment only
+          ETAGS = @etags@
+
+###################################################
+# You shouldn't need to touch anything below here #
+###################################################
+
+DUMMYLIB = rat_dummy${SHLIB_SUFFIX}
+CFLAGS = ${TK_DEFS} ${EXTRA_CFLAGS} ${FIX_INCLUDE} ${INCLUDES} \
+         ${SHLIB_CFLAGS} -DBUSYLIB_VERSION=\"${BUSYLIB_VERSION}\"
+BUSYLIB = blt_busy${BUSYLIB_SUFFIX}
+
+BUSYSRC = blt_busy.c blt_window.c
+BUSYOBJ = ${BUSYSRC:.c=.o}
+
+TARGETS_LIB  = ${BUSYLIB}
+TARGETS_DATA = rat_list.tcl rat_fbox.tcl rat_balloon.tcl \
+               rat_edit.tcl rat_textlist.tcl rat_ed.tcl rat_ispell.tcl \
+               rat_tree.tcl rat_enriched.tcl
+TARGETS = ${TARGETS_LIB} ${TARGETS_DATA}
+
+all: ${TARGETS} pkgIndex.tcl ${DUMMYLIB}
+
+${BUSYLIB}: ${BUSYOBJ}
+	${SHLIB_LD} -o ${BUSYLIB} ${BUSYOBJ} $(EXTRA_LIBS) ${SHLIB_LD_LIBS}
+
+${DUMMYLIB}: rat_dummy.o
+	${SHLIB_LD} -o ${DUMMYLIB} rat_dummy.o $(EXTRA_LIBS) ${SHLIB_LD_LIBS}
+
+pkgIndex.tcl: ${TARGETS} ${DUMMYLIB}
+	echo "if [catch {load ./${DUMMYLIB}; \
+			 load ./${BUSYLIB}; \
+			 pkg_mkIndex . ${TARGETS}} error] \
+		  {puts \$$error; exit 1}" | ${TCLSH}
+
+install.bin:  ${TARGETS_LIB} ${DUMMYLIB}
+	if test ! -d ${INSTALL_PREFIX}${LIB_DIR} ; then\
+	    ${INSTALL} -m 0755 -d ${INSTALL_PREFIX}${LIB_DIR} ;\
+	fi
+	for i in ${TARGETS_LIB} ; \
+	do \
+	    ${INSTALL} -m 0755 $$i ${INSTALL_PREFIX}${LIB_DIR} ;\
+	done
+	INST=${INSTALL_PREFIX}${LIB_DIR}; \
+	    echo "if [catch {load ./${DUMMYLIB}; \
+		     cd $$INST; \
+		     pkg_mkIndex -load ./*${SHLIB_SUFFIX} . \
+				 *${SHLIB_SUFFIX}} error] \
+	  	  {puts \$$error; exit 1}" | ${TCLSH}
+
+install.shared:  ${TARGETS_data}
+	if test ! -d ${INSTALL_PREFIX}${DATA_DIR} ; then\
+	    ${INSTALL} -m 0755 -d ${INSTALL_PREFIX}${DATA_DIR} ;\
+	fi
+	if test ! -d ${INSTALL_PREFIX}${UTIL_DIR} ; then\
+	    ${INSTALL} -m 0755 -d ${INSTALL_PREFIX}${UTIL_DIR} ;\
+	fi
+	for i in ${TARGETS_DATA} ; \
+	do \
+	    ${INSTALL} -m 0644 $$i ${INSTALL_PREFIX}${UTIL_DIR} ;\
+	done
+	cd ${INSTALL_PREFIX}${UTIL_DIR}; \
+		echo "if [catch {pkg_mkIndex . ${TARGETS_DATA}} \
+			error] \
+		  {puts \$$error; exit 1}" | ${TCLSH}
+
+install: install.shared install.bin
+
+clean:
+	rm -f pkgIndex.tcl ${BUSYOBJ} ${BUSYLIB} ${DUMMYLIB} rat_dummy.o
+
+
+tags-internal:
+	${ETAGS} --append --no-globals --output=../TAGS ${BUSYSRC}
+	${ETAGS} --append --output=../TAGS --lang=none \
+		--regex='/proc[ \t]+\([^ \t]+\)/\1/' ${TARGETS_DATA}
