@@ -897,7 +897,7 @@ proc ConvertHold {dir var} {
     upvar \#0 $var v
 
     # Load old hold functions
-    package require ratatosk_old 2.2
+    package require ratatosk_old 2.3
 
     # Get def of new folder
     VFolderRead

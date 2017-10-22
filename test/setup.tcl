@@ -9,7 +9,7 @@ set env(SSH)            /usr/bin/ssh
 lappend auto_path [pwd]/..
 lappend auto_path $env(LIBDIR)
 
-package require ratatosk 2.2
+package require ratatosk 2.3
 
 proc InitTestmsgs {} {
     global dir

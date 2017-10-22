@@ -15,7 +15,7 @@ proc TkRatStart {} {
 	   fixedItalicFont
 
     # Base package requirements
-    package require -exact ratatosk 2.2
+    package require -exact ratatosk 2.3
 
     # Function to let client know we have started
     proc RatPing {} {
@@ -23,7 +23,7 @@ proc TkRatStart {} {
     }
 
     # Initialize variables
-    set tkrat_version 2.2dev
+    set tkrat_version 2.3.0
     set tkrat_version_date 20050717
     set idCnt 0
     set inbox ""

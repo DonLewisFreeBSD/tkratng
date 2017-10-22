@@ -22,8 +22,8 @@
 /*
  * Version
  */
-#define LIBVERSION	"2.2dev"
-#define LIBDATE		"20020719"
+#define LIBVERSION	"2.3.0"
+#define LIBDATE		"20171022"
 
 /*
  * Length of status string
