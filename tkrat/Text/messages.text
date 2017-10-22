@@ -4517,14 +4517,14 @@ pl {Opis twojej konfiguracji}
 pt {Descrição da sua configuração}
 
 label send_bugs_etc
-sv {Vänligen skicka felrapporter och förslag till förbättringar till maf@tkrat.org}
-en {Please send bug reports and suggestions for improvements to maf@tkrat.org}
-de {Bitte senden sie Bugreports und Vorschläge für Verbesserungen an maf@tkrat.org}
-it {Prego mandare errori e suggerimenti a maf@tkrat.org}
-fr {Veuillez expédier les descriptions de bogues et vos suggestions à maf@tkrat.org}
-sr {Molim Vas, ¹aljite izve¹taje o gre¹kama i predloge za pobolj¹anja na maf@tkrat.org}
-pl {Proszê wys³aæ raport o b³êdach i sugestie ulepszeñ do maf@tkrat.org}
-pt {Envie pf. relatórios de erros e sugestões a maf@tkrat.org}
+sv {Vänligen skicka felrapporter och förslag till förbättringar till dl-tkrat@catspoiler.org}
+en {Please send bug reports and suggestions for improvements to dl-tkrat@catspoiler.org}
+de {Bitte senden sie Bugreports und Vorschläge für Verbesserungen an dl-tkrat@catspoiler.org}
+it {Prego mandare errori e suggerimenti a dl-tkrat@catspoiler.org}
+fr {Veuillez expédier les descriptions de bogues et vos suggestions à dl-tkrat@catspoiler.org}
+sr {Molim Vas, ¹aljite izve¹taje o gre¹kama i predloge za pobolj¹anja na dl-tkrat@catspoiler.org}
+pl {Proszê wys³aæ raport o b³êdach i sugestie ulepszeñ do dl-tkrat@catspoiler.org}
+pt {Envie pf. relatórios de erros e sugestões a dl-tkrat@catspoiler.org}
 
 label sign_outgoing
 sv {Signera brev}

@@ -410,7 +410,7 @@ proc DoSendBugReport {handler} {
     set mhandler composeM[incr idCnt]
     upvar \#0 $mhandler mh
 
-    set mh(to) maf@tkrat.org
+    set mh(to) dl-tkrat@catspoiler.org
     set mh(subject) $hd(subject)
     set mh(description) "Bug report"
     set mh(data) [$hd(text) get 1.0 end-1c]

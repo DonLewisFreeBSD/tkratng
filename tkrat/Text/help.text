@@ -2240,7 +2240,7 @@ pt {Relatório de mau funcionamento}
 label bugreport
 sv {				Felrapportering
 
-Felrapporter skickas till maf@TkRat.org. Detta görs bäst genom att man
+Felrapporter skickas till dl-tkrat@catspoiler.org. Detta görs bäst genom att man
 väljer "Skicka felrapport..." ur hjälpmenyn (i mappfönstret). Detta kommer
 att skapa ett "Skriva brev"-fönster med en felrapportmall. Mottagaren är redan
 ifylld och en del av ämnet. Du måste komplettera ämnet och skriva en detaljerad
@@ -2258,7 +2258,7 @@ skickas.
 }
 en {				Reporting bugs
 
-You should send bug reports to maf@TkRat.org. This is best done by
+You should send bug reports to dl-tkrat@catspoiler.org. This is best done by
 selecting "Send bug report..." in the Help menu (of the Folder window).
 This will open a Compose window with a template bug report. The recipient
 is already filled in as is part of the subject. You should complete the
@@ -2277,7 +2277,7 @@ when the report is sent.
 }
 de {                             Bugreports
 
-Bugreports sollten Sie an maf@TkRat.org senden. Am besten verwenden Sie
+Bugreports sollten Sie an dl-tkrat@catspoiler.org senden. Am besten verwenden Sie
 dazu die Option "Schicke Bugreport..." im "Hilfe" Menü des Hauptfensters. Damit
 öffnen Sie ein Fenster, in dem Sie die Beschreibung des Fehlers eingeben
 können. Geben Sie einen Betreff ein, der den Fehler stichwortartig beschreibt,
@@ -2298,7 +2298,7 @@ sie wird gelöscht, wenn die Nachricht verschickt wurde.
 }
 it {				Rapporto malfunzioni
 
-Si dovrebbero spedire malfunzionamenti a maf@TkRat.org. Il modo
+Si dovrebbero spedire malfunzionamenti a dl-tkrat@catspoiler.org. Il modo
 migliore per fare ciò e' di selezionare "Spedisci malfunzione..." dal menu
 d'Aiuto (della finestra cartella). In tal modo verrà aperta una finestra di
 composizione con uno schema di malfunzione. Il destinatario e' già
@@ -2319,7 +2319,7 @@ la malfunzione viene spedita.
 fr {                  Rapport de bogue
 
 
-Pour envoyer un description de bogue, contacter maf@TkRat.org
+Pour envoyer un description de bogue, contacter dl-tkrat@catspoiler.org
 (NDT: en suédois, anglais... mais pas en français !). Le mieux est
 encore d'utiliser la commande « Signaler une bogue » du menu « Aide »
 de la fenêtre principale. Cela va ouvrir une fenêtre de rédaction
@@ -2339,7 +2339,7 @@ et est détruit aussitôt que le message est expédié.
 }
 sr {			Izve¹taji o gre¹kama
 
-Izve¹taje o gre¹kama (bagovima) treba da ¹aljete na maf@TkRat.org.
+Izve¹taje o gre¹kama (bagovima) treba da ¹aljete na dl-tkrat@catspoiler.org.
 Ovo je najpogodnije uraditi tako ¹to odaberete stavku "Izve¹taj o gre¹ci"
 iz menija "Pomoæ" (prozor za pregled skupa). Pojaviæe se prozor za pisanje
 poruka sa osnovnom formom izve¹taja. Primalac je veæ naznaèen, kao i deo
@@ -2358,7 +2358,7 @@ uklanja se kad se izve¹taj po¹alje.
 pt {                    Relatório de mau funcionamento
 
   Os utilizadores devem enviar relatórios de erros e mau funcionamento
-  ao autor do programa, contactável por e-mail:  maf@TkRat.org.
+  ao autor do programa, contactável por e-mail:  dl-tkrat@catspoiler.org.
   A melhor  maneira  de o fazer é  seguir  os  passos  que o  programa
   sugere,  seleccionando a entrada  "Enviar  relatório de erro..."  do
   menu  "Ajuda"  da  janela  principal.  Uma  janela  de  redacção  de
