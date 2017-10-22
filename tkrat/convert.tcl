@@ -1302,11 +1302,23 @@ proc NewVersionUpdate {} {
     }
 
     # Add new fields to roles
-    if {$option(last_version_date) < 20020830} {
+    if {$option(last_version_date) < 20020423} {
+        foreach r $option(roles) {
+            if {![info exists option($r,uqa_domain)]} {
+                set option($r,uqa_domain) ""
+            }
+            if {![info exists option($r,smtp_helo)]} {
+                set option($r,smtp_helo) ""
+            }
+        }
+    }
+
+    # Add new fields to roles
+    if {$option(last_version_date) < 20020830 ||
+	$option(last_version_date) == 20050602} {
 	foreach r $option(roles) {
-	    foreach vt {{uqa_domain {}} {smtp_helo {}} {validate_cert 0} \
-			    {same_sending_prefs 0} {smtp_user {}} \
-			    {smtp_passwd {}}} {
+	    foreach vt {{validate_cert 0}  {same_sending_prefs 0} \
+			{smtp_user {}} {smtp_passwd {}}} {
 		if {![info exists option($r,[lindex $vt 0])]} {
 		    set option($r,[lindex $vt 0]) [lindex $vt 1]
 		}
@@ -1315,14 +1327,16 @@ proc NewVersionUpdate {} {
     }
 
     # Adjust size of norm italic font
-    if {$option(last_version_date) < 20030213 
+    if {($option(last_version_date) < 20030213 ||
+        $option(last_version_date) == 20050602) 
         && [info exists option(fixed_italic)]} {
 	set option(fixed_italic) \
 	    [lreplace $option(fixed_italic) 2 2 [lindex $option(fixed_norm) 2]]
     }
 
     # Add pgp fields to roles
-    if {$option(last_version_date) < 20031123} {
+    if {$option(last_version_date) < 20031123 ||
+	$option(last_version_date) == 20050602} {
 	foreach r $option(roles) {
 	    if {[info exists option(pgp_sign)]} {
 		set option($r,sign_outgoing) $option(pgp_sign)
@@ -1334,7 +1348,8 @@ proc NewVersionUpdate {} {
     }
 
     # Remove old color settings (they are incompatible)
-    if {$option(last_version_date) < 20040710} {
+    if {$option(last_version_date) < 20040710 ||
+	$option(last_version_date) == 20050602} {
         if {4 != [llength $option(color_set)]} {
             set option(color_set) {\#dde3eb black white black}
         }
