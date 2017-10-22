@@ -70,7 +70,9 @@ CFLAGS = ${TK_DEFS} ${EXTRA_CFLAGS} -I${C_CLIENT} ${FIX_INCLUDE} ${INCLUDES} \
 C_CLIENT_LIB = ${C_CLIENT}/c-client.a
 RATLIB = ratatosk${RATLIB_SUFFIX}
 RATOLDLIB = ratold${RATLIB_SUFFIX}
-DUMMYLIB = ratDummy${SHLIB_SUFFIX}
+BUSYLIB_SUFFIX = @BUSYLIB_SUFFIX@
+BUSYLIB = blt_busy${BUSYLIB_SUFFIX}
+BUSYLIB_VERSION = @BUSYLIB_VERSION@
 
 HEADERS = rat.h ratFolder.h ratPGP.h ratStdFolder.h
 SRC = ratAppInit.c ratFolder.c ratStdFolder.c ratMessage.c ratCode.c \
@@ -87,7 +89,7 @@ all: ${RATLIB} ${RATOLDLIB} pkgIndex.tcl
 
 clean:
 	rm -f ${OBJ} ${OLDOBJ} ${RATLIB} ${RATOLDLIB} ratDummy.o \
-		${DUMMYLIB} core pkgIndex.tcl
+		core pkgIndex.tcl
 
 ${RATLIB}: ${OBJ} ${C_CLIENT_LIB}
 	${SHLIB_LD} -o ${RATLIB} ${OBJ} ${C_CLIENT_LIB} $(EXTRA_LIBS) ${SHLIB_LD_LIBS}
@@ -95,28 +97,18 @@ ${RATLIB}: ${OBJ} ${C_CLIENT_LIB}
 ${RATOLDLIB}: ${OLDOBJ}
 	${SHLIB_LD} -o ${RATOLDLIB} ${OLDOBJ} $(EXTRA_LIBS) ${SHLIB_LD_LIBS}
 
-${DUMMYLIB}: ratDummy.o
-	${SHLIB_LD} -o ${DUMMYLIB} ratDummy.o $(EXTRA_LIBS) ${SHLIB_LD_LIBS}
+pkgIndex.tcl: ${RATLIB} ${RATOLDLIB}
+	(echo "package ifneeded ratatosk ${VERSION} [list load [file join \$$dir ${RATLIB}]]"; \
+	 echo "package ifneeded ratatosk_old ${VERSION} [list load [file join \$$dir ${RATOLDLIB}]]"; \
+	echo "package ifneeded blt_busy ${BUSYLIB_VERSION} [list load [file join \$$dir ${BUSYLIB}]]") > pkgIndex.tcl
 
-pkgIndex.tcl: ${RATLIB} ${RATOLDLIB} ${DUMMYLIB}
-	echo "if [catch {load ./${DUMMYLIB}; \
-			 load ./${RATLIB}; \
-			 load ./${RATOLDLIB}; \
-			 pkg_mkIndex . ${RATLIB} ${RATOLDLIB}} error] \
-		  {puts \$$error; exit 1}" | ${TCLSH}
-
-install.bin: ${RATLIB} ${RATOLDLIB} ${DUMMYLIB}
+install.bin: ${RATLIB} ${RATOLDLIB} pkgIndex.tcl
 	if test ! -d ${INSTALL_PREFIX}${LIB_DIR} ; then\
 	    ${INSTALL} -m 0755 -d ${INSTALL_PREFIX}${LIB_DIR} ;\
 	fi
 	${INSTALL} -m 0755 ${RATLIB} ${INSTALL_PREFIX}${LIB_DIR}/${RATLIB}
 	${INSTALL} -m 0755 ${RATOLDLIB} ${INSTALL_PREFIX}${LIB_DIR}/${RATOLDLIB}
-	INST=${INSTALL_PREFIX}${LIB_DIR}; \
-	    echo "if [catch {load ./${DUMMYLIB}; \
-		     cd $$INST; \
-		     pkg_mkIndex -load ./*${SHLIB_SUFFIX} . \
-				 *${SHLIB_SUFFIX}} error] \
-	  	  {puts \$$error; exit 1}" | ${TCLSH}
+	${INSTALL} -m 0644 pkgIndex.tcl ${INSTALL_PREFIX}${LIB_DIR}/pkgIndex.tcl
 
 install: install.bin
 

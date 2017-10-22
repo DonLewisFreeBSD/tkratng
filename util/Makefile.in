@@ -67,7 +67,6 @@ BUSYLIB_VERSION = @BUSYLIB_VERSION@
 # You shouldn't need to touch anything below here #
 ###################################################
 
-DUMMYLIB = rat_dummy${SHLIB_SUFFIX}
 CFLAGS = ${TK_DEFS} ${EXTRA_CFLAGS} ${FIX_INCLUDE} ${INCLUDES} \
          ${SHLIB_CFLAGS} -DBUSYLIB_VERSION=\"${BUSYLIB_VERSION}\"
 BUSYLIB = blt_busy${BUSYLIB_SUFFIX}
@@ -83,21 +82,12 @@ TARGETS_DATA = rat_list.tcl rat_fbox.tcl rat_balloon.tcl \
 	       rat_spellutil.tcl rat_find.tcl rat_table.tcl
 TARGETS = ${TARGETS_LIB} ${TARGETS_DATA}
 
-all: ${TARGETS} pkgIndex.tcl ${DUMMYLIB}
+all: ${TARGETS}
 
 ${BUSYLIB}: ${BUSYOBJ}
 	${SHLIB_LD} -o ${BUSYLIB} ${BUSYOBJ} $(EXTRA_LIBS) ${SHLIB_LD_LIBS}
 
-${DUMMYLIB}: rat_dummy.o
-	${SHLIB_LD} -o ${DUMMYLIB} rat_dummy.o $(EXTRA_LIBS) ${SHLIB_LD_LIBS}
-
-pkgIndex.tcl: ${TARGETS} ${DUMMYLIB}
-	echo "if [catch {load ./${DUMMYLIB}; \
-			 load ./${BUSYLIB}; \
-			 pkg_mkIndex . ${TARGETS}} error] \
-		  {puts \$$error; exit 1}" | ${TCLSH}
-
-install.bin:  ${TARGETS_LIB} ${DUMMYLIB}
+install.bin:  ${TARGETS_LIB}
 	if test ! -d ${INSTALL_PREFIX}${LIB_DIR} ; then\
 	    ${INSTALL} -m 0755 -d ${INSTALL_PREFIX}${LIB_DIR} ;\
 	fi
@@ -105,12 +95,6 @@ install.bin:  ${TARGETS_LIB} ${DUMMYLIB}
 	do \
 	    ${INSTALL} -m 0755 $$i ${INSTALL_PREFIX}${LIB_DIR} ;\
 	done
-	INST=${INSTALL_PREFIX}${LIB_DIR}; \
-	    echo "if [catch {load ./${DUMMYLIB}; \
-		     cd $$INST; \
-		     pkg_mkIndex -load ./*${SHLIB_SUFFIX} . \
-				 *${SHLIB_SUFFIX}} error] \
-	  	  {puts \$$error; exit 1}" | ${TCLSH}
 
 install.shared:  ${TARGETS_data}
 	if test ! -d ${INSTALL_PREFIX}${DATA_DIR} ; then\
@@ -131,7 +115,7 @@ install.shared:  ${TARGETS_data}
 install: install.shared install.bin
 
 clean:
-	rm -f pkgIndex.tcl ${BUSYOBJ} ${BUSYLIB} ${DUMMYLIB} rat_dummy.o
+	rm -f pkgIndex.tcl ${BUSYOBJ} ${BUSYLIB}
 
 
 tags-internal:
