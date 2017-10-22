@@ -79,7 +79,7 @@ void *mbx_parameters (long function,void *value);
 void mbx_scan (MAILSTREAM *stream,char *ref,char *pat,char *contents);
 void mbx_list (MAILSTREAM *stream,char *ref,char *pat);
 void mbx_lsub (MAILSTREAM *stream,char *ref,char *pat);
-long mbx_create (MAILSTREAM *stream,char *mailbox);
+// long mbx_create (MAILSTREAM *stream,char *mailbox);
 long mbx_delete (MAILSTREAM *stream,char *mailbox);
 long mbx_rename (MAILSTREAM *stream,char *old,char *newname);
 long mbx_status (MAILSTREAM *stream,char *mbx,long flags);

@@ -26,3 +26,5 @@
 /* Private driver flags, should be in mail.h? */
 
 #define fEXPUNGED 32768
+/* Export this prototype since tkrat uses it directly */
+long mbx_create (MAILSTREAM *stream,char *mailbox);

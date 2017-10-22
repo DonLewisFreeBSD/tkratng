@@ -65,3 +65,5 @@ SENDSTREAM *smtp_open_full (NETDRIVER *dv,char **hostlist,char *service,
 			    unsigned long port,long options);
 SENDSTREAM *smtp_close (SENDSTREAM *stream);
 long smtp_mail (SENDSTREAM *stream,char *type,ENVELOPE *msg,BODY *body);
+/* Export this prototype since tkrat uses it directly */
+long smtp_send (SENDSTREAM *stream,char *command,char *args);

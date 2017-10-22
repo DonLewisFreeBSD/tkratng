@@ -60,7 +60,7 @@ void *smtp_challenge (void *s,unsigned long *len);
 long smtp_response (void *s,char *response,unsigned long size);
 long smtp_auth (SENDSTREAM *stream,NETMBX *mb,char *tmp);
 long smtp_rcpt (SENDSTREAM *stream,ADDRESS *adr,long *error);
-long smtp_send (SENDSTREAM *stream,char *command,char *args);
+/* long smtp_send (SENDSTREAM *stream,char *command,char *args); */
 long smtp_reply (SENDSTREAM *stream);
 long smtp_ehlo (SENDSTREAM *stream,char *host,NETMBX *mb);
 long smtp_fake (SENDSTREAM *stream,long code,char *text);
