@@ -1,6 +1,20 @@
 This file lists the changes made to TkRat between versions. It is much
 more detailed than the changes shown to the user when starting a new version.
 
+171022:	(other) Redirect help and bug reports to dl-tkrat@catspoiler.org.
+
+171022:	(other) Bump version to 2.3.0.
+
+171022:	(bug fix) Fix compiler warnings.
+
+171021:	(bug fix) Fix RatWriteString() handling of zero length strings.
+
+171021:	(bug fix) Handle preferences upgrade from TkRat 2.1.5 to 2.2.
+
+171021: (enhancement) Make compatible with Tcl/Tk 8.6.
+
+----
+
 100105: (bug fix) Fixed various issues with how bad passphrases where
         handled when signing or decrypting messages.
 
