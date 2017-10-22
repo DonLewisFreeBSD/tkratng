@@ -881,7 +881,7 @@ RatUtf8toMutf7(const char *signed_src)
 {
     static unsigned char *dst = NULL;
     static int dstlen = 0;
-    unsigned char buf[3], *src = (unsigned char*)signed_src;
+    unsigned char buf[4], *src = (unsigned char*)signed_src;
     int len = 0, overflow = 0;
 
     if (dstlen < strlen((char*)src)*3+1) {

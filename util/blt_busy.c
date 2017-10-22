@@ -563,7 +563,7 @@ static int
 GetBusy(clientData, interp, pathName, busyPtrPtr)
     ClientData clientData;	/* Window used to reference search  */
     Tcl_Interp *interp;		/* Interpreter to report errors to */
-    char *pathName;		/* Path name of parent window */
+    CONST84 char *pathName;	/* Path name of parent window */
     Busy **busyPtrPtr;		/* Will contain address of busy window if
 				 * found. */
 {
@@ -610,7 +610,7 @@ HoldBusy(clientData, interp, argc, argv)
     ClientData clientData;	/* Not used. */
     Tcl_Interp *interp;		/* Interpreter to report errors to */
     int argc;
-    char **argv;		/* Window name and option pairs */
+    CONST84 char **argv;	/* Window name and option pairs */
 {
     Tk_Window tkwin;
     Tcl_HashEntry *hPtr;
@@ -896,7 +896,7 @@ HoldOp(clientData, interp, argc, argv)
     ClientData clientData;	/* Main window of the interpreter */
     Tcl_Interp *interp;		/* Interpreter to report errors to */
     int argc;
-    char **argv;		/* Window name and option pairs */
+    CONST84 char **argv;	/* Window name and option pairs */
 {
     register int i, count;
 

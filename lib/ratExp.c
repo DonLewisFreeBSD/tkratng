@@ -383,7 +383,7 @@ RatParseExpCmd(ClientData clientData, Tcl_Interp *interp, int objc,
 	char buf[32];
 
 	FreeExp(expPtr);
-	sprintf(buf, "%d", cPtr-exp);
+	sprintf(buf, "%td", cPtr-exp);
 	Tcl_AppendElement(interp, buf);
 	Tcl_AppendElement(interp, error);
 	return TCL_ERROR;
