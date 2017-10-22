@@ -25,8 +25,9 @@
 #include <dirent.h>
 #include <fcntl.h>
 #include <syslog.h>
-#include <sys/file.h>
-
+#include <sys/stat.h>
+#include <time.h>
+#include <utime.h>
 
 #define direct dirent
 
