@@ -99,6 +99,7 @@ typedef struct {
     RatDbEntry entry;	/* The actual entry in the index file */
 } RatDbItem;
 
+/* XXX assiging these values to variable of type RatDbEType (enum) is iffy */
 #define SEARCH_ALL           -1
 #define SEARCH_ALL_ADDRESSES -2
 #define SEARCH_TIME_FROM     -3
@@ -1315,7 +1316,7 @@ RatDbSearch(Tcl_Interp *interp, Tcl_Obj *exp, int *numFoundPtr,
 	for(j=0; j < numExp && !(j != 0 && or == match); j++) {
 	    Tcl_ListObjGetElements(interp, valuePtr[j], &objc, &objv);
 	    for (k=0, matchl=0; k<objc; k++) {
-		if (fieldPtr[j] == SEARCH_ALL) {
+		if ((int)fieldPtr[j] == SEARCH_ALL) {
 		    snprintf(fname, sizeof(fname), "%s/dbase/%s", dbDir,
 			    entryPtr[i].content[FILENAME]);
 		    if (0 > (bodyfd = open(fname, O_RDONLY))) {
@@ -1340,17 +1341,17 @@ RatDbSearch(Tcl_Interp *interp, Tcl_Obj *exp, int *numFoundPtr,
                         (void)close(bodyfd);
                         matchl = RatSearch(Tcl_GetString(objv[k]), message);
                     }
-                } else if (fieldPtr[j] == SEARCH_ALL_ADDRESSES) {
+                } else if ((int)fieldPtr[j] == SEARCH_ALL_ADDRESSES) {
 		    matchl = RatSearch(Tcl_GetString(objv[k]),
                                        entryPtr[i].content[TO])
                         || RatSearch(Tcl_GetString(objv[k]),
                                      entryPtr[i].content[CC])
                         || RatSearch(Tcl_GetString(objv[k]),
                                      entryPtr[i].content[FROM]);
-                } else if (fieldPtr[j] == SEARCH_TIME_FROM) {
+                } else if ((int)fieldPtr[j] == SEARCH_TIME_FROM) {
                     Tcl_GetLongFromObj(interp, objv[k], &long_value);
                     matchl = atol(entryPtr[i].content[DATE]) >= long_value;
-                } else if (fieldPtr[j] == SEARCH_TIME_TO) {
+                } else if ((int)fieldPtr[j] == SEARCH_TIME_TO) {
                     Tcl_GetLongFromObj(interp, objv[k], &long_value);
                     matchl = atol(entryPtr[i].content[DATE]) <= long_value;
 		} else {
