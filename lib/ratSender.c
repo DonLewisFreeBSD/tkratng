@@ -175,7 +175,7 @@ RatWriteString(const char *str, FILE *out)
 {
     unsigned int l = strlen(str);
     if (1 != fwrite(&l, sizeof(int), 1, out)
-        || 1 != fwrite(str, l, 1, out)) {
+        || l != fwrite(str, 1, l, out)) {
         return -1;
     } else {
         return 0;
