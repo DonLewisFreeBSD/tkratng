@@ -543,7 +543,7 @@ static int
 RatGetCurrentCmd(ClientData dummy, Tcl_Interp *interp, int objc,
 		 Tcl_Obj *const objv[])
 {
-    RatCurrentType what = -1;
+    RatCurrentType what;
     char *result;
 
     if (3 == objc) {
@@ -555,9 +555,11 @@ RatGetCurrentCmd(ClientData dummy, Tcl_Interp *interp, int objc,
 	    what = RAT_PERSONAL;
 	} else if (!strcmp("smtp_helo", Tcl_GetString(objv[1]))) {
 	    what = RAT_HELO;
+	} else {
+	    goto usage;
 	}
-    }
-    if (3 != objc || -1 == what) {
+    } else {
+      usage:
 	Tcl_AppendResult(interp, "Usage: ", Tcl_GetString(objv[0]),
 			 " what role", (char*) NULL);
 	return TCL_ERROR;
