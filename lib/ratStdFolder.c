@@ -659,7 +659,7 @@ static int
 Std_UpdateProc(RatFolderInfoPtr infoPtr, Tcl_Interp *interp,RatUpdateType mode)
 {
     StdFolderInfo *stdPtr = (StdFolderInfo *) infoPtr->private;
-    int numNew = 0, oldExists, i, nmsgs;
+    int numNew = 0, oldExists, newExists, i, nmsgs;
     char sequence[16];
 
     if (infoPtr->append_only) {
@@ -697,12 +697,14 @@ Std_UpdateProc(RatFolderInfoPtr infoPtr, Tcl_Interp *interp,RatUpdateType mode)
 	    }
 	}
 	mail_expunge(stdPtr->stream);
-	numNew = stdPtr->exists - (infoPtr->number - offset);
+	newExists = stdPtr->exists;
+	numNew = newExists - (infoPtr->number - offset);
 
     } else if (RAT_CHECKPOINT == mode) {
 	oldExists = infoPtr->number;
 	mail_check(stdPtr->stream);
-	numNew = stdPtr->exists-oldExists;
+	newExists = stdPtr->exists;
+	numNew = newExists-oldExists;
     } else {
 	oldExists = infoPtr->number;
 	if (T != mail_ping(stdPtr->stream)) {
@@ -714,13 +716,14 @@ Std_UpdateProc(RatFolderInfoPtr infoPtr, Tcl_Interp *interp,RatUpdateType mode)
 	    Tcl_SetErrorCode(interp, "C_CLIENT", "streamdied", NULL);
 	    return -1;
 	}
-	numNew = stdPtr->exists-oldExists;
+	newExists = stdPtr->exists;
+	numNew = newExists-oldExists;
     }
     if (numNew) {
-	sprintf(sequence, "%d:%d", stdPtr->exists-numNew+1, stdPtr->exists);
+	sprintf(sequence, "%d:%d", newExists-numNew+1, newExists);
 	mail_fetchfast_full(stdPtr->stream, sequence, NIL);
     }
-    infoPtr->number = stdPtr->exists;
+    infoPtr->number = newExists;
     infoPtr->recent = (stdPtr->stream ? stdPtr->stream->recent : 0);
     nmsgs = (stdPtr->stream ? stdPtr->stream->nmsgs : 0);
     for (i = 1,infoPtr->unseen=0; i <= nmsgs; i++) {
